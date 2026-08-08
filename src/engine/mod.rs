@@ -4,6 +4,7 @@ pub mod installer;
 pub mod merger;
 pub mod organizer;
 pub mod reshade;
+pub mod translations;
 pub mod tray;
 
 use std::path::Path;

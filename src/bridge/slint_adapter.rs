@@ -3,7 +3,7 @@ use crate::core::config::{get_mods_dir, get_saves_dir, get_tray_dir, ConfigManag
 use crate::core::i18n::t;
 use crate::engine::installer::{
     calculate_conflicts, clear_staging, execute_installation, prepare_staging, ConflictType,
-    STAGING_DIR_NAME,
+    MANAGED_BASE_DIR, STAGING_DIR_NAME,
 };
 use crate::engine::merger::{
     apply_post_merge_action, common_ancestor, merge_sims4_packages, MergeTask, PostMergeAction,
@@ -16,6 +16,7 @@ use crate::engine::reshade::{
     detect_environment, detect_installation, install_reshade, install_shader_preset,
     uninstall_reshade,
 };
+use crate::engine::translations::{install_translation, list_installed, remove_translation};
 use crate::engine::tray::{
     clear_tray_work_dir, import_tray_item, prepare_tray_candidates, TrayCacheDb,
 };
@@ -283,7 +284,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         let weak_async = weak_clone.clone();
         let state_async = Arc::clone(&state_clone);
         tokio::task::spawn_blocking(move || {
-            let result = execute_installation(&report, &mods_dir, &allowed_roots);
+            let result = execute_installation(&report, &mods_dir, MANAGED_BASE_DIR, &allowed_roots);
             let _ = clear_staging(&staging);
 
             let (msg, clear_queue) = match result {
@@ -994,27 +995,62 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     });
 
     // Callback: select_translation_file
+    //
+    // Antes isto era um `fs::copy` cru: um `.zip` era copiado como `.zip` para
+    // dentro de Mods, onde o jogo não lê nada, e qualquer erro sumia num
+    // `let _ =`. Agora passa pelo instalador de verdade, em `spawn_blocking`.
     let cfg_clone = Arc::clone(&config_mgr);
     let weak_clone = weak_win.clone();
     window.on_select_translation_file(move || {
         let config = cfg_clone.load();
-        if let Some(sims_path) = &config.sims4_path {
-            let mods_dir = get_mods_dir(sims_path);
-            let trans_dir = mods_dir.join("01_Traducoes");
-            let _ = fs::create_dir_all(&trans_dir);
-
-            if let Some(file) = rfd::FileDialog::new()
-                .add_filter("Translation Packages", &["package", "zip", "7z"])
-                .pick_file()
-            {
-                let dest = crate::core::safety::unique_dest_path(
-                    &trans_dir,
-                    file.file_name().unwrap_or_default().to_str().unwrap_or("traducao.package"),
-                );
-                let _ = fs::copy(&file, dest);
-                refresh_translations_list(&weak_clone, &cfg_clone);
+        let Some(sims_path) = config.sims4_path.clone() else {
+            if let Some(w) = weak_clone.upgrade() {
+                w.set_translations_status(SharedString::from(
+                    "⚠️ Configure a pasta do jogo antes de instalar uma tradução.",
+                ));
             }
+            return;
+        };
+
+        let Some(file) = rfd::FileDialog::new()
+            .add_filter("Traduções (.package, .zip, .7z, .rar)", &["package", "zip", "7z", "rar"])
+            .pick_file()
+        else {
+            return;
+        };
+
+        let mods_dir = get_mods_dir(&sims_path);
+        let allowed_roots = vec![mods_dir.clone()];
+
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_translations_status(SharedString::from("📥 Instalando tradução..."));
         }
+
+        let weak_async = weak_clone.clone();
+        let cfg_async = Arc::clone(&cfg_clone);
+        tokio::task::spawn_blocking(move || {
+            let outcome = install_translation(&file, &mods_dir, &allowed_roots);
+            let msg = match outcome {
+                Ok(report) if report.installed == 0 => {
+                    "ℹ️ Esta tradução já está instalada e idêntica — nada a fazer.".to_string()
+                }
+                Ok(report) if report.updated > 0 => format!(
+                    "✅ Tradução atualizada: {} arquivo(s), com backup do que foi substituído.",
+                    report.installed
+                ),
+                Ok(report) => {
+                    format!("✅ Tradução instalada: {} arquivo(s).", report.installed)
+                }
+                Err(e) => format!("❌ Falha ao instalar a tradução: {}", e),
+            };
+
+            let _ = slint::invoke_from_event_loop(move || {
+                refresh_translations_list(&weak_async, &cfg_async);
+                if let Some(w) = weak_async.upgrade() {
+                    w.set_translations_status(SharedString::from(msg));
+                }
+            });
+        });
     });
 
     // Callback: delete_translation
@@ -1022,12 +1058,17 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let weak_clone = weak_win.clone();
     window.on_delete_translation(move |name| {
         let config = cfg_clone.load();
-        if let Some(sims_path) = &config.sims4_path {
-            let target = get_mods_dir(sims_path).join("01_Traducoes").join(name.as_str());
-            if target.exists() {
-                let _ = fs::remove_file(target);
-                refresh_translations_list(&weak_clone, &cfg_clone);
-            }
+        let Some(sims_path) = config.sims4_path.clone() else { return };
+        let mods_dir = get_mods_dir(&sims_path);
+
+        let msg = match remove_translation(&mods_dir, name.as_str(), &[mods_dir.clone()]) {
+            Ok(()) => format!("🗑️ Tradução removida: {}", name),
+            Err(e) => format!("❌ Não foi possível remover '{}': {}", name, e),
+        };
+
+        refresh_translations_list(&weak_clone, &cfg_clone);
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_translations_status(SharedString::from(msg));
         }
     });
 
@@ -1394,23 +1435,16 @@ fn refresh_translations_list(weak_win: &slint::Weak<MainWindow>, config_mgr: &Co
     let config = config_mgr.load();
     if let Some(w) = weak_win.upgrade() {
         if let Some(sims_path) = &config.sims4_path {
-            let trans_dir = get_mods_dir(sims_path).join("01_Traducoes");
             let model = Rc::new(VecModel::default());
-            if trans_dir.exists() {
-                if let Ok(entries) = fs::read_dir(&trans_dir) {
-                    for entry in entries.filter_map(|e| e.ok()) {
-                        if entry.path().is_file() {
-                            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                            model.push(crate::TranslationItem {
-                                name: SharedString::from(entry.file_name().to_string_lossy().to_string()),
-                                size_str: SharedString::from(crate::bridge::slint_models::format_size_bytes(size)),
-                            });
-                        }
-                    }
-                }
+            for item in list_installed(&get_mods_dir(sims_path)) {
+                model.push(crate::TranslationItem {
+                    name: SharedString::from(item.name),
+                    size_str: SharedString::from(
+                        crate::bridge::slint_models::format_size_bytes(item.size),
+                    ),
+                });
             }
             w.set_installed_translations(ModelRc::from(model));
-            w.set_translations_status(SharedString::from("Lista de traduções atualizada."));
         }
     }
 }

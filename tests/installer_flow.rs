@@ -175,7 +175,7 @@ fn mod_ja_presente_com_tamanho_diferente_vira_atualizacao() {
     assert_eq!(report.updates, 1);
     assert_eq!(report.new_files, 0);
     // Atualização sobrescreve onde o mod já estava, não cria uma segunda cópia.
-    assert_eq!(report.staged_files[0].destination(&fx.mods_dir), instalado);
+    assert_eq!(report.staged_files[0].destination(&fx.mods_dir, MANAGED_BASE_DIR), instalado);
 }
 
 #[test]
@@ -193,7 +193,7 @@ fn instalacao_organiza_packages_e_mantem_scripts_rasos() {
     prepare_staging(&[archive], &fx.staging()).unwrap();
     let report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
     let (installed, skipped) =
-        execute_installation(&report, &fx.mods_dir, &[fx.mods_dir.clone()]).unwrap();
+        execute_installation(&report, &fx.mods_dir, MANAGED_BASE_DIR, &[fx.mods_dir.clone()]).unwrap();
 
     assert_eq!(installed, 2);
     assert_eq!(skipped, 0);
@@ -225,7 +225,7 @@ fn arquivo_identico_e_ignorado_em_vez_de_reinstalado() {
     prepare_staging(&[archive], &fx.staging()).unwrap();
     let report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
     let (installed, skipped) =
-        execute_installation(&report, &fx.mods_dir, &[fx.mods_dir.clone()]).unwrap();
+        execute_installation(&report, &fx.mods_dir, MANAGED_BASE_DIR, &[fx.mods_dir.clone()]).unwrap();
 
     assert_eq!(installed, 0);
     assert_eq!(skipped, 1);
@@ -244,7 +244,7 @@ fn atualizacao_guarda_backup_do_arquivo_substituido() {
 
     prepare_staging(&[archive], &fx.staging()).unwrap();
     let report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
-    execute_installation(&report, &fx.mods_dir, &[fx.mods_dir.clone()]).unwrap();
+    execute_installation(&report, &fx.mods_dir, MANAGED_BASE_DIR, &[fx.mods_dir.clone()]).unwrap();
 
     let backups: Vec<_> = fs::read_dir(fx.mods_dir.join(".s4suite_backups"))
         .unwrap()

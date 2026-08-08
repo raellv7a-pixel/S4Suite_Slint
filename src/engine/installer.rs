@@ -275,15 +275,17 @@ impl StagedFile {
 
     /// Onde este arquivo será gravado dentro de `Mods`.
     ///
-    /// Atualizações vão para o caminho já existente. Arquivos novos vão para a
-    /// base gerenciada. Scripts ficam rasos de propósito: o jogo só carrega
-    /// `.ts4script` até um nível de subpasta, então `00_Triagem_Novos/x.ts4script`
-    /// é o mais fundo que podemos ir sem quebrar o mod.
-    pub fn destination(&self, mods_dir: &Path) -> PathBuf {
+    /// Atualizações vão para o caminho já existente. Arquivos novos vão para
+    /// `managed_base` — [`MANAGED_BASE_DIR`] para mods, mas o instalador de
+    /// traduções reaproveita este mesmo fluxo apontando para a pasta delas.
+    /// Scripts ficam rasos de propósito: o jogo só carrega `.ts4script` até um
+    /// nível de subpasta, então `00_Triagem_Novos/x.ts4script` é o mais fundo
+    /// que podemos ir sem quebrar o mod.
+    pub fn destination(&self, mods_dir: &Path, managed_base: &str) -> PathBuf {
         if let Some(existing) = &self.existing_dest {
             return existing.clone();
         }
-        let managed = mods_dir.join(MANAGED_BASE_DIR);
+        let managed = mods_dir.join(managed_base);
         if self.is_script() {
             managed.join(&self.filename)
         } else {
@@ -382,6 +384,7 @@ pub fn calculate_conflicts(
 pub fn execute_installation(
     report: &ConflictReport,
     mods_dir: &Path,
+    managed_base: &str,
     allowed_roots: &[PathBuf],
 ) -> Result<(usize, usize), InstallerError> {
     let backup_dir = mods_dir.join(BACKUP_DIR_NAME);
@@ -400,7 +403,7 @@ pub fn execute_installation(
                 continue;
             }
 
-            let target_dest = file.destination(mods_dir);
+            let target_dest = file.destination(mods_dir, managed_base);
 
             if target_dest.exists() {
                 let backup_file = unique_dest_path(&backup_dir, &file.filename);
