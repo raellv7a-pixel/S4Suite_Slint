@@ -32,8 +32,10 @@ testável sem event loop.
 | `s4tray.py` | `engine/tray.rs` | ✅ importação real e testada |
 | `s4reshade.py` | `engine/reshade.rs` | ⚠️ parcial, retomada adiada |
 | `s4disabled.py` | `engine/disabled.rs` | ✅ ligado ao organizador |
-| `ui/translations_tab.py` | `ui/views/translations.slint` | ⚠️ sem engine, só copia |
-| `ui/*_tab.py` | `ui/views/*.slint` | ⚠️ traduzidas; paridade de features pendente |
+| `ui/translations_tab.py` | `engine/translations.rs` | ✅ usa o instalador real |
+| `ui/dashboard_tab.py` | `engine/stats.rs` | ✅ varredura única e detalhes |
+| `ui/*_tab.py` | `ui/views/*.slint` | ✅ paridade de features |
+| `build.sh` (PyInstaller) | `build.sh` (AppImage do binário) | ✅ portado |
 
 ## Sequência de trabalho
 
@@ -185,60 +187,130 @@ trás, senão `"Maria / Silva"` viraria a pasta `"Maria  Silva"`.
       implementação e será retomado depois da paridade dos demais. Inclui
       revisar o `legacy/reshade.exe` versionado no repositório.
 
-## Paridade restante
+## Paridade com o app PyQt
 
-Comparação linha a linha entre `legacy/ui/*.py` e `ui/views/*.slint`. O port é
-funcional, mas estas peças do app PyQt ainda não existem no Rust/Slint.
+Comparação linha a linha entre `legacy/ui/*.py` e `ui/views/*.slint`.
 
-### Etapa 7 — Engine de traduções
+### Etapa 7 — Engine de traduções ✅ concluída
 
-Hoje `on_select_translation_file` faz um `fs::copy` cru. O legado chama
-`install_mod()`: extrai `.zip`/`.7z`, valida o `.package` e reporta o erro.
+`on_select_translation_file` fazia um `fs::copy` cru: um `.zip` de tradução era
+copiado **como zip** para dentro de `Mods`, onde o jogo não lê nada, e qualquer
+erro sumia num `let _ =`. A exclusão concatenava o nome vindo da UI direto no
+caminho, sem passar pela camada de segurança.
 
-- [ ] `engine/translations.rs` portando `install_mod`.
-- [ ] Bridge em `spawn_blocking`, com falha visível na UI em vez de `let _ =`.
-- [ ] `tests/translations_flow.rs`.
+- [x] `engine/translations.rs` reaproveita o instalador, como o app PyQt já
+      fazia (`translations_tab.py:166` chama o mesmo `install_mod` apontando
+      para `01_Traducoes`). Vem de graça a varredura de executáveis, a detecção
+      de cópia já instalada, o backup do substituído e o rollback.
+- [x] `StagedFile::destination` e `execute_installation` passaram a receber a
+      base gerenciada em vez de assumir `00_Triagem_Novos` — é o que permite o
+      reaproveitamento.
+- [x] A detecção de conflito varre `Mods` inteiro, mas só o que é **novo**
+      aterrissa em `01_Traducoes`: uma tradução guardada fora da pasta é
+      atualizada no lugar, em vez de virar uma segunda cópia carregando no jogo.
+- [x] `remove_translation` resolve o nome contra a listagem real e remove via
+      `core::safety` — `"../../algo"` não sai mais de `Mods`.
+- [x] 12 testes em `tests/translations_flow.rs`.
 
-### Etapa 8 — Organizador completo
+### Etapa 8 — Organizador completo ✅ concluída
 
-A maior lacuna: `organizer_tab.py` tem 1112 linhas contra 211 do `.slint`.
+Era a maior lacuna: 1112 linhas em `organizer_tab.py` contra 211 no `.slint`.
 
-- [ ] Gerenciamento de arquivos: nova pasta, mover, copiar, renomear, excluir —
-      tudo through `core::safety`, nunca `fs::` direto.
-- [ ] Busca/filtro na árvore de mods.
-- [ ] Painel de desativados: restaurar e excluir em lote.
-- [ ] Auto-fix de profundidade de script (`check_script_depth` já detecta, mas
-      não corrige pela UI).
+- [x] `create_folder`, `rename_item`, `transfer_items` (mover/copiar) e
+      `remove_entries`, todos passando pela validação de escopo. A raiz de
+      `Mods` é protegida de renomear e apagar.
+- [x] `sanitize_entry_name` usa a lista de caracteres proibidos do **Windows**:
+      a pasta `Mods` costuma ser compartilhada com instalações Windows por
+      drive comum.
+- [x] Mover pasta para dentro de si mesma é recusado — o `rename` falha, mas a
+      cópia recursiva entraria em laço criando cópias dentro de cópias.
+- [x] `move_entry` cai para copiar-e-apagar quando `fs::rename` recusa: `Mods`
+      costuma estar num disco separado, onde rename entre sistemas de arquivos
+      não funciona.
+- [x] Aviso de profundidade de script após transferir. O jogo só carrega
+      `.ts4script` até um nível de subpasta, e mover um mod para
+      `Mods/Categoria/Autor/` o desliga sem o jogo reclamar de nada.
+- [x] `filter_tree` traz junto os ancestrais de cada acerto: a árvore é plana no
+      modelo mas desenhada aninhada, e só as linhas que casam deixariam os
+      resultados órfãos.
+- [x] Painel de desativados com restaurar e excluir em lote. `list_disabled` tem
+      o **disco** como fonte da verdade, não o manifesto: um `.disabled`
+      renomeado à mão fora do app precisa aparecer, senão fica invisível e sem
+      como ser reativado.
+- [x] Seleção múltipla na árvore, com pastas incluídas — mover, copiar,
+      renomear e excluir valem para elas.
+- [x] 28 testes em `tests/organizer_flow.rs`.
 
-### Etapa 9 — Tray e merger com paridade
+`remove_entries` trata pastas; `remove_files` continua recusando-as, porque na
+limpeza de lixo e nas duplicatas uma pasta na lista só poderia ser engano.
 
-- [ ] Tray: pasta de destino por item, aplicar-a-todos, pular pacotes.
-- [ ] Merger: fila de jobs com destino editável por job (hoje é um merge por
-      vez).
+### Etapa 9 — Tray e merger com paridade ✅ concluída
 
-### Etapa 10 — Installer e dashboard: acabamento
+- [x] Tray: destino de CC por item, aplicar-a-todos e pular, com `cc_dir()`
+      resolvendo o padrão. Recusa pasta fora de `Mods` — lá o jogo não carrega
+      o CC, então copiar seria só gastar disco.
+- [x] Itens pulados continuam à vista, em cinza, para o usuário voltar atrás.
+      Os binários de Tray nunca seguem o destino do CC: só funcionam em `Tray/`.
+- [x] Merger: `run_merge_queue` executa a fila em ordem, com callbacks de status
+      e progresso identificados pelo índice do job — sem o índice, a barra da UI
+      não saberia de qual tarefa é o avanço.
+- [x] A pós-ação só roda com merge **completo**: num merge parcial, apagar ou
+      desativar os originais perderia o conteúdo que não entrou.
+- [x] Uma tarefa que falha não interrompe as seguintes — a fila é justamente
+      onde o usuário deixa vários grupos rodando sem olhar.
+- [x] 12 testes de tray e 15 de merger.
 
-- [ ] `detect_mutually_exclusive` (diálogo de escolha entre variantes do mesmo
-      mod) e `detect_dependencies` — o segundo existe no engine e não é exibido.
-- [ ] Cards clicáveis do dashboard com diálogos de detalhe: tamanho por pasta,
-      scripts, tray.
+### Etapa 10 — Installer e dashboard ✅ concluída
 
-### Etapa 11 — Validação de todos os motores
+- [x] `detect_mutually_exclusive` porta o `s4installer.py:234`: pasta marcada
+      como `options`/`choose`/`pick` vira uma escolha em vez de instalar todas
+      as variantes juntas. A marca precisa estar num componente do caminho —
+      senão `description.package` viraria opção.
+- [x] Escolhida a variante, as demais saem do relatório e as contagens do resumo
+      são recalculadas, senão o diálogo seguinte prometeria instalar todas.
+- [x] `collect_dependencies` reúne as bibliotecas exigidas e as mostra no
+      resumo. `detect_dependencies` existia no engine e nunca chegava à tela.
+      Só os primeiros 500 KB de cada package são lidos: as marcas ficam nos
+      metadados, e varrer centenas de arquivos inteiros custaria minutos.
+- [x] `engine/stats.rs` faz uma varredura única em vez de três, e passou a usar
+      `walk_user_mods` — staging e backups são cópias do que já está contado, e
+      incluí-los mostrava quase o dobro do espaço ocupado.
+- [x] Cards de scripts, tamanho e tray abrem a lista por trás do número.
+- [x] 17 testes de installer e 6 de stats.
 
-**Critério de conclusão do port.** O projeto só é dado como concluído quando
-todo motor passar aqui.
+### Etapa 11 — Validação de todos os motores ✅ concluída
 
-- [x] Suíte por engine: installer (12), organizer (8), merger (10), tray (10),
-      reshade (8), i18n (7) + 5 unitários — 60 testes verdes.
-- [ ] Cobrir `disabled`, `dbpf` e `translations` com suíte própria.
-- [ ] Um teste headless de bridge por motor, garantindo que o callback Slint
-      chama o engine de verdade. É a classe de bug que já apareceu três vezes
-      neste port: `on_start_merge` simulado, `check_scripts` desconectado e
-      `start_tray_import` no-op — todos com engine correto e testado por trás.
-- [ ] Validação manual com a pasta `Mods` real, motor por motor, registrada em
-      `docs/VALIDACAO.md`.
+**Critério de conclusão do port.** Três camadas: engine, bridge e manual.
 
-### Etapa 12 — Empacotamento
+- [x] Suíte por engine — 132 testes, todos verdes.
+- [x] `tests/bridge_wiring.rs`: todo callback tem handler dos dois lados, e
+      acioná-lo muda o disco de verdade, com a janela montada num backend
+      headless. Existe por causa da classe de bug que apareceu três vezes neste
+      port — `on_start_merge` simulado, `check_scripts` desconectado,
+      `start_tray_import` no-op — sempre com o engine correto por trás.
+- [x] O teste de fiação pegou **dois botões mortos** ao ser escrito: o
+      "Selecionar Arquivos de Mods" não estava ligado no `main.slint` e, sendo o
+      único jeito de encher a fila, deixava o instalador inteiro inutilizável
+      pela UI; o "Atualizar" do painel também não chamava nada.
+- [x] `dbpf_flow.rs`: 11 testes conferindo **bytes**, não só `Ok`. Um erro de
+      offset não dá exceção — grava um arquivo que o jogo abre e lê errado.
+      Achou a variante `IndexOutOfBounds` que existia e nunca era retornada.
+- [x] `docs/VALIDACAO.md` com o roteiro manual contra a pasta `Mods` real.
 
-- [ ] Substituir o AppImage do PyInstaller por empacotamento do binário Rust
-      (`cargo build --release`, `.desktop`, ícone).
+### Etapa 12 — Empacotamento ✅ concluída
+
+- [x] `build.sh` gera o AppImage a partir do binário Rust. O do PyInstaller
+      precisava de venv, do bundle inteiro do Python e de apagar à mão as libs
+      do sistema duplicadas; aqui o binário já carrega os locales embutidos por
+      `rust-embed` e linka contra a libc do sistema.
+- [x] Perfil de release com `lto`, `codegen-units = 1` e `strip`: 49 MB → 31 MB
+      de binário, 18 MB de AppImage. `panic = "abort"` fica de fora de
+      propósito — as tarefas em `spawn_blocking` isolam falhas por arquivo, e
+      sem unwind um package corrompido derrubaria o app inteiro.
+
+## O que falta
+
+- **ReShade** — adiado por decisão do usuário; precisa de mais trabalho de
+  implementação. Ver a etapa 6 e as pendências em `docs/VALIDACAO.md`.
+- **Validação manual** — o roteiro de `docs/VALIDACAO.md` contra um `Mods` real
+  ainda não foi percorrido.

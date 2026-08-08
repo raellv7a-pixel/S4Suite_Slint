@@ -30,6 +30,15 @@ glob = "0.3"
 tracing-subscriber = "0.3"
 indexmap = "2.2"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
+[profile.release]
+# O binário sai com ~49 MB sem isto, quase tudo símbolos de depuração que o
+# usuário final não usa. `panic = "abort"` fica de fora de propósito: as tarefas
+# em `spawn_blocking` isolam falhas por arquivo, e sem unwind um package
+# corrompido derrubaria o app inteiro em vez de virar uma linha de erro.
+lto = true
+codegen-units = 1
+strip = true
+
 [build-dependencies]
 slint-build = "1.8"
 

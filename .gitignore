@@ -3,6 +3,9 @@
 **/*.rs.bk
 *.pdb
 
+# Empacotamento (build.sh). O AppDir e o appimagetool vivem em target/.
+/S4Suite_v*.AppImage
+
 # === Python legado (legacy/) ===
 __pycache__/
 *.py[cod]
