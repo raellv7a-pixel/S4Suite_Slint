@@ -27,6 +27,9 @@ export component MainWindow inherits Window {
     in property <string> total_mods_size: "0 MB";
     in property <string> total_tray_count: "0";
     in property <string> dashboard_status: "Pronto";
+    in property <[string]> folder_size_details;
+    in property <[string]> scripts_details;
+    in property <[string]> tray_details;
 
     in property <[QueueItem]> installer_queue;
     in property <bool> is_installing: false;
@@ -88,6 +91,10 @@ export component MainWindow inherits Window {
     in property <string> careful_scan_message: "";
     callback cancel_install_clicked();
     callback proceed_install_clicked();
+    in property <bool> show_exclusive_dialog: false;
+    in property <[string]> exclusive_options;
+    callback exclusive_option_picked(string);
+    callback cancel_exclusive();
 
     in property <[MergeQueueItem]> merge_items;
     in property <string> merge_max_size: "1.0";
@@ -181,6 +188,9 @@ export component MainWindow inherits Window {
                 status_message: root.dashboard_status;
                 clear_cache_clicked => { root.clear_cache(); }
                 backup_saves_clicked => { root.backup_saves(); }
+                folder_size_details: root.folder_size_details;
+                scripts_details: root.scripts_details;
+                tray_details: root.tray_details;
             }
 
             if root.current_tab == 1 : InstallerView {
@@ -192,6 +202,10 @@ export component MainWindow inherits Window {
                 show_careful_scan_dialog: root.show_careful_scan_dialog;
                 careful_scan_message: root.careful_scan_message;
                 cancel_install_clicked => { root.cancel_install_clicked(); }
+                show_exclusive_dialog: root.show_exclusive_dialog;
+                exclusive_options: root.exclusive_options;
+                exclusive_option_picked(o) => { root.exclusive_option_picked(o); }
+                cancel_exclusive => { root.cancel_exclusive(); }
                 proceed_install_clicked => { root.proceed_install_clicked(); }
             }
             if root.current_tab == 2 : OrganizerView {

@@ -4,8 +4,8 @@ use crate::bridge::state::{
 use crate::core::config::{get_mods_dir, get_saves_dir, get_tray_dir, ConfigManager};
 use crate::core::i18n::t;
 use crate::engine::installer::{
-    calculate_conflicts, clear_staging, execute_installation, prepare_staging, ConflictType,
-    MANAGED_BASE_DIR, STAGING_DIR_NAME,
+    calculate_conflicts, clear_staging, collect_dependencies, detect_mutually_exclusive,
+    execute_installation, prepare_staging, ConflictType, MANAGED_BASE_DIR, STAGING_DIR_NAME,
 };
 use crate::engine::merger::{
     apply_post_merge_action, common_ancestor, merge_sims4_packages, run_merge_queue, JobStatus,
@@ -20,6 +20,7 @@ use crate::engine::reshade::{
     detect_environment, detect_installation, install_reshade, install_shader_preset,
     uninstall_reshade,
 };
+use crate::engine::stats::collect_stats;
 use crate::engine::translations::{install_translation, list_installed, remove_translation};
 use crate::engine::tray::{
     clear_tray_work_dir, import_tray_item, prepare_tray_candidates, TrayCacheDb,
@@ -216,6 +217,21 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                                 .join(", ")
                         )
                     };
+                    // Bibliotecas que os packages exigem. Sem elas o mod
+                    // instala, mas não funciona dentro do jogo.
+                    let deps = collect_dependencies(&conflicts.staged_files);
+                    let deps_texto = if deps.is_empty() {
+                        String::new()
+                    } else {
+                        format!("\n\n📌 Requer instalado: {}", deps.join(", "))
+                    };
+
+                    // Variantes do mesmo mod marcadas como "escolha uma".
+                    let exclusivos: Vec<String> = detect_mutually_exclusive(&conflicts.staged_files)
+                        .iter()
+                        .map(|f| f.rel_path.display().to_string())
+                        .collect();
+
                     let statuses: Vec<(String, String)> = conflicts
                         .staged_files
                         .iter()
@@ -242,8 +258,19 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                                 });
                             }
                             w.set_installer_queue(ModelRc::from(model));
-                            w.set_careful_scan_message(SharedString::from(format!("{}{}", summary, warnings)));
-                            w.set_show_careful_scan_dialog(true);
+                            w.set_careful_scan_message(SharedString::from(format!(
+                                "{}{}{}",
+                                summary, deps_texto, warnings
+                            )));
+
+                            // A escolha entre variantes vem antes: só depois
+                            // dela a contagem do resumo faz sentido.
+                            if exclusivos.is_empty() {
+                                w.set_show_careful_scan_dialog(true);
+                            } else {
+                                w.set_exclusive_options(to_string_model(exclusivos));
+                                w.set_show_exclusive_dialog(true);
+                            }
                         }
                     });
                 }
@@ -260,6 +287,71 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                 }
             }
         });
+    });
+
+    // Callback: exclusive_option_picked
+    //
+    // O usuário escolheu qual variante fica. As outras saem da análise antes
+    // do resumo, senão o diálogo seguinte prometeria instalar todas.
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_exclusive_option_picked(move |escolhida| {
+        let Some(mut report) = state_clone.take_pending_install() else { return };
+
+        let descartadas: Vec<String> = detect_mutually_exclusive(&report.staged_files)
+            .iter()
+            .map(|f| f.rel_path.display().to_string())
+            .filter(|rel| rel != escolhida.as_str())
+            .collect();
+
+        report
+            .staged_files
+            .retain(|f| !descartadas.contains(&f.rel_path.display().to_string()));
+
+        // As contagens do resumo precisam refletir o que sobrou.
+        report.new_files =
+            report.staged_files.iter().filter(|f| f.conflict == ConflictType::NewFile).count();
+        report.updates =
+            report.staged_files.iter().filter(|f| f.conflict == ConflictType::SizeDiff).count();
+        report.exact_matches =
+            report.staged_files.iter().filter(|f| f.conflict == ConflictType::ExactMatch).count();
+
+        let resumo = format!(
+            "Variante escolhida: {}\n\n\
+             O instalador vai aplicar:\n\
+             • {} mods novos\n\
+             • {} atualizações\n\
+             • {} já instalados (serão ignorados)\n\n\
+             Deseja aplicar essas alterações à sua pasta Mods?",
+            escolhida, report.new_files, report.updates, report.exact_matches
+        );
+
+        state_clone.set_pending_install(report);
+
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_show_exclusive_dialog(false);
+            w.set_careful_scan_message(SharedString::from(resumo));
+            w.set_show_careful_scan_dialog(true);
+        }
+    });
+
+    // Callback: cancel_exclusive
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_cancel_exclusive(move || {
+        let config = cfg_clone.load();
+        state_clone.take_pending_install();
+        if let Some(sims_path) = &config.sims4_path {
+            let _ = clear_staging(&get_mods_dir(sims_path).join(STAGING_DIR_NAME));
+        }
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_show_exclusive_dialog(false);
+            w.set_is_installing(false);
+            w.set_installer_status(SharedString::from(
+                "Instalação cancelada. Nada foi gravado em Mods.",
+            ));
+        }
     });
 
     // Fase 2 de 2: o usuário confirmou. Aqui sim escrevemos em Mods.
@@ -2019,40 +2111,39 @@ fn refresh_dashboard_stats(weak_win: &slint::Weak<MainWindow>, config_mgr: &Conf
             
             tokio::task::spawn_blocking(move || {
                 let mods_dir = get_mods_dir(&sims_path);
-                let tray_dir = get_tray_dir(&sims_path);
+                let stats = collect_stats(&mods_dir, &get_tray_dir(&sims_path));
 
-                let mut mods_count = 0;
-                let mut scripts_count = 0;
-                let mut mods_size = 0u64;
-
-                if mods_dir.exists() {
-                    for entry in walkdir::WalkDir::new(&mods_dir).into_iter().filter_map(|e| e.ok()) {
-                        if entry.path().is_file() {
-                            let ext = entry.path().extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-                            if ext == "package" {
-                                mods_count += 1;
-                                mods_size += entry.metadata().map(|m| m.len()).unwrap_or(0);
-                            } else if ext == "ts4script" {
-                                scripts_count += 1;
-                                mods_size += entry.metadata().map(|m| m.len()).unwrap_or(0);
-                            }
-                        }
-                    }
-                }
-
-                let mut tray_count = 0;
-                if tray_dir.exists() {
-                    if let Ok(entries) = fs::read_dir(&tray_dir) {
-                        tray_count = entries.count();
-                    }
-                }
+                // As listas de detalhe são montadas aqui, fora da thread da UI:
+                // uma pasta Mods real tem milhares de arquivos.
+                let pastas: Vec<String> = stats
+                    .folder_sizes
+                    .iter()
+                    .map(|(nome, tamanho)| {
+                        format!(
+                            "📂 {}  →  {}",
+                            nome,
+                            crate::bridge::slint_models::format_size_bytes(*tamanho)
+                        )
+                    })
+                    .collect();
+                let scripts: Vec<String> =
+                    stats.scripts.iter().map(|p| display_path(p, &mods_dir)).collect();
+                let tray: Vec<String> =
+                    stats.tray_files.iter().map(|p| file_label(p)).collect();
 
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak_async.upgrade() {
-                        w.set_total_mods_count(SharedString::from(mods_count.to_string()));
-                        w.set_total_scripts_count(SharedString::from(scripts_count.to_string()));
-                        w.set_total_mods_size(SharedString::from(crate::bridge::slint_models::format_size_bytes(mods_size)));
-                        w.set_total_tray_count(SharedString::from(tray_count.to_string()));
+                        w.set_total_mods_count(SharedString::from(stats.mods_count.to_string()));
+                        w.set_total_scripts_count(SharedString::from(
+                            stats.scripts_count.to_string(),
+                        ));
+                        w.set_total_mods_size(SharedString::from(
+                            crate::bridge::slint_models::format_size_bytes(stats.total_size),
+                        ));
+                        w.set_total_tray_count(SharedString::from(stats.tray_count.to_string()));
+                        w.set_folder_size_details(to_string_model(pastas));
+                        w.set_scripts_details(to_string_model(scripts));
+                        w.set_tray_details(to_string_model(tray));
                         w.set_dashboard_status(SharedString::from("Estatísticas atualizadas."));
                     }
                 });

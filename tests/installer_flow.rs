@@ -2,7 +2,8 @@
 //! conflitos -> instalação em Mods.
 
 use s4suite::engine::installer::{
-    calculate_conflicts, execute_installation, install_identity_name, is_valid_mod_file,
+    calculate_conflicts, collect_dependencies, detect_mutually_exclusive, execute_installation,
+    install_identity_name, is_valid_mod_file,
     prepare_staging, ConflictType, MANAGED_BASE_DIR, STAGING_DIR_NAME,
 };
 use std::fs;
@@ -265,4 +266,97 @@ fn staging_e_recriado_do_zero_a_cada_instalacao() {
     prepare_staging(&[archive], &fx.staging()).unwrap();
 
     assert!(!fx.staging().join("lixo_da_rodada_anterior.package").exists());
+}
+
+// --- Variantes exclusivas e dependências ---
+
+#[test]
+fn variantes_marcadas_como_opcao_viram_uma_escolha() {
+    let fx = Fixture::new();
+    let archive = fx.downloads.join("CabeloPack.zip");
+    make_zip(
+        &archive,
+        &[
+            ("Options/Cabelo Loiro.package", b"loiro".to_vec()),
+            ("Options/Cabelo Ruivo.package", b"ruivo".to_vec()),
+            ("leiame.txt", b"escolha um".to_vec()),
+        ],
+    );
+
+    prepare_staging(&[archive], &fx.staging()).unwrap();
+    let report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
+    let opcoes = detect_mutually_exclusive(&report.staged_files);
+
+    assert_eq!(opcoes.len(), 2, "as duas variantes deveriam virar opções");
+    assert!(opcoes.iter().all(|f| f.filename.starts_with("Cabelo")));
+}
+
+/// Uma opção sozinha não é uma escolha — perguntar ali só atrapalharia.
+#[test]
+fn uma_variante_isolada_nao_gera_pergunta() {
+    let fx = Fixture::new();
+    let archive = fx.downloads.join("Mod.zip");
+    make_zip(&archive, &[("Option A/unico.package", b"x".to_vec())]);
+
+    prepare_staging(&[archive], &fx.staging()).unwrap();
+    let report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
+
+    assert!(detect_mutually_exclusive(&report.staged_files).is_empty());
+}
+
+#[test]
+fn mod_comum_nao_e_confundido_com_variante_exclusiva() {
+    let fx = Fixture::new();
+    let archive = fx.downloads.join("Normal.zip");
+    make_zip(
+        &archive,
+        &[
+            ("Cabelos/longo.package", b"a".to_vec()),
+            ("Cabelos/curto.package", b"b".to_vec()),
+        ],
+    );
+
+    prepare_staging(&[archive], &fx.staging()).unwrap();
+    let report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
+
+    assert!(detect_mutually_exclusive(&report.staged_files).is_empty());
+}
+
+#[test]
+fn dependencias_sao_reunidas_sem_repetir() {
+    let fx = Fixture::new();
+    let archive = fx.downloads.join("ModComDeps.zip");
+    let mut com_lot51 = b"DBPF".to_vec();
+    com_lot51.extend_from_slice(b"....Lot51....");
+    let mut com_xml = b"DBPF".to_vec();
+    com_xml.extend_from_slice(b"....XML Injector....");
+    let mut outro_lot51 = b"DBPF".to_vec();
+    outro_lot51.extend_from_slice(b"....Lot51 de novo....");
+
+    make_zip(
+        &archive,
+        &[
+            ("a.package", com_lot51),
+            ("b.package", com_xml),
+            ("c.package", outro_lot51),
+        ],
+    );
+
+    prepare_staging(&[archive], &fx.staging()).unwrap();
+    let report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
+    let deps = collect_dependencies(&report.staged_files);
+
+    assert_eq!(deps, vec!["Lot51 Core Library", "XML Injector"]);
+}
+
+#[test]
+fn mod_sem_dependencia_nao_inventa_nenhuma() {
+    let fx = Fixture::new();
+    let archive = fx.downloads.join("Simples.zip");
+    make_zip(&archive, &[("mod.package", b"DBPF conteudo qualquer".to_vec())]);
+
+    prepare_staging(&[archive], &fx.staging()).unwrap();
+    let report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
+
+    assert!(collect_dependencies(&report.staged_files).is_empty());
 }

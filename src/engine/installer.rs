@@ -381,6 +381,69 @@ pub fn calculate_conflicts(
     })
 }
 
+/// Marcas que autores usam em nomes de pasta para dizer "escolha só um destes".
+const EXCLUSIVE_KEYWORDS: [&str; 8] = [
+    "option",
+    "choose",
+    "pick",
+    "exclusive",
+    "select one",
+    "only one",
+    "select_one",
+    "only_one",
+];
+
+/// Variantes do mesmo mod que não devem ser instaladas juntas.
+///
+/// Um pacote com `Options/Cabelo Loiro.package` e `Options/Cabelo Ruivo.package`
+/// espera que o usuário escolha uma. Instalar as duas costuma dar conflito
+/// dentro do jogo, então a UI pergunta antes de gravar.
+pub fn detect_mutually_exclusive(staged: &[StagedFile]) -> Vec<StagedFile> {
+    let opcoes: Vec<StagedFile> = staged
+        .iter()
+        .filter(|file| {
+            let rel = file.rel_path.to_string_lossy().replace('\\', "/").to_lowercase();
+            // A marca tem que estar num componente do caminho, não no arquivo
+            // inteiro: "description.package" contém "script", mas não é opção.
+            rel.split('/')
+                .any(|parte| EXCLUSIVE_KEYWORDS.iter().any(|key| parte.contains(key)))
+        })
+        .cloned()
+        .collect();
+
+    // Uma opção sozinha não é uma escolha.
+    if opcoes.len() > 1 {
+        opcoes
+    } else {
+        Vec::new()
+    }
+}
+
+/// Bibliotecas que os packages da fila exigem para funcionar.
+///
+/// Só lê o início de cada arquivo: as marcas ficam nos metadados, e varrer
+/// centenas de packages inteiros custaria minutos por instalação.
+pub fn collect_dependencies(staged: &[StagedFile]) -> Vec<String> {
+    const LIMITE_LEITURA: usize = 500_000;
+    let mut encontradas: Vec<String> = Vec::new();
+
+    for file in staged.iter().filter(|f| !f.is_script()) {
+        let Ok(mut handle) = File::open(&file.src_path) else { continue };
+        let mut buffer = vec![0u8; LIMITE_LEITURA.min(file.size as usize)];
+        if std::io::Read::read_exact(&mut handle, &mut buffer).is_err() {
+            continue;
+        }
+        for dep in detect_dependencies(&buffer) {
+            if !encontradas.contains(&dep) {
+                encontradas.push(dep);
+            }
+        }
+    }
+
+    encontradas.sort();
+    encontradas
+}
+
 pub fn execute_installation(
     report: &ConflictReport,
     mods_dir: &Path,

@@ -1,4 +1,5 @@
 import { I18n } from "../i18n.slint";
+import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../palette.slint";
 import { Card } from "../components/card.slint";
 import { PrimaryButton } from "../components/button.slint";
@@ -14,6 +15,14 @@ export component DashboardView inherits Rectangle {
     callback clear_cache_clicked();
     callback backup_saves_clicked();
     callback refresh_stats_clicked();
+
+    // Detalhes por trás dos números. Um card que só mostra "1.238 mods" não
+    // ajuda quem quer saber *onde* está o peso.
+    in property <[string]> folder_size_details;
+    in property <[string]> scripts_details;
+    in property <[string]> tray_details;
+    property <string> open_details: "";
+    property <string> details_title: "";
 
     VerticalLayout {
         padding: 24px;
@@ -68,31 +77,64 @@ export component DashboardView inherits Rectangle {
             Card {
                 horizontal-stretch: 1;
                 height: 110px;
+                scripts_touch := TouchArea {
+                    clicked => {
+                        root.details_title = I18n.tr("📜 Caminhos dos Scripts");
+                        root.open_details = "scripts";
+                    }
+                }
                 VerticalLayout {
                     padding: 16px;
                     alignment: space-between;
                     Text { text: I18n.tr("📜 Scripts (.ts4script)"); font-size: 13px; color: Theme.text_secondary; }
                     Text { text: root.total_scripts_count; font-size: 28px; font-weight: 800; color: Theme.info; }
+                    Text {
+                        text: scripts_touch.has-hover ? I18n.tr("clique para ver a lista") : "";
+                        font-size: 10px;
+                        color: Theme.text_muted;
+                    }
                 }
             }
             Card {
                 horizontal-stretch: 1;
                 height: 110px;
+                size_touch := TouchArea {
+                    clicked => {
+                        root.details_title = I18n.tr("💾 Tamanho Ocupado por Pasta");
+                        root.open_details = "folders";
+                    }
+                }
                 VerticalLayout {
                     padding: 16px;
                     alignment: space-between;
                     Text { text: I18n.tr("💾 Tamanho Ocupado"); font-size: 13px; color: Theme.text_secondary; }
                     Text { text: root.total_mods_size; font-size: 28px; font-weight: 800; color: Theme.warning; }
+                    Text {
+                        text: size_touch.has-hover ? I18n.tr("clique para ver a lista") : "";
+                        font-size: 10px;
+                        color: Theme.text_muted;
+                    }
                 }
             }
             Card {
                 horizontal-stretch: 1;
                 height: 110px;
+                tray_touch := TouchArea {
+                    clicked => {
+                        root.details_title = I18n.tr("🗂️ Arquivos do Tray");
+                        root.open_details = "tray";
+                    }
+                }
                 VerticalLayout {
                     padding: 16px;
                     alignment: space-between;
                     Text { text: I18n.tr("🗂️ Arquivos Tray"); font-size: 13px; color: Theme.text_secondary; }
                     Text { text: root.total_tray_count; font-size: 28px; font-weight: 800; color: Theme.success; }
+                    Text {
+                        text: tray_touch.has-hover ? I18n.tr("clique para ver a lista") : "";
+                        font-size: 10px;
+                        color: Theme.text_muted;
+                    }
                 }
             }
         }
@@ -155,5 +197,70 @@ export component DashboardView inherits Rectangle {
         }
 
         Rectangle { vertical-stretch: 1; }
+
+        // Detalhe do card clicado. A lista já vem pronta do Rust: montá-la aqui
+        // percorreria milhares de caminhos dentro da thread da UI.
+        if root.open_details != "" : Rectangle {
+            width: 100%; height: 100%;
+            background: #000000.transparentize(0.4);
+            TouchArea {}
+
+            Card {
+                width: 620px;
+                VerticalLayout {
+                    padding: 24px; spacing: 16px;
+                    Text {
+                        text: root.details_title;
+                        font-size: 18px;
+                        font-weight: 700;
+                        color: Theme.text_primary;
+                    }
+
+                    Rectangle {
+                        height: 340px;
+                        background: Theme.background;
+                        border-radius: 6px;
+                        ScrollView {
+                            VerticalLayout {
+                                padding: 8px;
+                                alignment: start;
+
+                                if root.open_details == "folders" : VerticalLayout {
+                                    for linha in root.folder_size_details : Text {
+                                        text: linha;
+                                        font-size: 12px;
+                                        color: Theme.text_secondary;
+                                        overflow: elide;
+                                    }
+                                }
+                                if root.open_details == "scripts" : VerticalLayout {
+                                    for linha in root.scripts_details : Text {
+                                        text: "📜 " + linha;
+                                        font-size: 12px;
+                                        color: Theme.text_secondary;
+                                        overflow: elide;
+                                    }
+                                }
+                                if root.open_details == "tray" : VerticalLayout {
+                                    for linha in root.tray_details : Text {
+                                        text: "🗂️ " + linha;
+                                        font-size: 12px;
+                                        color: Theme.text_secondary;
+                                        overflow: elide;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    PrimaryButton {
+                        text: I18n.tr("Fechar");
+                        btn_color: Theme.surface_header;
+                        hover_color: Theme.surface_hover;
+                        clicked => { root.open_details = ""; }
+                    }
+                }
+            }
+        }
     }
 }

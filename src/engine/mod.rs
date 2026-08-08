@@ -4,6 +4,7 @@ pub mod installer;
 pub mod merger;
 pub mod organizer;
 pub mod reshade;
+pub mod stats;
 pub mod translations;
 pub mod tray;
 

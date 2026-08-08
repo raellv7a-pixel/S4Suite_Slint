@@ -410,5 +410,11 @@
   "Manter": "Mantener",
   "Desativar": "Desactivar",
   "Backup em zip": "Copia en zip",
-  "Excluir": "Eliminar"
+  "Excluir": "Eliminar",
+  "Este mod traz versões alternativas que não devem ser instaladas juntas. Escolha a que você quer:": "Este mod trae versiones alternativas que no deben instalarse juntas. Elige la que quieras:",
+  "clique para ver a lista": "haz clic para ver la lista",
+  "💾 Tamanho Ocupado por Pasta": "💾 Espacio Ocupado por Carpeta",
+  "📜 Caminhos dos Scripts": "📜 Rutas de los Scripts",
+  "🔀 Escolha uma variante": "🔀 Elige una variante",
+  "🗂️ Arquivos do Tray": "🗂️ Archivos del Tray"
 }
