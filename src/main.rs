@@ -9,7 +9,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     let config_mgr = Arc::new(ConfigManager::new()?);
-    let state = Arc::new(AppState::new());
+    let state = Arc::new(AppState::new(config_mgr.config_dir()));
     let main_window = MainWindow::new()?;
 
     setup_app_adapter(&main_window, Arc::clone(&config_mgr), Arc::clone(&state));

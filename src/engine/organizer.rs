@@ -1,10 +1,10 @@
-use crate::core::safety::unique_dest_path;
+use crate::core::safety::{safe_remove_file, unique_dest_path};
 use crate::engine::tray::{fast_md5, full_sha256};
+use crate::engine::walk_user_mods;
 use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
 
 #[derive(Debug, Clone)]
 pub struct ModNode {
@@ -21,11 +21,7 @@ pub fn scan_mods_tree(mods_dir: &Path) -> Vec<ModNode> {
         return nodes;
     }
 
-    for entry in WalkDir::new(mods_dir)
-        .max_depth(5)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
+    for entry in walk_user_mods(mods_dir, 5) {
         let path = entry.path();
         if path == mods_dir {
             continue;
@@ -62,7 +58,7 @@ pub fn check_script_depth(mods_dir: &Path) -> Vec<ScriptDepthIssue> {
         return issues;
     }
 
-    for entry in WalkDir::new(mods_dir).into_iter().filter_map(|e| e.ok()) {
+    for entry in walk_user_mods(mods_dir, usize::MAX) {
         let path = entry.path();
         if !path.is_file() {
             continue;
@@ -116,7 +112,7 @@ pub struct DuplicateGroup {
 pub fn detect_duplicates(mods_dir: &Path) -> Vec<DuplicateGroup> {
     let mut fast_map: HashMap<String, Vec<PathBuf>> = HashMap::new();
 
-    for entry in WalkDir::new(mods_dir).into_iter().filter_map(|e| e.ok()) {
+    for entry in walk_user_mods(mods_dir, usize::MAX) {
         let path = entry.path();
         if path.is_file() && path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase() == "package" {
             if let Ok(hash) = fast_md5(path) {
@@ -151,11 +147,57 @@ pub fn detect_duplicates(mods_dir: &Path) -> Vec<DuplicateGroup> {
     duplicate_groups
 }
 
+impl DuplicateGroup {
+    /// O arquivo que fica. Escolhemos o de caminho mais curto: mods soltos na
+    /// raiz de `Mods` costumam ser a cópia "oficial", e as duplicatas tendem a
+    /// estar enterradas em subpastas de instalações antigas.
+    pub fn keeper(&self) -> &PathBuf {
+        self.file_paths
+            .iter()
+            .min_by_key(|p| (p.components().count(), p.as_os_str().len()))
+            .unwrap_or(&self.file_paths[0])
+    }
+
+    /// As cópias redundantes — tudo menos o `keeper`.
+    pub fn redundant(&self) -> Vec<PathBuf> {
+        let keeper = self.keeper().clone();
+        self.file_paths.iter().filter(|p| **p != keeper).cloned().collect()
+    }
+}
+
+/// Resultado de uma remoção em lote.
+#[derive(Debug, Default)]
+pub struct RemovalOutcome {
+    pub removed: usize,
+    pub freed_bytes: u64,
+    pub failures: Vec<(PathBuf, String)>,
+}
+
+/// Apaga os arquivos indicados, sempre por [`safe_remove_file`], que recusa
+/// qualquer caminho fora das raízes permitidas. Um arquivo protegido não
+/// interrompe o lote: vira uma entrada em `failures`.
+pub fn remove_files(files: &[PathBuf], allowed_roots: &[PathBuf]) -> RemovalOutcome {
+    let mut outcome = RemovalOutcome::default();
+
+    for file in files {
+        let size = fs::metadata(file).map(|m| m.len()).unwrap_or(0);
+        match safe_remove_file(file, allowed_roots) {
+            Ok(()) => {
+                outcome.removed += 1;
+                outcome.freed_bytes += size;
+            }
+            Err(e) => outcome.failures.push((file.clone(), e.to_string())),
+        }
+    }
+
+    outcome
+}
+
 pub fn find_junk_files(mods_dir: &Path) -> Vec<PathBuf> {
     let junk_exts = ["txt", "url", "png", "jpg", "jpeg", "db"];
     let mut junk = Vec::new();
 
-    for entry in WalkDir::new(mods_dir).into_iter().filter_map(|e| e.ok()) {
+    for entry in walk_user_mods(mods_dir, usize::MAX) {
         let path = entry.path();
         if path.is_file() {
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();

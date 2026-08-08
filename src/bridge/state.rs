@@ -1,6 +1,18 @@
+use crate::engine::disabled::DisabledManager;
 use crate::engine::installer::ConflictReport;
+use crate::engine::organizer::DuplicateGroup;
 use parking_lot::Mutex;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Ação destrutiva do organizador aguardando confirmação do usuário.
+///
+/// Guardamos a lista já resolvida em vez de recalculá-la depois do "confirmar":
+/// entre a análise e a confirmação o disco pode mudar, e o usuário precisa
+/// apagar exatamente aquilo que a tela lhe mostrou.
+pub enum PendingOrganizerAction {
+    RemoveDuplicates(Vec<DuplicateGroup>),
+    CleanJunk(Vec<PathBuf>),
+}
 
 /// Estado que precisa sobreviver entre callbacks da UI.
 ///
@@ -8,18 +20,43 @@ use std::path::PathBuf;
 /// não enxerga. Sem este estado, a fila do instalador existia apenas como
 /// texto na tela e o caminho real dos arquivos era perdido no instante em que
 /// o diálogo de seleção fechava.
-#[derive(Default)]
 pub struct AppState {
     /// Arquivos que o usuário escolheu para instalar (caminhos reais em disco).
-    pub installer_sources: Mutex<Vec<PathBuf>>,
+    installer_sources: Mutex<Vec<PathBuf>>,
     /// Análise de conflitos aguardando confirmação no diálogo.
-    pub pending_install: Mutex<Option<ConflictReport>>,
+    pending_install: Mutex<Option<ConflictReport>>,
+
+    /// Item selecionado na árvore do organizador.
+    selected_mod: Mutex<Option<PathBuf>>,
+    /// Remoção aguardando confirmação no diálogo do organizador.
+    pending_organizer: Mutex<Option<PendingOrganizerAction>>,
+
+    /// Packages encontrados na pasta de origem do merge.
+    merger_inputs: Mutex<Vec<PathBuf>>,
+    /// Destino escolhido para as partes unificadas.
+    merger_output: Mutex<Option<PathBuf>>,
+
+    disabled_mgr: DisabledManager,
 }
 
 impl AppState {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(config_dir: &Path) -> Self {
+        Self {
+            installer_sources: Mutex::new(Vec::new()),
+            pending_install: Mutex::new(None),
+            selected_mod: Mutex::new(None),
+            pending_organizer: Mutex::new(None),
+            merger_inputs: Mutex::new(Vec::new()),
+            merger_output: Mutex::new(None),
+            disabled_mgr: DisabledManager::new(config_dir),
+        }
     }
+
+    pub fn disabled_manager(&self) -> &DisabledManager {
+        &self.disabled_mgr
+    }
+
+    // --- Instalador ---
 
     pub fn set_installer_sources(&self, files: Vec<PathBuf>) {
         *self.installer_sources.lock() = files;
@@ -42,5 +79,46 @@ impl AppState {
     /// o que também protege contra duplo-clique em "Prosseguir".
     pub fn take_pending_install(&self) -> Option<ConflictReport> {
         self.pending_install.lock().take()
+    }
+
+    // --- Organizador ---
+
+    pub fn set_selected_mod(&self, path: Option<PathBuf>) {
+        *self.selected_mod.lock() = path;
+    }
+
+    pub fn selected_mod(&self) -> Option<PathBuf> {
+        self.selected_mod.lock().clone()
+    }
+
+    pub fn set_pending_organizer(&self, action: PendingOrganizerAction) {
+        *self.pending_organizer.lock() = Some(action);
+    }
+
+    pub fn take_pending_organizer(&self) -> Option<PendingOrganizerAction> {
+        self.pending_organizer.lock().take()
+    }
+
+    // --- Merger ---
+
+    pub fn set_merger_inputs(&self, files: Vec<PathBuf>) {
+        *self.merger_inputs.lock() = files;
+    }
+
+    pub fn merger_inputs(&self) -> Vec<PathBuf> {
+        self.merger_inputs.lock().clone()
+    }
+
+    pub fn set_merger_output(&self, dir: Option<PathBuf>) {
+        *self.merger_output.lock() = dir;
+    }
+
+    pub fn merger_output(&self) -> Option<PathBuf> {
+        self.merger_output.lock().clone()
+    }
+
+    pub fn clear_merger(&self) {
+        self.merger_inputs.lock().clear();
+        *self.merger_output.lock() = None;
     }
 }

@@ -302,14 +302,7 @@ pub fn calculate_conflicts(
     // arquivos recém-extraídos apareceriam como "já instalados" e toda a fila
     // seria classificada como ExactMatch.
     let mut existing_map: HashMap<String, (PathBuf, u64)> = HashMap::new();
-    for entry in WalkDir::new(mods_dir)
-        .into_iter()
-        .filter_entry(|e| {
-            let name = e.file_name().to_string_lossy();
-            !(e.file_type().is_dir() && (name == STAGING_DIR_NAME || name == BACKUP_DIR_NAME))
-        })
-        .filter_map(|e| e.ok())
-    {
+    for entry in crate::engine::walk_user_mods(mods_dir, usize::MAX) {
         if entry.path().is_file() {
             let fname = entry.file_name().to_string_lossy().to_string();
             let size = entry.metadata().map(|m| m.len()).unwrap_or(0);

@@ -31,15 +31,21 @@ export component MainWindow inherits Window {
 
     in property <[ModTreeEntry]> mod_entries;
     in property <string> organizer_status: "Pronto";
+    in property <string> selected_mod_path: "";
+    in property <bool> selected_mod_is_disabled: false;
     // Merger Dialog
     in property <bool> show_post_merge_dialog: false;
     in property <string> post_merge_message: "";
     callback post_merge_action(string);
 
-    // Organizer Dialog
-    in property <bool> show_duplicates_dialog: false;
-    in property <string> duplicates_message: "";
-    callback close_duplicates_dialog();
+    // Organizer: confirmação de ações destrutivas
+    in property <bool> show_organizer_confirm: false;
+    in property <string> organizer_confirm_title: "";
+    in property <string> organizer_confirm_message: "";
+    in property <[string]> organizer_confirm_items;
+    callback confirm_organizer_action();
+    callback cancel_organizer_action();
+    callback select_mod_entry(string);
     // Installer Dialog
     in property <bool> show_careful_scan_dialog: false;
     in property <string> careful_scan_message: "";
@@ -50,6 +56,9 @@ export component MainWindow inherits Window {
     in property <string> merge_max_size: "1.0";
     in property <bool> is_merging: false;
     in property <string> merge_status: "Pronto";
+    in property <string> merge_input_dir: "";
+    in property <string> merge_output_dir: "";
+    in property <float> merge_progress: 0.0;
 
     in property <[TrayItem]> tray_items;
     in property <bool> is_importing_tray: false;
@@ -77,7 +86,7 @@ export component MainWindow inherits Window {
     callback check_scripts();
     callback find_duplicates();
     callback clean_junk();
-    callback toggle_disabled_mod();
+    callback toggle_disabled_mod(string);
     callback select_merger_input();
     callback select_merger_output();
     callback start_merge();
@@ -130,19 +139,30 @@ export component MainWindow inherits Window {
             if root.current_tab == 2 : OrganizerView {
                 mod_entries: root.mod_entries;
                 organizer_status: root.organizer_status;
+                selected_path: root.selected_mod_path;
+                selected_is_disabled: root.selected_mod_is_disabled;
                 refresh_tree_clicked => { root.refresh_mod_tree(); }
-                show_duplicates_dialog: root.show_duplicates_dialog;
-                duplicates_message: root.duplicates_message;
-                close_duplicates_dialog => { root.close_duplicates_dialog(); }
+                check_scripts_clicked => { root.check_scripts(); }
+                show_confirm_dialog: root.show_organizer_confirm;
+                confirm_title: root.organizer_confirm_title;
+                confirm_message: root.organizer_confirm_message;
+                confirm_items: root.organizer_confirm_items;
+                confirm_action => { root.confirm_organizer_action(); }
+                cancel_action => { root.cancel_organizer_action(); }
                 find_duplicates_clicked => { root.find_duplicates(); }
                 clean_junk_clicked => { root.clean_junk(); }
-                toggle_disabled_clicked => { root.toggle_disabled_mod(); }
+                entry_clicked(path) => { root.select_mod_entry(path); }
+                toggle_disabled_clicked(path) => { root.toggle_disabled_mod(path); }
             }
 
             if root.current_tab == 3 : MergerView {
                 items: root.merge_items;
                 max_size_gb: root.merge_max_size;
                 is_merging: root.is_merging;
+                merge_status: root.merge_status;
+                input_dir: root.merge_input_dir;
+                output_dir: root.merge_output_dir;
+                merge_progress: root.merge_progress;
                 show_post_merge_dialog: root.show_post_merge_dialog;
                 post_merge_message: root.post_merge_message;
                 post_merge_action(action) => { root.post_merge_action(action); }

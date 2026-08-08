@@ -1,8 +1,10 @@
 use crate::engine::dbpf::{DBPFReader, DBPFWriter, PackageResource, ResourceKey};
+use crate::engine::disabled::DisabledManager;
+use crate::engine::organizer::{remove_files, RemovalOutcome};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
-use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom};
+use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -171,6 +173,152 @@ where
     }
 
     Ok(report)
+}
+
+/// O que fazer com os arquivos originais depois de um merge bem-sucedido.
+///
+/// Manter os originais junto das partes unificadas duplica todo o conteúdo
+/// dentro do jogo, então esta escolha não é cosmética.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PostMergeAction {
+    Keep,
+    Disable,
+    Backup,
+    Delete,
+}
+
+impl PostMergeAction {
+    pub fn parse(action: &str) -> Self {
+        match action {
+            "disable" => Self::Disable,
+            "backup" => Self::Backup,
+            "delete" => Self::Delete,
+            _ => Self::Keep,
+        }
+    }
+}
+
+/// Resultado da ação pós-merge, pronto para virar mensagem na UI.
+#[derive(Debug, Default)]
+pub struct PostMergeOutcome {
+    pub affected: usize,
+    pub failed: usize,
+    pub freed_bytes: u64,
+    /// Caminho do zip, quando a ação foi `Backup`.
+    pub backup_path: Option<PathBuf>,
+    /// Preenchido quando a ação abortou sem tocar em nada.
+    pub error: Option<String>,
+}
+
+/// Aplica o destino escolhido para os arquivos originais.
+///
+/// `input_root` é a raiz de segurança: nada fora dela é apagado ou renomeado,
+/// por mais que a lista de originais diga o contrário.
+pub fn apply_post_merge_action(
+    action: PostMergeAction,
+    originals: &[PathBuf],
+    input_root: &Path,
+    disabled_mgr: &DisabledManager,
+) -> PostMergeOutcome {
+    let allowed_roots = vec![input_root.to_path_buf()];
+
+    match action {
+        PostMergeAction::Keep => PostMergeOutcome::default(),
+
+        PostMergeAction::Disable => {
+            let mut outcome = PostMergeOutcome::default();
+            for path in originals {
+                match disabled_mgr.disable_mod(
+                    path,
+                    input_root,
+                    "merge",
+                    "Original substituído por package unificado",
+                    &allowed_roots,
+                ) {
+                    Ok(_) => outcome.affected += 1,
+                    Err(_) => outcome.failed += 1,
+                }
+            }
+            outcome
+        }
+
+        PostMergeAction::Backup => {
+            let stamp = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let zip_path = input_root.join(format!("originais_pre_merge_{}.zip", stamp));
+
+            if let Err(e) = create_zip_from_files(originals, input_root, &zip_path) {
+                // O zip é a única cópia de segurança: sem ele, não apagamos nada.
+                let _ = fs::remove_file(&zip_path);
+                return PostMergeOutcome {
+                    error: Some(e.to_string()),
+                    ..Default::default()
+                };
+            }
+
+            let removal = remove_files(originals, &allowed_roots);
+            PostMergeOutcome {
+                affected: removal.removed,
+                failed: removal.failures.len(),
+                freed_bytes: removal.freed_bytes,
+                backup_path: Some(zip_path),
+                error: None,
+            }
+        }
+
+        PostMergeAction::Delete => {
+            let RemovalOutcome { removed, freed_bytes, failures } =
+                remove_files(originals, &allowed_roots);
+            PostMergeOutcome {
+                affected: removed,
+                failed: failures.len(),
+                freed_bytes,
+                backup_path: None,
+                error: None,
+            }
+        }
+    }
+}
+
+/// Pasta comum mais profunda que contém todos os caminhos. Serve de raiz de
+/// segurança para as ações pós-merge.
+pub fn common_ancestor(paths: &[PathBuf]) -> Option<PathBuf> {
+    let mut iter = paths.iter().filter_map(|p| p.parent());
+    let mut common = iter.next()?.to_path_buf();
+    for parent in iter {
+        while !parent.starts_with(&common) {
+            if !common.pop() {
+                return None;
+            }
+        }
+    }
+    Some(common)
+}
+
+/// Compacta uma lista específica de arquivos, preservando o caminho relativo
+/// a `base_dir`.
+fn create_zip_from_files(files: &[PathBuf], base_dir: &Path, zip_path: &Path) -> io::Result<()> {
+    let file = File::create(zip_path)?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    for path in files {
+        if !path.is_file() {
+            continue;
+        }
+        let name = path.strip_prefix(base_dir).unwrap_or(path);
+        zip.start_file(name.to_string_lossy().to_string(), options)?;
+        let mut f = File::open(path)?;
+        let mut buffer = Vec::new();
+        f.read_to_end(&mut buffer)?;
+        zip.write_all(&buffer)?;
+    }
+
+    zip.finish()?;
+    Ok(())
 }
 
 fn write_package_chunk(part_path: &Path, resources: &[PackageResource]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

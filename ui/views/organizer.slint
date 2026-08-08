@@ -1,3 +1,4 @@
+import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../palette.slint";
 import { Card } from "../components/card.slint";
 import { PrimaryButton } from "../components/button.slint";
@@ -14,18 +15,24 @@ export component OrganizerView inherits Rectangle {
     in property <[ModTreeEntry]> mod_entries;
     in property <string> search_query: "";
     in property <string> selected_path: "";
+    in property <bool> selected_is_disabled: false;
     in property <string> organizer_status: "Pronto";
-    in property <bool> show_duplicates_dialog: false;
-    in property <string> duplicates_message: "";
-    callback close_duplicates_dialog();
 
+    // Diálogo de confirmação para as ações destrutivas (duplicatas e lixo).
+    in property <bool> show_confirm_dialog: false;
+    in property <string> confirm_title: "";
+    in property <string> confirm_message: "";
+    in property <[string]> confirm_items;
+    callback confirm_action();
+    callback cancel_action();
 
     callback search_changed(string);
     callback refresh_tree_clicked();
     callback check_scripts_clicked();
     callback find_duplicates_clicked();
     callback clean_junk_clicked();
-    callback toggle_disabled_clicked();
+    callback entry_clicked(string);
+    callback toggle_disabled_clicked(string);
 
     VerticalLayout {
         padding: 24px;
@@ -67,46 +74,74 @@ export component OrganizerView inherits Rectangle {
                 clicked => { root.clean_junk_clicked(); }
             }
             PrimaryButton {
-                text: "🔴 Ligar/Desligar Mod";
+                // Sem um mod selecionado não há o que alternar.
+                text: root.selected_path == ""
+                    ? "🔴 Selecione um mod"
+                    : (root.selected_is_disabled ? "🟢 Reativar Mod" : "🔴 Desativar Mod");
+                enabled: root.selected_path != "";
                 btn_color: Theme.primary_color;
                 hover_color: Theme.primary_hover;
-                clicked => { root.toggle_disabled_clicked(); }
+                clicked => { root.toggle_disabled_clicked(root.selected_path); }
             }
         }
 
         // File/Folder List
         Card {
             vertical-stretch: 1;
-            VerticalLayout {
-                padding: 12px;
 
-                if root.mod_entries.length == 0 : Text {
-                    text: "Nenhum mod encontrado na pasta Mods.";
-                    font-size: 13px;
-                    color: Theme.text_muted;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
+            if root.mod_entries.length == 0 : Text {
+                text: "Nenhum mod encontrado na pasta Mods.";
+                font-size: 13px;
+                color: Theme.text_muted;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
 
-                for entry in root.mod_entries : HorizontalLayout {
-                    height: 36px;
-                    padding-left: 12px;
-                    padding-right: 12px;
-                    alignment: center;
+            // Uma pasta Mods real tem centenas de entradas: sem rolagem, tudo
+            // além da altura do Card fica inacessível.
+            if root.mod_entries.length > 0 : ScrollView {
+                VerticalLayout {
+                    padding: 12px;
+                    alignment: start;
 
-                    Text {
-                        text: entry.is_dir ? "📁 " + entry.name : (entry.disabled ? "🔴 " + entry.name : "📦 " + entry.name);
-                        font-size: 13px;
-                        color: entry.disabled ? Theme.danger : Theme.text_primary;
-                        horizontal-stretch: 1;
-                        vertical-alignment: center;
-                    }
-                    Text {
-                        text: entry.size_str;
-                        font-size: 12px;
-                        color: Theme.text_secondary;
-                        width: 100px;
-                        vertical-alignment: center;
+                    for entry in root.mod_entries : Rectangle {
+                        height: 36px;
+                        background: root.selected_path == entry.path_str
+                            ? Theme.surface_hover
+                            : (touch.has-hover ? Theme.surface_header : transparent);
+                        border-radius: 6px;
+
+                        touch := TouchArea {
+                            // Pastas não são desativáveis: só arquivos entram
+                            // na seleção.
+                            clicked => {
+                                if (!entry.is_dir) {
+                                    root.entry_clicked(entry.path_str);
+                                }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            alignment: center;
+
+                            Text {
+                                text: entry.is_dir ? "📁 " + entry.name : (entry.disabled ? "🔴 " + entry.name : "📦 " + entry.name);
+                                font-size: 13px;
+                                color: entry.disabled ? Theme.danger : Theme.text_primary;
+                                horizontal-stretch: 1;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: entry.size_str;
+                                font-size: 12px;
+                                color: Theme.text_secondary;
+                                width: 100px;
+                                vertical-alignment: center;
+                            }
+                        }
                     }
                 }
             }
@@ -123,18 +158,51 @@ export component OrganizerView inherits Rectangle {
             }
         }
 
-        if root.show_duplicates_dialog : Rectangle {
+        if root.show_confirm_dialog : Rectangle {
             width: 100%; height: 100%;
             background: #000000.transparentize(0.4);
             TouchArea {}
-            
+
             Card {
-                width: 500px;
+                width: 560px;
                 VerticalLayout {
                     padding: 24px; spacing: 16px;
-                    Text { text: "🔍 Resultado da Busca por Duplicatas"; font-size: 18px; font-weight: 700; color: Theme.text_primary; }
-                    Text { text: root.duplicates_message; font-size: 14px; color: Theme.text_secondary; wrap: word-wrap; }
-                    PrimaryButton { text: "Fechar"; clicked => { root.close_duplicates_dialog(); } }
+                    Text { text: root.confirm_title; font-size: 18px; font-weight: 700; color: Theme.text_primary; }
+                    Text { text: root.confirm_message; font-size: 14px; color: Theme.text_secondary; wrap: word-wrap; }
+
+                    // Nada é apagado às cegas: o usuário vê a lista exata.
+                    if root.confirm_items.length > 0 : Rectangle {
+                        height: 200px;
+                        background: Theme.background;
+                        border-radius: 6px;
+                        ScrollView {
+                            VerticalLayout {
+                                padding: 8px;
+                                alignment: start;
+                                for item in root.confirm_items : Text {
+                                    text: item;
+                                    font-size: 12px;
+                                    color: Theme.text_secondary;
+                                    overflow: elide;
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        PrimaryButton {
+                            text: "Cancelar";
+                            btn_color: Theme.surface_header;
+                            hover_color: Theme.surface_hover;
+                            clicked => { root.cancel_action(); }
+                        }
+                        PrimaryButton {
+                            text: "Confirmar Exclusão";
+                            btn_color: Theme.danger;
+                            clicked => { root.confirm_action(); }
+                        }
+                    }
                 }
             }
         }
