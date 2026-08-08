@@ -1,0 +1,158 @@
+import { Theme } from "../palette.slint";
+import { Card } from "../components/card.slint";
+import { PrimaryButton } from "../components/button.slint";
+
+export component DashboardView inherits Rectangle {
+    in property <string> game_path: "Não configurado";
+    in property <string> total_mods_count: "0";
+    in property <string> total_scripts_count: "0";
+    in property <string> total_mods_size: "0 MB";
+    in property <string> total_tray_count: "0";
+    in property <string> status_message: "Pronto";
+
+    callback clear_cache_clicked();
+    callback backup_saves_clicked();
+    callback refresh_stats_clicked();
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 20px;
+
+        // Welcome Header
+        Card {
+            height: 100px;
+            HorizontalLayout {
+                padding: 20px;
+                spacing: 16px;
+                alignment: center;
+
+                Text {
+                    text: "🎉";
+                    font-size: 36px;
+                    vertical-alignment: center;
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: "Bem-vindo ao S4 Suite v2.0 (Linux Edition)";
+                        font-size: 20px;
+                        font-weight: 700;
+                        color: Theme.text_primary;
+                    }
+                    Text {
+                        text: "O Seu Hub Definitivo para Mods e Conteúdos do The Sims 4 no Linux";
+                        font-size: 13px;
+                        color: Theme.text_secondary;
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+        }
+
+        // Stats Grid
+        HorizontalLayout {
+            spacing: 16px;
+
+            Card {
+                horizontal-stretch: 1;
+                height: 110px;
+                VerticalLayout {
+                    padding: 16px;
+                    alignment: space-between;
+                    Text { text: "📦 Mods Instalados"; font-size: 13px; color: Theme.text_secondary; }
+                    Text { text: root.total_mods_count; font-size: 28px; font-weight: 800; color: Theme.accent_color; }
+                }
+            }
+            Card {
+                horizontal-stretch: 1;
+                height: 110px;
+                VerticalLayout {
+                    padding: 16px;
+                    alignment: space-between;
+                    Text { text: "📜 Scripts (.ts4script)"; font-size: 13px; color: Theme.text_secondary; }
+                    Text { text: root.total_scripts_count; font-size: 28px; font-weight: 800; color: Theme.info; }
+                }
+            }
+            Card {
+                horizontal-stretch: 1;
+                height: 110px;
+                VerticalLayout {
+                    padding: 16px;
+                    alignment: space-between;
+                    Text { text: "💾 Tamanho Ocupado"; font-size: 13px; color: Theme.text_secondary; }
+                    Text { text: root.total_mods_size; font-size: 28px; font-weight: 800; color: Theme.warning; }
+                }
+            }
+            Card {
+                horizontal-stretch: 1;
+                height: 110px;
+                VerticalLayout {
+                    padding: 16px;
+                    alignment: space-between;
+                    Text { text: "🗂️ Arquivos Tray"; font-size: 13px; color: Theme.text_secondary; }
+                    Text { text: root.total_tray_count; font-size: 28px; font-weight: 800; color: Theme.success; }
+                }
+            }
+        }
+
+        // Quick Actions
+        Card {
+            VerticalLayout {
+                padding: 20px;
+                spacing: 16px;
+
+                Text {
+                    text: "⚡ Ações Rápidas";
+                    font-size: 16px;
+                    font-weight: 700;
+                    color: Theme.text_primary;
+                }
+
+                HorizontalLayout {
+                    spacing: 12px;
+                    PrimaryButton {
+                        text: "🧹 Limpar Cache do Jogo";
+                        icon_str: "🧹";
+                        btn_color: Theme.surface_header;
+                        hover_color: Theme.surface_hover;
+                        clicked => { root.clear_cache_clicked(); }
+                    }
+                    PrimaryButton {
+                        text: "🛡️ Backup de Saves";
+                        icon_str: "🛡️";
+                        btn_color: Theme.surface_header;
+                        hover_color: Theme.surface_hover;
+                        clicked => { root.backup_saves_clicked(); }
+                    }
+                    PrimaryButton {
+                        text: "🔄 Atualizar Estatísticas";
+                        icon_str: "🔄";
+                        btn_color: Theme.primary_color;
+                        hover_color: Theme.primary_hover;
+                        clicked => { root.refresh_stats_clicked(); }
+                    }
+                }
+            }
+        }
+
+        // Path & Status Banner
+        Card {
+            VerticalLayout {
+                padding: 16px;
+                spacing: 8px;
+
+                HorizontalLayout {
+                    Text { text: "📍 Caminho do Jogo: "; font-size: 13px; font-weight: 600; color: Theme.text_secondary; }
+                    Text { text: root.game_path; font-size: 13px; color: Theme.text_primary; }
+                }
+                HorizontalLayout {
+                    Text { text: "ℹ️ Status: "; font-size: 13px; font-weight: 600; color: Theme.text_secondary; }
+                    Text { text: root.status_message; font-size: 13px; color: Theme.accent_color; }
+                }
+            }
+        }
+
+        Rectangle { vertical-stretch: 1; }
+    }
+}

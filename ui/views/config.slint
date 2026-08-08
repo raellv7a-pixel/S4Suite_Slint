@@ -1,0 +1,121 @@
+import { Theme } from "../palette.slint";
+import { Card } from "../components/card.slint";
+import { PrimaryButton } from "../components/button.slint";
+
+export component ConfigView inherits Rectangle {
+    in property <string> game_path: "";
+    in property <string> merge_limit_gb: "1.0";
+    in property <string> active_language: "Português";
+    in property <int> active_theme_idx: 0;
+    in property <string> config_status: "Pronto";
+
+    callback select_game_path_clicked();
+    callback autodetect_game_path_clicked();
+    callback save_config_clicked();
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 16px;
+
+        Text {
+            text: "⚙️ Configurações do Aplicativo";
+            font-size: 22px;
+            font-weight: 800;
+            color: Theme.text_primary;
+        }
+
+        // Game Path Section
+        Card {
+            VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+
+                Text { text: "Pasta Raiz do The Sims 4 (Game/Bin)"; font-size: 15px; font-weight: 700; color: Theme.text_primary; }
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    Text { text: root.game_path != "" ? root.game_path : "Não configurada"; font-size: 13px; color: Theme.text_secondary; horizontal-stretch: 1; vertical-alignment: center; }
+                    PrimaryButton {
+                        text: "📁 Procurar";
+                        btn_color: Theme.surface_header;
+                        hover_color: Theme.surface_hover;
+                        clicked => { root.select_game_path_clicked(); }
+                    }
+                    PrimaryButton {
+                        text: "🔍 Auto-Detectar";
+                        btn_color: Theme.primary_color;
+                        hover_color: Theme.primary_hover;
+                        clicked => { root.autodetect_game_path_clicked(); }
+                    }
+                }
+            }
+        }
+
+        // Appearance & Language Section
+        Card {
+            VerticalLayout {
+                padding: 20px;
+                spacing: 16px;
+
+                Text { text: "Personalização Visual & Idioma"; font-size: 15px; font-weight: 700; color: Theme.text_primary; }
+
+                HorizontalLayout {
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        spacing: 6px;
+                        Text { text: "Tema Visual:"; font-size: 13px; color: Theme.text_secondary; }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            PrimaryButton {
+                                text: "🟢 Sims Green";
+                                btn_color: root.active_theme_idx == 0 ? #15803d : Theme.surface_header;
+                                clicked => { Theme.active_theme = 0; }
+                            }
+                            PrimaryButton {
+                                text: "🔵 Deep Blue";
+                                btn_color: root.active_theme_idx == 1 ? #1e40af : Theme.surface_header;
+                                clicked => { Theme.active_theme = 1; }
+                            }
+                            PrimaryButton {
+                                text: "🟣 Cyber Purple";
+                                btn_color: root.active_theme_idx == 2 ? #7e22ce : Theme.surface_header;
+                                clicked => { Theme.active_theme = 2; }
+                            }
+                            PrimaryButton {
+                                text: "🩷 Neon Pink";
+                                btn_color: root.active_theme_idx == 3 ? #be185d : Theme.surface_header;
+                                clicked => { Theme.active_theme = 3; }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Save Action Bar
+        HorizontalLayout {
+            spacing: 12px;
+            PrimaryButton {
+                text: "💾 Salvar Configurações";
+                icon_str: "💾";
+                btn_color: Theme.accent_color;
+                clicked => { root.save_config_clicked(); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        // Status Card
+        Card {
+            height: 40px;
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                alignment: center;
+                Text { text: root.config_status; font-size: 13px; color: Theme.info; vertical-alignment: center; }
+            }
+        }
+
+        Rectangle { vertical-stretch: 1; }
+    }
+}

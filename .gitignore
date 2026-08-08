@@ -1,0 +1,36 @@
+# === Rust / Slint ===
+/target/
+**/*.rs.bk
+*.pdb
+
+# === Python legado (legacy/) ===
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+legacy/build_env/
+legacy/build/
+legacy/dist/
+legacy/S4Suite.AppDir/
+legacy/S4Suite_v*.AppImage
+legacy/appimagetool-x86_64.AppImage
+
+# Caminhos antigos (pré-reorganização)
+S4Suite_Qt/build_env/
+S4Suite_Qt/build/
+S4Suite_Qt/dist/
+S4Suite_Qt/S4Suite.AppDir/
+S4Suite_Qt/S4Suite_v*.AppImage
+S4Suite_Qt/appimagetool-x86_64.AppImage
+build_env/
+build/
+dist/
+
+# === Ferramentas / editores ===
+.prowl/
+.venv/
+
+# === Runtime ===
+*.log
+*.tmp
+*.corrupt

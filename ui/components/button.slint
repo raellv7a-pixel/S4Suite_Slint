@@ -1,0 +1,42 @@
+import { Theme } from "../palette.slint";
+
+export component PrimaryButton inherits Rectangle {
+    in property <string> text;
+    in property <string> icon_str: "";
+    in property <bool> enabled: true;
+    in property <color> btn_color: Theme.primary_color;
+    in property <color> hover_color: Theme.primary_hover;
+
+    callback clicked();
+
+    height: 40px;
+    border-radius: 8px;
+    background: !enabled ? Theme.surface_header : (touch.has-hover ? hover_color : btn_color);
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 8px;
+        alignment: center;
+
+        if icon_str != "": Text {
+            text: root.icon_str;
+            font-size: 14px;
+            color: #ffffff;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.text;
+            font-size: 14px;
+            font-weight: 600;
+            color: root.enabled ? #ffffff : Theme.text_muted;
+            vertical-alignment: center;
+        }
+    }
+}

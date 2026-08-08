@@ -1,0 +1,38 @@
+[language-server.prowl-agent]
+command = "prowl-agent"
+args = ["lsp"]
+
+# Helix replaces the per-language server list, so add your existing servers
+# back to any language below if you rely on them.
+
+[[language]]
+name = "hyprlang"
+language-servers = ["prowl-agent"]
+
+[[language]]
+name = "toml"
+language-servers = ["prowl-agent"]
+
+[[language]]
+name = "ini"
+language-servers = ["prowl-agent"]
+
+[[language]]
+name = "css"
+language-servers = ["prowl-agent"]
+
+[[language]]
+name = "scss"
+language-servers = ["prowl-agent"]
+
+[[language]]
+name = "json"
+language-servers = ["prowl-agent"]
+
+[[language]]
+name = "yaml"
+language-servers = ["prowl-agent"]
+
+[[language]]
+name = "qml"
+language-servers = ["prowl-agent"]

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "prowl-agent": {
+      "command": [
+        "prowl-agent",
+        "serve"
+      ],
+      "enabled": true,
+      "type": "local"
+    }
+  }
+}

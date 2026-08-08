@@ -1,0 +1,139 @@
+import { Theme } from "../palette.slint";
+import { Card } from "../components/card.slint";
+import { PrimaryButton } from "../components/button.slint";
+
+export struct MergeQueueItem {
+    name: string,
+    size_str: string,
+}
+
+export component MergerView inherits Rectangle {
+    in property <[MergeQueueItem]> items;
+    in property <string> max_size_gb: "1.0";
+    in property <bool> is_merging: false;
+    in property <string> merge_status: "Aguardando seleção de arquivos...";
+
+    callback select_input_clicked();
+    callback select_output_clicked();
+    callback start_merge_clicked();
+
+    in property <bool> show_post_merge_dialog: false;
+    in property <string> post_merge_message: "";
+    callback post_merge_action(string); // "keep", "disable", "backup", "delete"
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 16px;
+        Text {
+            text: "🔗 Unificador de Packages (Merger V2)";
+            font-size: 22px;
+            font-weight: 800;
+            color: Theme.text_primary;
+        }
+
+        // Info Banner
+        Card {
+            height: 80px;
+            HorizontalLayout {
+                padding: 16px;
+                spacing: 12px;
+                alignment: center;
+                Text { text: "⚡"; font-size: 28px; vertical-alignment: center; }
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: "Merge de Alta Performance (DBPF Engine V2 em Rust)";
+                        font-size: 14px;
+                        font-weight: 700;
+                        color: Theme.text_primary;
+                    }
+                    Text {
+                        text: "Unifica centenas de .package em partes organizadas com ordenação TGI para acelerar o jogo.";
+                        font-size: 12px;
+                        color: Theme.text_secondary;
+                    }
+                }
+            }
+        }
+
+        // Actions Bar
+        HorizontalLayout {
+            spacing: 12px;
+            PrimaryButton {
+                text: "📁 Selecionar Pasta de Origem";
+                clicked => { root.select_input_clicked(); }
+            }
+            PrimaryButton {
+                text: "📁 Selecionar Pasta de Destino";
+                btn_color: Theme.surface_header;
+                hover_color: Theme.surface_hover;
+                clicked => { root.select_output_clicked(); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            PrimaryButton {
+                text: "🚀 Iniciar Unificação";
+                enabled: !root.is_merging;
+                btn_color: Theme.accent_color;
+                clicked => { root.start_merge_clicked(); }
+            }
+        }
+
+        // File List
+        Card {
+            vertical-stretch: 1;
+            VerticalLayout {
+                padding: 12px;
+
+                if root.items.length == 0 : Text {
+                    text: "Nenhum arquivo .package selecionado para merge.";
+                    font-size: 13px;
+                    color: Theme.text_muted;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                for item in root.items : HorizontalLayout {
+                    height: 36px;
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    alignment: center;
+                    Text { text: "📦 " + item.name; font-size: 13px; color: Theme.text_primary; horizontal-stretch: 1; vertical-alignment: center; }
+                    Text { text: item.size_str; font-size: 12px; color: Theme.text_secondary; width: 100px; vertical-alignment: center; }
+                }
+            }
+        }
+
+        // Status Card
+        Card {
+            height: 40px;
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                alignment: center;
+                Text { text: root.merge_status; font-size: 13px; color: Theme.info; vertical-alignment: center; }
+            }
+        }
+        
+        if root.show_post_merge_dialog : Rectangle {
+            TouchArea {}
+            
+            Card {
+                width: 500px;
+                VerticalLayout {
+                    padding: 24px; spacing: 16px;
+                    Text { text: "✅ Merge Concluído"; font-size: 18px; font-weight: 700; color: Theme.text_primary; }
+                    Text { text: root.post_merge_message; font-size: 14px; color: Theme.text_secondary; wrap: word-wrap; }
+                    Text { text: "O que deseja fazer com os arquivos originais?"; font-size: 14px; font-weight: 700; color: Theme.text_primary; }
+                    
+                    VerticalLayout {
+                        spacing: 8px;
+                        PrimaryButton { text: "Manter Originais (Recomendado para Testes)"; btn_color: Theme.surface_header; clicked => { root.post_merge_action("keep"); } }
+                        PrimaryButton { text: "Desativar (.disabled)"; btn_color: Theme.warning; clicked => { root.post_merge_action("disable"); } }
+                        PrimaryButton { text: "Mover para Backup (Zip)"; btn_color: Theme.info; clicked => { root.post_merge_action("backup"); } }
+                        PrimaryButton { text: "Excluir Definitivamente"; btn_color: Theme.danger; clicked => { root.post_merge_action("delete"); } }
+                    }
+                }
+            }
+        }
+    }
+}

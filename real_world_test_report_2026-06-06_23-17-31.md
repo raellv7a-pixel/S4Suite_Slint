@@ -1,0 +1,224 @@
+# S4Suite Real World Test
+
+- Data: 2026-06-06_23-17-31
+- Downloads: `/home/raell/Downloads/NOVOS MODS`
+- Mods: `/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods`
+- Tray: `/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray`
+
+## Contagens
+
+- Antes: `{'active_packages': 20989, 'disabled_packages': 0, 'merged_packages': 8, 'scripts': 123}`
+- Depois: `{'active_packages': 10074, 'disabled_packages': 12701, 'merged_packages': 53, 'scripts': 123}`
+- Arquivos compactados analisados: 187
+- Packages soltos planejados: 503
+
+## Instalação
+
+- Loose packages: `{'success': True, 'message': 'Importação concluída.', 'stats': {'tray': 0, 'installed': 496, 'skipped': 0, 'duplicates': 7, 'blocked': 0}, 'planned': 503}`
+- Categorias loose: `{'female_clothing': 214, 'nsfw': 2, 'skin_details': 130, 'shoes': 29, 'my_cas': 48, 'male_clothing': 8, 'hair': 55, 'gameplay': 1, 'accessories': 14, 'sliders': 1, 'utilities': 1}`
+- Categorias em arquivos compactados: `{'my_cas': 109, 'shoes': 12, 'female_clothing': 973, 'accessories': 27, 'hair': 46, 'nsfw': 9, 'male_clothing': 43, 'kids_clothing': 1, 'skin_details': 63, 'defaults': 10, 'sliders': 7}`
+
+### Arquivos compactados
+
+- `14011764 (1).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 14, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `14011764.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `ADDISON ROMPER AND JUMPSUIT SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Agatha - Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Alana - Set (1).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Alana - Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 0, 'skipped': 0, 'duplicates': 3, 'blocked': 0} msg=Importação concluída.
+- `Amber Glow Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `AMERICANA SHORTS AND TOP SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `ANNA SWIMSUIT SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `ANTONIA DRESS SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `ANTONIA SWIMSUIT SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `ASH TANK TOP AND SKIRT SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Aurelia - Set (1).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Aurelia - Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 0, 'skipped': 0, 'duplicates': 3, 'blocked': 0} msg=Importação concluída.
+- `Aurum - Miranda hairstyle set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 4, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `basic sexy sportswear set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Belaloallure CC Pack.7z`: success=True stage=import_plan stats={'tray': 0, 'installed': 664, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Bergdorf - Apparel Collection 1.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 4, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `BROOKLYN TOP AND SHORTS SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `CAMO - Niajah F-Locs.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Capri Mood Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `CARLA SPORTY SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `CAROLINA PAJAMA SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `CheerNo - Construction Collection Part III.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Cherry Blossom Set - top and short.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Chloe Clothing Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Coach - Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Coastal Linen Set for men.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Cocoa Muse Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 4, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Court Glow Collection.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 4, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `cowgirl set - female.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Cozy Luxe Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `CRISTOFER set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Crop Top and Ruffle Lace-Up Mini Skirt.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Daddy (Set).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Daisy Shoes Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 1, 'skipped': 0, 'duplicates': 1, 'blocked': 0} msg=Importação concluída.
+- `Dayana (Set).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Diana Sleepwear set - top and short.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Dominus - Bracelet.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Elizabeth (Set).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `EMMA TANK TOP AND SKIRT SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Essential Swim Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `FIORELLA TOP AND PANTS SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `FOI - Suri Cardigan.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Full Cup Lingerie Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Guacuco - Set (1).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Guacuco - Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 0, 'skipped': 0, 'duplicates': 2, 'blocked': 0} msg=Importação concluída.
+- `HARPER set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 4, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Haze_Hair_All_In_One.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 4, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `HELLEN ROMPER ADN GYM BAG SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `HELLEN SKIRT, TOP AND DRESS SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Isla Linen Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `JAKAYLA collection.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 6, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Jazmin Casual Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `JENNY TOP AND SKIRT SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Jessi - Set (1).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Jessi - Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 0, 'skipped': 0, 'duplicates': 2, 'blocked': 0} msg=Importação concluída.
+- `jessica- fitted corset-style DRESS and top with a V-neck.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Kaitlyn Cutout Clothing Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 4, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `katy - Sexy set of corset-style top and leather mini skirt.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Korina (Set).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `LANNA TOP AND SKIRT SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Laura Leather Jacket and Pants.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Laura Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Lise Top.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `LOWEN - Hailey Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `LUNNA TANK TOP AND SHORTS SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Maiquetia (Set).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `MARINA DRESSES SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `MARINA TOP AND SHORTS SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `MARY SHORT AND MIDI DRESS SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Mia dress and top set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Military - Set (Female Version).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `MIRANDA OFFICE SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Miss Grand - Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Modern Doll Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Modern Office Muse Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Nadia - Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NEW slingshot bikini version- female v1 .zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 5, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Noble Necklace Set - Diamond Bead Chain Layered Necklaces.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Nova Doll Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Nova Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/Brior - Lori Set (Patreon Exclusive).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 5, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/CAMO - Canelle F-Locs.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/CAMO - Eurydice F-Locs.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 1, 'skipped': 0, 'duplicates': 1, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/CAMO - Grace F-Locs.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 1, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/CAMO - Liz F-Locs.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 1, 'skipped': 0, 'duplicates': 1, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/CAMO - Lucio Dreads.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/CAMO - Marvin Dreads.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/CAMO - Selita Braids.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 1, 'skipped': 0, 'duplicates': 1, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/CAMO - Sloan Dreads.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 1, 'skipped': 0, 'duplicates': 1, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/CATARSIS - Clueless Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/CATARSIS - Do It For Love Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 4, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/CATARSIS - Family Affair Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 4, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/CATARSIS - Gang Baby (Patreon Exclusive).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 5, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/DERNIER - Candice Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/DERNIER - Marilyn Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/DERNIER - Raye Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/EVELYN TANK TOP AND PANTS SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/Fio's - London Girls Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/FOI - Suri Cardigan.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 0, 'skipped': 0, 'duplicates': 2, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/FOI - Yumi Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 4, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/Klubb - Cherry Set (Patreon Exclusive).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/Klubb - McBling Set (Patreon Exclusive).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 6, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/Klubb - Purity Set (Patreon Exclusive).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/Klubb - Wednesday Spider Dress.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/leLAPEAU - Betty Skin (Patreon Exclusive).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/leLAPEAU - Freya Skin & Overlay (Patreon Exclusive).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/leLAPEAU - Helena Skin & Overlay.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/leLAPEAU - Kota Skin & Overlay (Patreon Exclusive).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/leLAPEAU - Rose Skin.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/leLAPEAU - Ryan Skin (Patreon Exclusive).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/leLAPEAU - Sandra Skin (Patreon Exclusive).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/LOWEN - Collection 02 (Patreon Exclusive).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 8, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/LOWEN - Hailey Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 0, 'skipped': 0, 'duplicates': 2, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/LOWEN - Tilda Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/MASK - Pre-Fall Sarah Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/MOGUL - Cruise Collection (Patreon Exclusive).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 10, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/MOWIE - Essentials Collection (Patreon Exclusive).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 8, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/MOWIE - Instinct Collection(1).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 7, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/MOWIE - Instinct Collection.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 0, 'skipped': 0, 'duplicates': 7, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/MOWIE - LOVE Collection.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 5, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/MOWIE - Siren Collection.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 11, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/Off-Line - Chloe Dress (Patreon Exclusive).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/Off-Line - Colson Set (Patreon Exclusive).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/Off-Line - Inferno Set (Patreon Exclusive).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/PARE - Love Set (Patreon Exclusive).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 1, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/POX - Nana Collection (Patreon Exclusive).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 9, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/RAMA - Angie Hair.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/RAMA - Brenda Hair.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/RAMA - Kim Jen Hair.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/RAMA - Valentine Hair.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/Rebel Gal - Samile Skin.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/SIMS PRONTOS/14011764 (1).zip`: success=True stage=import_plan stats={'tray': 5, 'installed': 15, 'skipped': 0, 'duplicates': 1, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/SIMS PRONTOS/14011764 (2).zip`: success=True stage=import_plan stats={'tray': 5, 'installed': 23, 'skipped': 0, 'duplicates': 1, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/SIMS PRONTOS/14011764 (3).zip`: success=True stage=import_plan stats={'tray': 5, 'installed': 18, 'skipped': 0, 'duplicates': 5, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/SIMS PRONTOS/14011764 (4).zip`: success=True stage=import_plan stats={'tray': 5, 'installed': 16, 'skipped': 0, 'duplicates': 5, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/SIMS PRONTOS/14011764 (5).zip`: success=True stage=import_plan stats={'tray': 5, 'installed': 16, 'skipped': 0, 'duplicates': 7, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/SIMS PRONTOS/14011764.zip`: success=True stage=import_plan stats={'tray': 5, 'installed': 23, 'skipped': 0, 'duplicates': 1, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/STREET MOOD COLLECTION.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 6, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `NOVOS MODS Z/YALLA - Silk Desire Collection (Patreon Exclusive).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 1, 'blocked': 0} msg=Importação concluída.
+- `Off-Line - Colson Set (Patreon Exclusive).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 0, 'skipped': 0, 'duplicates': 3, 'blocked': 0} msg=Importação concluída.
+- `Off-Shoulder Top & Balloon Skirt.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Office Chic Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Office Siren SET - EMILI SKIRT AND TOP.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Pastel Heat Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Penelope Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Polka Bow Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Sasha Clothing Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `SASHA TOP AND SKIRT SET.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Sebas - Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Seraphina - Bracelet.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Set - Bouquet Collection.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Set - Floral Maxi H-Collection.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `SET-Afterglow Collection.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `SET-Bride Lingerie.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `SET-Chill Outfit.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `SET-City Obsession Outfit - BD1668.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `SET-Clean Girl Collection.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 5, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `SET-Cozy Pyjama.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `SET-Golden Hour Outfit.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `SET-Linen Couple Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 4, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `SET-Noir Spark Outfit.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `SET-Sleek Fit Outfit.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `SET-Tropical Bikini Collection.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 4, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Sherry (Set).zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `simdulgence_BodyHairFemale_20260121.zip`: success=True stage=empty stats={} msg=Sem Tray/package útil
+- `simdulgence_Condoms_SmoothSensations_20260217.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 1, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `simdulgence_RazorBumps_20250803.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 1, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `simdulgence_SimpleBreasts_v2_20260305.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `simdulgence_SimplePeniz_v2_20260409.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 0, 'skipped': 0, 'duplicates': 2, 'blocked': 0} msg=Importação concluída.
+- `simdulgence_SimplePenizExclusives_v2_20260202.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 0, 'skipped': 0, 'duplicates': 1, 'blocked': 0} msg=Importação concluída.
+- `simdulgence_SimplePenizFemaleExclusives_v2_20260331.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 1, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `simdulgence_SimplePiercings_20260404.zip`: success=True stage=empty stats={} msg=Sem Tray/package útil
+- `Sleek Allure Set DO.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 4, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Soccer Uniform - Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Soft Form Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Starluxe Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Statement Chic Set DO168.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Swanlight - Bracelet.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Sweet Vibe Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Teddy Soft Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 4, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Tinikijima - Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 4, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Turtleneck  Top.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Vanessa - Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Vittoria - Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 3, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+- `Volleyball Uniform - Set.zip`: success=True stage=import_plan stats={'tray': 0, 'installed': 2, 'skipped': 0, 'duplicates': 0, 'blocked': 0} msg=Importação concluída.
+
+## Merges
+
+- `10a Personal CAS/1 Female Clothing` -> `S4Suite_Merged/Real_Test_2026-06-06_23-17-31/1 Female Clothing`: success=True input=3202 disabled=3202 failures=0
+- `10a Personal CAS/2a Male Clothing` -> `S4Suite_Merged/Real_Test_2026-06-06_23-17-31/2a Male Clothing`: success=True input=1113 disabled=1113 failures=0
+- `10a Personal CAS/2b Femboy Clothing` -> `S4Suite_Merged/Real_Test_2026-06-06_23-17-31/2b Femboy Clothing`: success=True input=509 disabled=509 failures=0
+- `10a Personal CAS/3 Kids Clothing` -> `S4Suite_Merged/Real_Test_2026-06-06_23-17-31/3 Kids Clothing`: success=True input=1955 disabled=1955 failures=0
+- `10a Personal CAS/4 Hair` -> `S4Suite_Merged/Real_Test_2026-06-06_23-17-31/4 Hair`: success=True input=1819 disabled=1819 failures=0
+- `10a Personal CAS/6 Skin Details` -> `S4Suite_Merged/Real_Test_2026-06-06_23-17-31/6 Skin Details`: success=True input=1509 disabled=1509 failures=0
+- `10a Personal CAS/8 Accessories` -> `S4Suite_Merged/Real_Test_2026-06-06_23-17-31/8 Accessories`: success=True input=1188 disabled=1188 failures=0
+- `10a Personal CAS/10 Shoes` -> `S4Suite_Merged/Real_Test_2026-06-06_23-17-31/10 Shoes`: success=True input=493 disabled=493 failures=0
+- `16 My CAS` -> `S4Suite_Merged/Real_Test_2026-06-06_23-17-31/16 My CAS`: success=True input=913 disabled=913 failures=0
+
+### Merges pulados
+

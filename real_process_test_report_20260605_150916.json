@@ -1,0 +1,1117 @@
+{
+  "run_id": "20260605_150916",
+  "sims_path": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4",
+  "backup_mods": "/home/raell/Downloads/S4Suite_Backups/Mods_backup_20260605_143900",
+  "backup_tray": "/home/raell/Downloads/S4Suite_Backups/Tray_backup_20260605_143900",
+  "before": {
+    "mods": {
+      "total_files": 21334,
+      "total_size": 115996044533,
+      "by_ext": {
+        ".cfg": 5,
+        ".log": 10,
+        ".ts4script": 123,
+        ".txt": 50,
+        ".package": 20987,
+        ".dat": 3,
+        "<no_ext>": 2,
+        ".ini": 6,
+        ".png": 128,
+        ".json": 2,
+        ".jpg": 1,
+        ".householdbinary": 2,
+        ".trayitem": 2,
+        ".sgi": 2,
+        ".hhi": 4,
+        ".off": 1,
+        ".pdf": 5,
+        ".uniform": 1
+      }
+    },
+    "tray": {
+      "total_files": 65,
+      "total_size": 4664584,
+      "by_ext": {
+        ".householdbinary": 9,
+        ".trayitem": 9,
+        ".sgi": 29,
+        ".hhi": 18
+      }
+    }
+  },
+  "classification": {
+    "direct_mod_files": 93,
+    "install_archives": 53,
+    "sim_import_archives": 6,
+    "archives_total": 59
+  },
+  "install": {
+    "total": 146,
+    "success": 146,
+    "needs_decision": 0,
+    "needs_selection": 0,
+    "failed": 0,
+    "items": [
+      {
+        "file": "ANGISSI Pamela Eyes.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/angissi_pamela_eyes"
+      },
+      {
+        "file": "AviGlam_AnimeEyes.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/aviglam_animeeyes"
+      },
+      {
+        "file": "AviGlam_AphroditeEyes.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/aviglam_aphroditeeyes"
+      },
+      {
+        "file": "AviGlam_DaywalkerEyes.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/aviglam_daywalkereyes"
+      },
+      {
+        "file": "AviGlam_DeanSkin.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/aviglam_deanskin"
+      },
+      {
+        "file": "AviGlam_DeliriumEyes.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/aviglam_deliriumeyes"
+      },
+      {
+        "file": "AviGlam_DiamondEyes.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/aviglam_diamondeyes"
+      },
+      {
+        "file": "AviGlam_GaiaEyes.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/aviglam_gaiaeyes"
+      },
+      {
+        "file": "AviGlam_HalloweenEyes.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/aviglam_halloweeneyes"
+      },
+      {
+        "file": "AviGlam_LeonSkin.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/aviglam_leonskin"
+      },
+      {
+        "file": "AviGlam_MoonshineEyes.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/aviglam_moonshineeyes"
+      },
+      {
+        "file": "AviGlam_SincereEyes.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/aviglam_sincereeyes"
+      },
+      {
+        "file": "Brior_Akari_Sweater_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/brior_akari_sweater_sample"
+      },
+      {
+        "file": "Brior_Cleo_Dress_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/brior_cleo_dress_sample"
+      },
+      {
+        "file": "Brior_Harper_ShortDress_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/brior_harper_shortdress_sample"
+      },
+      {
+        "file": "Brior_Kiera_Dress_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/brior_kiera_dress_sample"
+      },
+      {
+        "file": "Brior_Makayla_Dress_TSRSample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/brior_makayla_dress_tsrsample"
+      },
+      {
+        "file": "CATARSIS_Redrum_Top_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/catarsis_redrum_top_sample"
+      },
+      {
+        "file": "DAPHS - Mini Shorts C1779 - TSR.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/daphs___mini_shorts_c1779___tsr"
+      },
+      {
+        "file": "DAPHS - Mock Neck Split Hem Tank Top C1782 - TSR.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/daphs___mock_neck_split_hem_tank_top_c1782___tsr"
+      },
+      {
+        "file": "DAPHS - Mock Neck T-shirt C1778 - TSR.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/daphs___mock_neck_t_shirt_c1778___tsr"
+      },
+      {
+        "file": "DAPHS - Satin Skirt C1781 - TSR.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/daphs___satin_skirt_c1781___tsr"
+      },
+      {
+        "file": "DAPHS - Satin Top C1780 - TSR.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/daphs___satin_top_c1780___tsr"
+      },
+      {
+        "file": "DERNIER_Bruna_Gown_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/dernier_bruna_gown_sample"
+      },
+      {
+        "file": "DERNIER_Cher_Jumpsuit.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/dernier_cher_jumpsuit"
+      },
+      {
+        "file": "DERNIER_Kristen_Gown_TSR.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/dernier_kristen_gown_tsr"
+      },
+      {
+        "file": "GASET_Arlet_Top_TSRSample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/gaset_arlet_top_tsrsample"
+      },
+      {
+        "file": "GASET_Francis_Shirt_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/gaset_francis_shirt_sample"
+      },
+      {
+        "file": "GASET_Joan_Jacket_TSRSample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/gaset_joan_jacket_tsrsample"
+      },
+      {
+        "file": "GASET_Junior_Sweater_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/gaset_junior_sweater_sample"
+      },
+      {
+        "file": "GASET_Miller_Sweater_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/gaset_miller_sweater_sample"
+      },
+      {
+        "file": "JACOBS_Bonnie_Dress_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/jacobs_bonnie_dress_sample"
+      },
+      {
+        "file": "JACOBS_SashaMiniDress.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/jacobs_sashaminidress"
+      },
+      {
+        "file": "JustDraven_BaseLayer_SportsBra_Solid_AF&AM.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/justdraven_baselayer_sportsbra_solid_af_am"
+      },
+      {
+        "file": "Klubb_CarolSweater.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/klubb_carolsweater"
+      },
+      {
+        "file": "Klubb_Regina_Bra_TSRSample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/klubb_regina_bra_tsrsample"
+      },
+      {
+        "file": "LABBEL - Skin [HAZEL] .package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/labbel___skin__hazel"
+      },
+      {
+        "file": "LOWEN_Ariana_Skirt_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/lowen_ariana_skirt_sample"
+      },
+      {
+        "file": "LOWEN_Danera_Boots.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/lowen_danera_boots"
+      },
+      {
+        "file": "LOWEN_Norma_Dress.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/lowen_norma_dress"
+      },
+      {
+        "file": "LOWEN_Sabrina_Dress.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/lowen_sabrina_dress"
+      },
+      {
+        "file": "Leahlillith_MirienHairstyle_MM.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/leahlillith_mirienhairstyle_mm"
+      },
+      {
+        "file": "Linavees - HERITAGE SET - SKIRT.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/linavees___heritage_set___skirt"
+      },
+      {
+        "file": "Linavees - HERITAGE SET - TOP.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/linavees___heritage_set___top"
+      },
+      {
+        "file": "MASK_Dexter_Top_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/mask_dexter_top_sample"
+      },
+      {
+        "file": "MASK_Jayda_Top_TSRSample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/mask_jayda_top_tsrsample"
+      },
+      {
+        "file": "MASK_Jill_Top_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/mask_jill_top_sample"
+      },
+      {
+        "file": "MASK_Skyms_Briefs.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/mask_skyms_briefs"
+      },
+      {
+        "file": "MCB_SunThightTattooLeftLeg.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/mcb_sunthighttattooleftleg"
+      },
+      {
+        "file": "MERCH_Ajani_CropTop_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/merch_ajani_croptop_sample"
+      },
+      {
+        "file": "MERCH_Shelly_Top_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/merch_shelly_top_sample"
+      },
+      {
+        "file": "MERCH_Sua_CorsetSuit.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/merch_sua_corsetsuit"
+      },
+      {
+        "file": "MIIOE HAIR TS4 AZ0520.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/miioe_hair_ts4_az0520"
+      },
+      {
+        "file": "McLayneSims_HasteDenimJeans.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/mclaynesims_hastedenimjeans"
+      },
+      {
+        "file": "MysteriousOoLaceOverlayStripeDress0106.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/mysteriousoolaceoverlaystripedress0106"
+      },
+      {
+        "file": "Nightcrawler AF Hair LAKE Style A.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/nightcrawler_af_hair_lake_style_a"
+      },
+      {
+        "file": "Off-Line_Alix_Skirt_TSRSample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/off_line_alix_skirt_tsrsample"
+      },
+      {
+        "file": "Off-Line_Demi_Bikini_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/off_line_demi_bikini_sample"
+      },
+      {
+        "file": "Off-Line_Dynamo_Top_TSRSample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/off_line_dynamo_top_tsrsample"
+      },
+      {
+        "file": "Off-Line_Judit_Bodysuit_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/off_line_judit_bodysuit_sample"
+      },
+      {
+        "file": "Off-Line_Monica_Dress.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/off_line_monica_dress"
+      },
+      {
+        "file": "Off-Line_Tessa_Cardigan_TSRSample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/off_line_tessa_cardigan_tsrsample"
+      },
+      {
+        "file": "Off-Line_Zoella_Bikini_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/off_line_zoella_bikini_sample"
+      },
+      {
+        "file": "PARE_Cece_MiniSkirt_TSRSample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/pare_cece_miniskirt_tsrsample"
+      },
+      {
+        "file": "POX_Claire_Shirt_TSRSample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/pox_claire_shirt_tsrsample"
+      },
+      {
+        "file": "POX_Daria_Skirt_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/pox_daria_skirt_sample"
+      },
+      {
+        "file": "POX_DoveDress.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/pox_dovedress"
+      },
+      {
+        "file": "POX_Mozzy_Shorts_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/pox_mozzy_shorts_sample"
+      },
+      {
+        "file": "RAMA_Adora_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rama_adora_sample"
+      },
+      {
+        "file": "RAMA_BomiHair_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rama_bomihair_sample"
+      },
+      {
+        "file": "RAMA_BuildABella_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rama_buildabella_sample"
+      },
+      {
+        "file": "RAMA_EveHair_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rama_evehair_sample"
+      },
+      {
+        "file": "RAMA_Isa_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rama_isa_sample"
+      },
+      {
+        "file": "RAMA_JeilynnHair_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rama_jeilynnhair_sample"
+      },
+      {
+        "file": "RAMA_JoyHair_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rama_joyhair_sample"
+      },
+      {
+        "file": "RAMA_Luna_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rama_luna_sample"
+      },
+      {
+        "file": "RAMA_MadsHair_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rama_madshair_sample"
+      },
+      {
+        "file": "RAMA_Mathilde_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rama_mathilde_sample"
+      },
+      {
+        "file": "RAMA_Nikkie_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rama_nikkie_sample"
+      },
+      {
+        "file": "RebelGal_AdutSkin.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rebelgal_adutskin"
+      },
+      {
+        "file": "RebelGal_BrookeSkin.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rebelgal_brookeskin"
+      },
+      {
+        "file": "RebelGal_CandiceSkin.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rebelgal_candiceskin"
+      },
+      {
+        "file": "RebelGal_ElsaSkin.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rebelgal_elsaskin"
+      },
+      {
+        "file": "RebelGal_Madison_Skin.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rebelgal_madison_skin"
+      },
+      {
+        "file": "SOREN_DuaButterfly_Gown.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/soren_duabutterfly_gown"
+      },
+      {
+        "file": "SOREN_Nocturne_MonotDress.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/soren_nocturne_monotdress"
+      },
+      {
+        "file": "Valentine_Top_Ava.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/valentine_top_ava"
+      },
+      {
+        "file": "YALLA_Belle_Top_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/yalla_belle_top_sample"
+      },
+      {
+        "file": "YALLA_Erica_Bodysuit_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/yalla_erica_bodysuit_sample"
+      },
+      {
+        "file": "YALLA_Wonda_Top_Sample.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/yalla_wonda_top_sample"
+      },
+      {
+        "file": "ZN top TS4 20260527(suits jacket).package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/zn_top_ts4_20260527_suits_jacket"
+      },
+      {
+        "file": "sclub_ts4_hair_ 020626.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/sclub_ts4_hair__020626"
+      },
+      {
+        "file": "sclub_ts4_hair_ 040626.package",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/sclub_ts4_hair__040626"
+      },
+      {
+        "file": "NOVOS MODS Z/Brior - Lori Set (Patreon Exclusive).zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/brior___lori_set__patreon_exclusive"
+      },
+      {
+        "file": "NOVOS MODS Z/CAMO - Canelle F-Locs.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/camo___canelle_f_locs"
+      },
+      {
+        "file": "NOVOS MODS Z/CAMO - Eurydice F-Locs.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/camo___eurydice_f_locs"
+      },
+      {
+        "file": "NOVOS MODS Z/CAMO - Grace F-Locs.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/camo___grace_f_locs"
+      },
+      {
+        "file": "NOVOS MODS Z/CAMO - Liz F-Locs.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/camo___liz_f_locs"
+      },
+      {
+        "file": "NOVOS MODS Z/CAMO - Lucio Dreads.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/camo___lucio_dreads"
+      },
+      {
+        "file": "NOVOS MODS Z/CAMO - Marvin Dreads.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/camo___marvin_dreads"
+      },
+      {
+        "file": "NOVOS MODS Z/CAMO - Selita Braids.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/camo___selita_braids"
+      },
+      {
+        "file": "NOVOS MODS Z/CAMO - Sloan Dreads.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/camo___sloan_dreads"
+      },
+      {
+        "file": "NOVOS MODS Z/CATARSIS - Clueless Set.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/catarsis___clueless_set"
+      },
+      {
+        "file": "NOVOS MODS Z/CATARSIS - Do It For Love Set.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/catarsis___do_it_for_love_set"
+      },
+      {
+        "file": "NOVOS MODS Z/CATARSIS - Family Affair Set.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/catarsis___family_affair_set"
+      },
+      {
+        "file": "NOVOS MODS Z/CATARSIS - Gang Baby (Patreon Exclusive).zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/catarsis___gang_baby__patreon_exclusive"
+      },
+      {
+        "file": "NOVOS MODS Z/DERNIER - Candice Set.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/dernier___candice_set"
+      },
+      {
+        "file": "NOVOS MODS Z/DERNIER - Marilyn Set.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/dernier___marilyn_set"
+      },
+      {
+        "file": "NOVOS MODS Z/DERNIER - Raye Set.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/dernier___raye_set"
+      },
+      {
+        "file": "NOVOS MODS Z/EVELYN TANK TOP AND PANTS SET.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/evelyn_tank_top_and_pants_set"
+      },
+      {
+        "file": "NOVOS MODS Z/FOI - Suri Cardigan.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/foi___suri_cardigan"
+      },
+      {
+        "file": "NOVOS MODS Z/FOI - Yumi Set.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/foi___yumi_set"
+      },
+      {
+        "file": "NOVOS MODS Z/Fio's - London Girls Set.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/fio_s___london_girls_set"
+      },
+      {
+        "file": "NOVOS MODS Z/Klubb - Cherry Set (Patreon Exclusive).zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/klubb___cherry_set__patreon_exclusive"
+      },
+      {
+        "file": "NOVOS MODS Z/Klubb - McBling Set (Patreon Exclusive).zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/klubb___mcbling_set__patreon_exclusive"
+      },
+      {
+        "file": "NOVOS MODS Z/Klubb - Purity Set (Patreon Exclusive).zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/klubb___purity_set__patreon_exclusive"
+      },
+      {
+        "file": "NOVOS MODS Z/Klubb - Wednesday Spider Dress.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/klubb___wednesday_spider_dress"
+      },
+      {
+        "file": "NOVOS MODS Z/LOWEN - Collection 02 (Patreon Exclusive).zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/lowen___collection_02__patreon_exclusive"
+      },
+      {
+        "file": "NOVOS MODS Z/LOWEN - Hailey Set.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/lowen___hailey_set"
+      },
+      {
+        "file": "NOVOS MODS Z/LOWEN - Tilda Set.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/lowen___tilda_set"
+      },
+      {
+        "file": "NOVOS MODS Z/MASK - Pre-Fall Sarah Set.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/mask___pre_fall_sarah_set"
+      },
+      {
+        "file": "NOVOS MODS Z/MOGUL - Cruise Collection (Patreon Exclusive).zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/mogul___cruise_collection__patreon_exclusive"
+      },
+      {
+        "file": "NOVOS MODS Z/MOWIE - Essentials Collection (Patreon Exclusive).zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/mowie___essentials_collection__patreon_exclusive"
+      },
+      {
+        "file": "NOVOS MODS Z/MOWIE - Instinct Collection(1).zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/mowie___instinct_collection_1"
+      },
+      {
+        "file": "NOVOS MODS Z/MOWIE - Instinct Collection.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/mowie___instinct_collection"
+      },
+      {
+        "file": "NOVOS MODS Z/MOWIE - LOVE Collection.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/mowie___love_collection"
+      },
+      {
+        "file": "NOVOS MODS Z/MOWIE - Siren Collection.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/mowie___siren_collection"
+      },
+      {
+        "file": "NOVOS MODS Z/Off-Line - Chloe Dress (Patreon Exclusive).zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/off_line___chloe_dress__patreon_exclusive"
+      },
+      {
+        "file": "NOVOS MODS Z/Off-Line - Colson Set (Patreon Exclusive).zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/off_line___colson_set__patreon_exclusive"
+      },
+      {
+        "file": "NOVOS MODS Z/Off-Line - Inferno Set (Patreon Exclusive).zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/off_line___inferno_set__patreon_exclusive"
+      },
+      {
+        "file": "NOVOS MODS Z/PARE - Love Set (Patreon Exclusive).zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/pare___love_set__patreon_exclusive"
+      },
+      {
+        "file": "NOVOS MODS Z/POX - Nana Collection (Patreon Exclusive).zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/pox___nana_collection__patreon_exclusive"
+      },
+      {
+        "file": "NOVOS MODS Z/RAMA - Angie Hair.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rama___angie_hair"
+      },
+      {
+        "file": "NOVOS MODS Z/RAMA - Brenda Hair.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rama___brenda_hair"
+      },
+      {
+        "file": "NOVOS MODS Z/RAMA - Kim Jen Hair.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rama___kim_jen_hair"
+      },
+      {
+        "file": "NOVOS MODS Z/RAMA - Valentine Hair.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rama___valentine_hair"
+      },
+      {
+        "file": "NOVOS MODS Z/Rebel Gal - Samile Skin.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/rebel_gal___samile_skin"
+      },
+      {
+        "file": "NOVOS MODS Z/STREET MOOD COLLECTION.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/street_mood_collection"
+      },
+      {
+        "file": "NOVOS MODS Z/YALLA - Silk Desire Collection (Patreon Exclusive).zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/yalla___silk_desire_collection__patreon_exclusive"
+      },
+      {
+        "file": "NOVOS MODS Z/leLAPEAU - Betty Skin (Patreon Exclusive).zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/lelapeau___betty_skin__patreon_exclusive"
+      },
+      {
+        "file": "NOVOS MODS Z/leLAPEAU - Freya Skin & Overlay (Patreon Exclusive).zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/lelapeau___freya_skin___overlay__patreon_exclusive"
+      },
+      {
+        "file": "NOVOS MODS Z/leLAPEAU - Helena Skin & Overlay.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/lelapeau___helena_skin___overlay"
+      },
+      {
+        "file": "NOVOS MODS Z/leLAPEAU - Kota Skin & Overlay (Patreon Exclusive).zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/lelapeau___kota_skin___overlay__patreon_exclusive"
+      },
+      {
+        "file": "NOVOS MODS Z/leLAPEAU - Rose Skin.zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/lelapeau___rose_skin"
+      },
+      {
+        "file": "NOVOS MODS Z/leLAPEAU - Ryan Skin (Patreon Exclusive).zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/lelapeau___ryan_skin__patreon_exclusive"
+      },
+      {
+        "file": "NOVOS MODS Z/leLAPEAU - Sandra Skin (Patreon Exclusive).zip",
+        "status": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos/lelapeau___sandra_skin__patreon_exclusive"
+      }
+    ]
+  },
+  "index_error": null,
+  "import": {
+    "total": 6,
+    "success": 6,
+    "failed": 0,
+    "tray": 30,
+    "installed": 120,
+    "skipped": 11,
+    "items": [
+      {
+        "file": "NOVOS MODS Z/SIMS PRONTOS/14011764 (1).zip",
+        "success": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Imported_Sims/14011764 1",
+        "stats": {
+          "tray": 5,
+          "installed": 15,
+          "skipped": 1
+        }
+      },
+      {
+        "file": "NOVOS MODS Z/SIMS PRONTOS/14011764 (2).zip",
+        "success": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Imported_Sims/14011764 2",
+        "stats": {
+          "tray": 5,
+          "installed": 23,
+          "skipped": 1
+        }
+      },
+      {
+        "file": "NOVOS MODS Z/SIMS PRONTOS/14011764 (3).zip",
+        "success": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Imported_Sims/14011764 3",
+        "stats": {
+          "tray": 5,
+          "installed": 18,
+          "skipped": 5
+        }
+      },
+      {
+        "file": "NOVOS MODS Z/SIMS PRONTOS/14011764 (4).zip",
+        "success": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Imported_Sims/14011764 4",
+        "stats": {
+          "tray": 5,
+          "installed": 19,
+          "skipped": 2
+        }
+      },
+      {
+        "file": "NOVOS MODS Z/SIMS PRONTOS/14011764 (5).zip",
+        "success": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Imported_Sims/14011764 5",
+        "stats": {
+          "tray": 5,
+          "installed": 21,
+          "skipped": 2
+        }
+      },
+      {
+        "file": "NOVOS MODS Z/SIMS PRONTOS/14011764.zip",
+        "success": true,
+        "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Imported_Sims/14011764",
+        "stats": {
+          "tray": 5,
+          "installed": 24,
+          "skipped": 0
+        }
+      }
+    ]
+  },
+  "after_import": {
+    "mods": {
+      "total_files": 21735,
+      "total_size": 119282081609,
+      "by_ext": {
+        ".cfg": 5,
+        ".log": 10,
+        ".ts4script": 123,
+        ".txt": 50,
+        ".package": 21388,
+        ".dat": 3,
+        "<no_ext>": 2,
+        ".ini": 6,
+        ".png": 128,
+        ".json": 2,
+        ".jpg": 1,
+        ".householdbinary": 2,
+        ".trayitem": 2,
+        ".sgi": 2,
+        ".hhi": 4,
+        ".off": 1,
+        ".pdf": 5,
+        ".uniform": 1
+      }
+    },
+    "tray": {
+      "total_files": 95,
+      "total_size": 5388900,
+      "by_ext": {
+        ".householdbinary": 15,
+        ".trayitem": 15,
+        ".sgi": 35,
+        ".hhi": 30
+      }
+    }
+  },
+  "merge_root": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/S4Suite_Merge_Tests_20260605_150916",
+  "merge": [
+    {
+      "name": "new_installs_00_Triagem_Novos",
+      "input_dir": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/00_Triagem_Novos",
+      "output_dir": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/S4Suite_Merge_Tests_20260605_150916/new_installs_00_Triagem_Novos",
+      "result": {
+        "success": true,
+        "partial": false,
+        "success_count": 281,
+        "skipped_count": 0,
+        "failed_files": [],
+        "parts": 5,
+        "report_path": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/S4Suite_Merge_Tests_20260605_150916/new_installs_00_Triagem_Novos/merge_report_20260605_150950_852008.json"
+      },
+      "validation": {
+        "parts": 5,
+        "details": [
+          {
+            "file": "Merged_Content_20260605_150950_852008_Part001.package",
+            "size": 482863068,
+            "resources": 1701
+          },
+          {
+            "file": "Merged_Content_20260605_150950_852008_Part002.package",
+            "size": 483214667,
+            "resources": 1455
+          },
+          {
+            "file": "Merged_Content_20260605_150950_852008_Part003.package",
+            "size": 483227030,
+            "resources": 1421
+          },
+          {
+            "file": "Merged_Content_20260605_150950_852008_Part004.package",
+            "size": 483194174,
+            "resources": 1486
+          },
+          {
+            "file": "Merged_Content_20260605_150950_852008_Part005.package",
+            "size": 477227798,
+            "resources": 7489
+          }
+        ],
+        "validation_errors": [],
+        "total_resources": 13552,
+        "unique_resources": 13552,
+        "duplicate_resource_keys": 0,
+        "reports": [
+          "merge_report_20260605_150950_852008.json"
+        ]
+      },
+      "last_logs": [
+        "    Gravando recursos: 7000/7489...",
+        "    Gravando recursos: 7100/7489...",
+        "    Gravando recursos: 7200/7489...",
+        "    Gravando recursos: 7300/7489...",
+        "    Gravando recursos: 7400/7489...",
+        "\n✅ CONCLUÍDO! 281 arquivos unidos em 5 partes."
+      ]
+    },
+    {
+      "name": "1_Utilities",
+      "input_dir": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/1 Utilities",
+      "output_dir": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/S4Suite_Merge_Tests_20260605_150916/1_Utilities",
+      "result": {
+        "success": true,
+        "partial": false,
+        "success_count": 15,
+        "skipped_count": 0,
+        "failed_files": [],
+        "parts": 1,
+        "report_path": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/S4Suite_Merge_Tests_20260605_150916/1_Utilities/merge_report_20260605_150952_728477.json"
+      },
+      "validation": {
+        "parts": 1,
+        "details": [
+          {
+            "file": "Merged_Content_20260605_150952_728477_Part001.package",
+            "size": 6064085,
+            "resources": 1178
+          }
+        ],
+        "validation_errors": [],
+        "total_resources": 1178,
+        "unique_resources": 1178,
+        "duplicate_resource_keys": 0,
+        "reports": [
+          "merge_report_20260605_150952_728477.json"
+        ]
+      },
+      "last_logs": [
+        "    Gravando recursos: 700/1178...",
+        "    Gravando recursos: 800/1178...",
+        "    Gravando recursos: 900/1178...",
+        "    Gravando recursos: 1000/1178...",
+        "    Gravando recursos: 1100/1178...",
+        "\n✅ CONCLUÍDO! 15 arquivos unidos em 1 partes."
+      ]
+    },
+    {
+      "name": "14_Bug_Fixes",
+      "input_dir": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/14 Bug Fixes",
+      "output_dir": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/S4Suite_Merge_Tests_20260605_150916/14_Bug_Fixes",
+      "result": {
+        "success": true,
+        "partial": false,
+        "success_count": 75,
+        "skipped_count": 0,
+        "failed_files": [],
+        "parts": 1,
+        "report_path": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/S4Suite_Merge_Tests_20260605_150916/14_Bug_Fixes/merge_report_20260605_150952_760900.json"
+      },
+      "validation": {
+        "parts": 1,
+        "details": [
+          {
+            "file": "Merged_Content_20260605_150952_760900_Part001.package",
+            "size": 2776986,
+            "resources": 822
+          }
+        ],
+        "validation_errors": [],
+        "total_resources": 822,
+        "unique_resources": 822,
+        "duplicate_resource_keys": 0,
+        "reports": [
+          "merge_report_20260605_150952_760900.json"
+        ]
+      },
+      "last_logs": [
+        "    Gravando recursos: 400/822...",
+        "    Gravando recursos: 500/822...",
+        "    Gravando recursos: 600/822...",
+        "    Gravando recursos: 700/822...",
+        "    Gravando recursos: 800/822...",
+        "\n✅ CONCLUÍDO! 75 arquivos unidos em 1 partes."
+      ]
+    },
+    {
+      "name": "15_Sliders",
+      "input_dir": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/15 Sliders",
+      "output_dir": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/S4Suite_Merge_Tests_20260605_150916/15_Sliders",
+      "result": {
+        "success": true,
+        "partial": false,
+        "success_count": 142,
+        "skipped_count": 0,
+        "failed_files": [],
+        "parts": 1,
+        "report_path": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/S4Suite_Merge_Tests_20260605_150916/15_Sliders/merge_report_20260605_150952_774484.json"
+      },
+      "validation": {
+        "parts": 1,
+        "details": [
+          {
+            "file": "Merged_Content_20260605_150952_774484_Part001.package",
+            "size": 101339584,
+            "resources": 2225
+          }
+        ],
+        "validation_errors": [],
+        "total_resources": 2225,
+        "unique_resources": 2225,
+        "duplicate_resource_keys": 0,
+        "reports": [
+          "merge_report_20260605_150952_774484.json"
+        ]
+      },
+      "last_logs": [
+        "    Gravando recursos: 1800/2225...",
+        "    Gravando recursos: 1900/2225...",
+        "    Gravando recursos: 2000/2225...",
+        "    Gravando recursos: 2100/2225...",
+        "    Gravando recursos: 2200/2225...",
+        "\n✅ CONCLUÍDO! 142 arquivos unidos em 1 partes."
+      ]
+    },
+    {
+      "name": "7_Default_Replacements",
+      "input_dir": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/7 Default Replacements",
+      "output_dir": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/S4Suite_Merge_Tests_20260605_150916/7_Default_Replacements",
+      "result": {
+        "success": true,
+        "partial": false,
+        "success_count": 313,
+        "skipped_count": 0,
+        "failed_files": [],
+        "parts": 2,
+        "report_path": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/S4Suite_Merge_Tests_20260605_150916/7_Default_Replacements/merge_report_20260605_150952_883128.json"
+      },
+      "validation": {
+        "parts": 2,
+        "details": [
+          {
+            "file": "Merged_Content_20260605_150952_883128_Part001.package",
+            "size": 483587842,
+            "resources": 12820
+          },
+          {
+            "file": "Merged_Content_20260605_150952_883128_Part002.package",
+            "size": 462586369,
+            "resources": 23416
+          }
+        ],
+        "validation_errors": [],
+        "total_resources": 36236,
+        "unique_resources": 36236,
+        "duplicate_resource_keys": 0,
+        "reports": [
+          "merge_report_20260605_150952_883128.json"
+        ]
+      },
+      "last_logs": [
+        "    Gravando recursos: 23000/23416...",
+        "    Gravando recursos: 23100/23416...",
+        "    Gravando recursos: 23200/23416...",
+        "    Gravando recursos: 23300/23416...",
+        "    Gravando recursos: 23400/23416...",
+        "\n✅ CONCLUÍDO! 313 arquivos unidos em 2 partes."
+      ]
+    }
+  ]
+}

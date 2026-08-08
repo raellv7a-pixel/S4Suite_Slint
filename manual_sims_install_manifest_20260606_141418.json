@@ -1,0 +1,873 @@
+{
+  "run_id": "20260606_141418",
+  "mode": "manual_without_s4suite_importer",
+  "sources_dir": "/home/raell/Downloads/NOVOS MODS/NOVOS MODS Z/SIMS PRONTOS",
+  "archives": [
+    "/home/raell/Downloads/NOVOS MODS/NOVOS MODS Z/SIMS PRONTOS/14011764 (1).zip",
+    "/home/raell/Downloads/NOVOS MODS/NOVOS MODS Z/SIMS PRONTOS/14011764 (2).zip",
+    "/home/raell/Downloads/NOVOS MODS/NOVOS MODS Z/SIMS PRONTOS/14011764 (3).zip",
+    "/home/raell/Downloads/NOVOS MODS/NOVOS MODS Z/SIMS PRONTOS/14011764 (4).zip",
+    "/home/raell/Downloads/NOVOS MODS/NOVOS MODS Z/SIMS PRONTOS/14011764 (5).zip",
+    "/home/raell/Downloads/NOVOS MODS/NOVOS MODS Z/SIMS PRONTOS/14011764.zip"
+  ],
+  "target_mod_root": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418",
+  "manifest_path": "/home/raell/Projetos/S4Suite_Qt/manual_sims_install_manifest_20260606_141418.json",
+  "created_dirs": [
+    "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418",
+    "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 1",
+    "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2",
+    "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3",
+    "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4",
+    "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5",
+    "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764"
+  ],
+  "copied_tray": [
+    {
+      "archive": "14011764 (1).zip",
+      "source": "0x97932c03!0x00ea169c05042908.hhi",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x97932c03!0x00ea169c05042908.hhi"
+    },
+    {
+      "archive": "14011764 (1).zip",
+      "source": "0x97932c02!0x00ea169c05042908.hhi",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x97932c02!0x00ea169c05042908.hhi"
+    },
+    {
+      "archive": "14011764 (1).zip",
+      "source": "0x00000013!0x01ea169c05042909.sgi",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x00000013!0x01ea169c05042909.sgi"
+    },
+    {
+      "archive": "14011764 (1).zip",
+      "source": "0x00000001!0x00ea169c05042908.trayitem",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x00000001!0x00ea169c05042908.trayitem"
+    },
+    {
+      "archive": "14011764 (1).zip",
+      "source": "0x00000000!0x00ea169c05042908.householdbinary",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x00000000!0x00ea169c05042908.householdbinary"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "0xc8b74903!0x006c16979f930048.hhi",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0xc8b74903!0x006c16979f930048.hhi"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "0xc8b74902!0x006c16979f930048.hhi",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0xc8b74902!0x006c16979f930048.hhi"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "0x00000013!0x0b6c16979f930049.sgi",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x00000013!0x0b6c16979f930049.sgi"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "0x00000001!0x006c16979f930048.trayitem",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x00000001!0x006c16979f930048.trayitem"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "0x00000000!0x006c16979f930048.householdbinary",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x00000000!0x006c16979f930048.householdbinary"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "0xdbdc5d03!0x00d11696e9f00052.hhi",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0xdbdc5d03!0x00d11696e9f00052.hhi"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "0xdbdc5d02!0x00d11696e9f00052.hhi",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0xdbdc5d02!0x00d11696e9f00052.hhi"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "0x00000013!0x0dd11696e9f00053.sgi",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x00000013!0x0dd11696e9f00053.sgi"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "0x00000001!0x00d11696e9f00052.trayitem",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x00000001!0x00d11696e9f00052.trayitem"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "0x00000000!0x00d11696e9f00052.householdbinary",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x00000000!0x00d11696e9f00052.householdbinary"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "0x39793703!0x005f1692c22d01f1.hhi",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x39793703!0x005f1692c22d01f1.hhi"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "0x39793702!0x005f1692c22d01f1.hhi",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x39793702!0x005f1692c22d01f1.hhi"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "0x00000013!0x065f1692c22d01f2.sgi",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x00000013!0x065f1692c22d01f2.sgi"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "0x00000001!0x005f1692c22d01f1.trayitem",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x00000001!0x005f1692c22d01f1.trayitem"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "0x00000000!0x005f1692c22d01f1.householdbinary",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x00000000!0x005f1692c22d01f1.householdbinary"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "0xb8fd0803!0x008b16888a0d01f0.hhi",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0xb8fd0803!0x008b16888a0d01f0.hhi"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "0xb8fd0802!0x008b16888a0d01f0.hhi",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0xb8fd0802!0x008b16888a0d01f0.hhi"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "0x00000013!0x008b16888a0d01f1.sgi",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x00000013!0x008b16888a0d01f1.sgi"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "0x00000001!0x008b16888a0d01f0.trayitem",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x00000001!0x008b16888a0d01f0.trayitem"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "0x00000000!0x008b16888a0d01f0.householdbinary",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x00000000!0x008b16888a0d01f0.householdbinary"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "0x67f96d03!0x00f0169a57900037.hhi",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x67f96d03!0x00f0169a57900037.hhi"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "0x67f96d02!0x00f0169a57900037.hhi",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x67f96d02!0x00f0169a57900037.hhi"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "0x00000013!0x07f0169a57900038.sgi",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x00000013!0x07f0169a57900038.sgi"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "0x00000001!0x00f0169a57900037.trayitem",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x00000001!0x00f0169a57900037.trayitem"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "0x00000000!0x00f0169a57900037.householdbinary",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Tray/0x00000000!0x00f0169a57900037.householdbinary"
+    }
+  ],
+  "copied_packages": [
+    {
+      "archive": "14011764 (1).zip",
+      "source": "RebelGal_Aveline_Skin.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 1/RebelGal_Aveline_Skin.package"
+    },
+    {
+      "archive": "14011764 (1).zip",
+      "source": "RebelGal_Aveline_Skin_Overlay.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 1/RebelGal_Aveline_Skin_Overlay.package"
+    },
+    {
+      "archive": "14011764 (1).zip",
+      "source": "Ade - Nayla Hairstyle (Style 2).package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 1/Ade - Nayla Hairstyle (Style 2).package"
+    },
+    {
+      "archive": "14011764 (1).zip",
+      "source": "[IMF]eyesN381-TSRexclusive.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 1/[IMF]eyesN381-TSRexclusive.package"
+    },
+    {
+      "archive": "14011764 (1).zip",
+      "source": "[ali]TSR_Jazmyn_Sweatpants.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 1/[ali]TSR_Jazmyn_Sweatpants.package"
+    },
+    {
+      "archive": "14011764 (1).zip",
+      "source": "[ali]TSR_Jazmyn_Top.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 1/[ali]TSR_Jazmyn_Top.package"
+    },
+    {
+      "archive": "14011764 (1).zip",
+      "source": "MagicHand Cecelia Eyebrows N452.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 1/MagicHand Cecelia Eyebrows N452.package"
+    },
+    {
+      "archive": "14011764 (1).zip",
+      "source": "Mydarling20 - short dress asly .package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 1/Mydarling20 - short dress asly .package"
+    },
+    {
+      "archive": "14011764 (1).zip",
+      "source": "Layla-Eyeliner N125.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 1/Layla-Eyeliner N125.package"
+    },
+    {
+      "archive": "14011764 (1).zip",
+      "source": "MagicHand Tia Lipstick N291.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 1/MagicHand Tia Lipstick N291.package"
+    },
+    {
+      "archive": "14011764 (1).zip",
+      "source": "Caroll91 NYE Eyeshadow HQ.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 1/Caroll91 NYE Eyeshadow HQ.package"
+    },
+    {
+      "archive": "14011764 (1).zip",
+      "source": "Pitted0live_Pearl_Heart_Studs.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 1/Pitted0live_Pearl_Heart_Studs.package"
+    },
+    {
+      "archive": "14011764 (1).zip",
+      "source": "Seleng_Highlighter_N7.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 1/Seleng_Highlighter_N7.package"
+    },
+    {
+      "archive": "14011764 (1).zip",
+      "source": "[IMF]minzy_blushN210-TSRexclusive.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 1/[IMF]minzy_blushN210-TSRexclusive.package"
+    },
+    {
+      "archive": "14011764 (1).zip",
+      "source": "[Magic Hand] Ermina Mouth Preset N14.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 1/[Magic Hand] Ermina Mouth Preset N14.package"
+    },
+    {
+      "archive": "14011764 (1).zip",
+      "source": "Seleng_Nose_Preset_N1.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 1/Seleng_Nose_Preset_N1.package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "leLAPEAU_KotaSkin.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/leLAPEAU_KotaSkin.package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "Linavees - WAITRESS UNIFORM TIGHTS.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/Linavees - WAITRESS UNIFORM TIGHTS.package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "Linavees - WAITRESS UNIFORM.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/Linavees - WAITRESS UNIFORM.package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "MERMALADE S720.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/MERMALADE S720.package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "WINGS HAIR TS4 EF0115 (Loose and messy updo).package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/WINGS HAIR TS4 EF0115 (Loose and messy updo).package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "MERMALADE S716.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/MERMALADE S716.package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "eyebrows_72_awesome-ajuga.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/eyebrows_72_awesome-ajuga.package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "DAPHS - Metallic Bikini Set S313 - Patreon.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/DAPHS - Metallic Bikini Set S313 - Patreon.package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "[IMF]danique_blushN185-TSRexclusive.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/[IMF]danique_blushN185-TSRexclusive.package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "LEXEL - Foxy_eyelashes.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/LEXEL - Foxy_eyelashes.package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "CAMUFLAJE - SET 392 - Sweater and Scarf (TSR Exclusive).package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/CAMUFLAJE - SET 392 - Sweater and Scarf (TSR Exclusive).package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "BAkalia_PencilBehindEar.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/BAkalia_PencilBehindEar.package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "ANGISSI_EYES A178.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/ANGISSI_EYES A178.package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "[Pipco] - Millie Jeans (+HQ).package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/[Pipco] - Millie Jeans (+HQ).package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "JEYS-Mellifuous-Dress.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/JEYS-Mellifuous-Dress.package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "MSQSIMS_Larissa_Eyelashes.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/MSQSIMS_Larissa_Eyelashes.package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "[Magic Hand] Yasmin Jaw Preset N06.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/[Magic Hand] Yasmin Jaw Preset N06.package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "ChordoftheRingsOversizeSweatshirtNo.02.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/ChordoftheRingsOversizeSweatshirtNo.02.package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "[plumbobsnfries]Hendrix_Hoodie.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/[plumbobsnfries]Hendrix_Hoodie.package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "Seleng_Hairline_N1_(dimple_left).package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/Seleng_Hairline_N1_(dimple_left).package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "JH [COSMETICS] LIPS PRESET #9.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/JH [COSMETICS] LIPS PRESET #9.package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "Christopher067_Delilah_Dress.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/Christopher067_Delilah_Dress.package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "SLYD_StellaMcCartney_Shirt_Goldie.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/SLYD_StellaMcCartney_Shirt_Goldie.package"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "Tuberosum Lipstick.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 2/Tuberosum Lipstick.package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "YALLA_Skyla_Dress_TSR.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/YALLA_Skyla_Dress_TSR.package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "SOREN_DuaButterfly_Gown.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/SOREN_DuaButterfly_Gown.package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "Klubb_Regina_Bra_TSRSample.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/Klubb_Regina_Bra_TSRSample.package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "ShakeProductionsS072312-Sneakers(Female).package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/ShakeProductionsS072312-Sneakers(Female).package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "Off-Line_Alice_Bikini_Sample.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/Off-Line_Alice_Bikini_Sample.package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "Nose mask 06 (full coverage) UPDATE for sim creators .package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/Nose mask 06 (full coverage) UPDATE for sim creators .package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "[cosimetic]Eyeshadow-N211-TSR.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/[cosimetic]Eyeshadow-N211-TSR.package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "Anto_S4Hair_247_Kenza.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/Anto_S4Hair_247_Kenza.package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "ShakeProductions940-HighHeels.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/ShakeProductions940-HighHeels.package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "MinimalSIM_LVNDR_Edge_Nails.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/MinimalSIM_LVNDR_Edge_Nails.package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "CAMUFLAJE - SET 151 - Cargo Pants.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/CAMUFLAJE - SET 151 - Cargo Pants.package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "JH [COSMETICS] LIPS PRESET#3.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/JH [COSMETICS] LIPS PRESET#3.package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "RemusSirion_eyes_sclera01(OccultEyesocket).package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/RemusSirion_eyes_sclera01(OccultEyesocket).package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "Seleng_Eyebags_N4.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/Seleng_Eyebags_N4.package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "Seleng_Highlighter_N7.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/Seleng_Highlighter_N7.package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "Seleng_Mouthcorners_N1.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/Seleng_Mouthcorners_N1.package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "Belaloallure_wanda_swimsuit.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/Belaloallure_wanda_swimsuit.package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "ANGISSI-Eyeliner-Scarlett.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/ANGISSI-Eyeliner-Scarlett.package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "Eyelids 4.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/Eyelids 4.package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "FRS Britney Blush.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/FRS Britney Blush.package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "PS_AstueNostrilPiercingStud.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/PS_AstueNostrilPiercingStud.package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "PSMouthcornerN02.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/PSMouthcornerN02.package"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "SayaSims_EyeReflections_Set_N1.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 3/SayaSims_EyeReflections_Set_N1.package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "SonyaSims 290 Hair Value.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/SonyaSims 290 Hair Value.package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "RebelGal_Aveline_Skin.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/RebelGal_Aveline_Skin.package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "Harmonia_TSR_EllieFloralMicroMiniChemise.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/Harmonia_TSR_EllieFloralMicroMiniChemise.package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "DAPHS - Floral Textured Mini Dress C1763 - TSR.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/DAPHS - Floral Textured Mini Dress C1763 - TSR.package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "ANGISSI Elizabeth Lipstick A244.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/ANGISSI Elizabeth Lipstick A244.package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "AviGlam_CoolEyes.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/AviGlam_CoolEyes.package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "SOREN_DuaButterfly_Gown.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/SOREN_DuaButterfly_Gown.package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "(Wisteria) Diamond Butterfly_NoseRing Right.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/(Wisteria) Diamond Butterfly_NoseRing Right.package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "SimsHouseWOMEN'S LONG-SLEEVE TOP WITH LACE_TSR26m.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/SimsHouseWOMEN'S LONG-SLEEVE TOP WITH LACE_TSR26m.package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "SonyaSims 161 Hair The Remnant.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/SonyaSims 161 Hair The Remnant.package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "Pitted0live_Yuri_Wispy_3D_Lashes_Glasses_Contradict.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/Pitted0live_Yuri_Wispy_3D_Lashes_Glasses_Contradict.package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "MERMALADE S633.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/MERMALADE S633.package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "MERMALADE S618.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/MERMALADE S618.package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "ZENX EYESHADOW Z290+HQ.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/ZENX EYESHADOW Z290+HQ.package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "Anonimux - Makeup Set N39 - Blush.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/Anonimux - Makeup Set N39 - Blush.package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "(Wisteria) University_Sports_Dress.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/(Wisteria) University_Sports_Dress.package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "(Wisteria) Moon&Star_Earrings.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/(Wisteria) Moon&Star_Earrings.package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "(Wisteria) Lovely_Nails.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/(Wisteria) Lovely_Nails.package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "SimsHouseWomen's denim overalls (bottom).package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/SimsHouseWomen's denim overalls (bottom).package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "(Wisteria) Moon&Star_Choker.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/(Wisteria) Moon&Star_Choker.package"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "ANGISSI_Eyeliner-A30.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 4/ANGISSI_Eyeliner-A30.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "LEXEL_Elvira_adult.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/LEXEL_Elvira_adult.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "TresBeau_MaySkin.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/TresBeau_MaySkin.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "(Wisteria) Honey Bow Set - Necklace for woman.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/(Wisteria) Honey Bow Set - Necklace for woman.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "[ali]TSR_Jakayla_Collection_Waistcoat_and_Shirt.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/[ali]TSR_Jakayla_Collection_Waistcoat_and_Shirt.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "(Wisteria) Honey Bow Set - Earrings for woman.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/(Wisteria) Honey Bow Set - Earrings for woman.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "[ali]TSR_Jakayla_Collection_Skirt.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/[ali]TSR_Jakayla_Collection_Skirt.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "Harmonia_PTR_NextGirl_collarGinghamShirt.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/Harmonia_PTR_NextGirl_collarGinghamShirt.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "Klubb_Mercy_BowBlazer.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/Klubb_Mercy_BowBlazer.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "Harmonia_PTR_NextGirl_collarGinghamShort.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/Harmonia_PTR_NextGirl_collarGinghamShort.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "[IMF]susie_eyeshadowN418-TSRexclusive.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/[IMF]susie_eyeshadowN418-TSRexclusive.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "LVNDR_Soft Leather Cutout Pumps_Shoes.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/LVNDR_Soft Leather Cutout Pumps_Shoes.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "Pitted0live_Yuri_Wispy_3D_Lashes_Rings_Contradict.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/Pitted0live_Yuri_Wispy_3D_Lashes_Rings_Contradict.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "sports jumpsuit set - MYDARLING20 .package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/sports jumpsuit set - MYDARLING20 .package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "MERMALADE S673.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/MERMALADE S673.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "Brior_Harper_ShortDress_Sample.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/Brior_Harper_ShortDress_Sample.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "ANGISSI Hypnotic Eyes A301.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/ANGISSI Hypnotic Eyes A301.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "Arltos_T_shoes_387_f.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/Arltos_T_shoes_387_f.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "ANGISSI Eyebrows n124.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/ANGISSI Eyebrows n124.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "MagicHand Leslie Lipstick N265.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/MagicHand Leslie Lipstick N265.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "ANGISSI Contour  blush N2.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/ANGISSI Contour  blush N2.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "GiuliettaSims_Andy_Glasses.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/GiuliettaSims_Andy_Glasses.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "(Wisteria) Short_Squoval_Nails.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/(Wisteria) Short_Squoval_Nails.package"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "ANGISSI_Eyeliner-A30.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764 5/ANGISSI_Eyeliner-A30.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "WINGS HAIR TS4 EF0719 (Ponytail curly long hair).package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/WINGS HAIR TS4 EF0719 (Ponytail curly long hair).package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "Valentine_Jacket_Amira.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/Valentine_Jacket_Amira.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "ANGISSI Sharon Eyes.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/ANGISSI Sharon Eyes.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "Linavees - PAMELA - LIFEGUARD SWIMSUIT.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/Linavees - PAMELA - LIFEGUARD SWIMSUIT.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "JCB AYIS SHORTS.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/JCB AYIS SHORTS.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "Pitted0live_Emily_3D_Lashes_Rings_Contradict.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/Pitted0live_Emily_3D_Lashes_Rings_Contradict.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "JCB NOEMI TANK TOP.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/JCB NOEMI TANK TOP.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "[IMF]elsa_blushN200-TSRexclusive.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/[IMF]elsa_blushN200-TSRexclusive.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "MERMALADE MC578.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/MERMALADE MC578.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "[MagicHand] Hannah Eyebrows N189.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/[MagicHand] Hannah Eyebrows N189.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "MagicHand Kian Nose Preset N39.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/MagicHand Kian Nose Preset N39.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "MagicHand Carissa Mouth Preset N18.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/MagicHand Carissa Mouth Preset N18.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "[Pipco] - Vicki Jeans (Ripped) (+HQ).package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/[Pipco] - Vicki Jeans (Ripped) (+HQ).package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "LEXEL - GenesisFemale (Eyeliner).package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/LEXEL - GenesisFemale (Eyeliner).package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "Laupipi_FallCollection-DR365.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/Laupipi_FallCollection-DR365.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "Dissia_Amber Flip Flops SN21.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/Dissia_Amber Flip Flops SN21.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "Dissia_Satin Scrunchie AN85.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/Dissia_Satin Scrunchie AN85.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "BL_Two Piece PJ Set 04.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/BL_Two Piece PJ Set 04.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "[IMF]freckles_all_overN10.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/[IMF]freckles_all_overN10.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "Christopher067_Darling_Dress.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/Christopher067_Darling_Dress.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "Genesis Lipstick.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/Genesis Lipstick.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "Lola_dress_by_belaloallure.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/Lola_dress_by_belaloallure.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "S-Club ts4 WM Headacc 201902.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/S-Club ts4 WM Headacc 201902.package"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "Bobur Eyebags 05.package",
+      "dest": "/home/raell/Games/Heroic/Prefixes/The sims 4/drive_c/users/steamuser/Documents/Electronic Arts/The Sims 4/Mods/Manual_Sims_Test_20260606_141418/14011764/Bobur Eyebags 05.package"
+    }
+  ],
+  "skipped_non_game_files": [
+    {
+      "archive": "14011764 (1).zip",
+      "source": "readme.txt",
+      "ext": ".txt"
+    },
+    {
+      "archive": "14011764 (2).zip",
+      "source": "readme.txt",
+      "ext": ".txt"
+    },
+    {
+      "archive": "14011764 (3).zip",
+      "source": "readme.txt",
+      "ext": ".txt"
+    },
+    {
+      "archive": "14011764 (4).zip",
+      "source": "readme.txt",
+      "ext": ".txt"
+    },
+    {
+      "archive": "14011764 (5).zip",
+      "source": "readme.txt",
+      "ext": ".txt"
+    },
+    {
+      "archive": "14011764.zip",
+      "source": "readme.txt",
+      "ext": ".txt"
+    }
+  ],
+  "errors": [],
+  "summary": {
+    "archives": 6,
+    "tray_files": 30,
+    "package_files": 131,
+    "skipped_non_game_files": 6,
+    "errors": 0
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "servers": {
+    "prowl-agent": {
+      "type": "stdio",
+      "command": "prowl-agent",
+      "args": [
+        "serve"
+      ]
+    }
+  }
+}

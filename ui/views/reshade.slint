@@ -1,0 +1,106 @@
+import { Theme } from "../palette.slint";
+import { Card } from "../components/card.slint";
+import { PrimaryButton } from "../components/button.slint";
+
+export component ReshadeView inherits Rectangle {
+    in property <string> env_type: "GENERIC";
+    in property <string> env_command: "WINEDLLOVERRIDES=\"dxgi=n,b\" %command%";
+    in property <bool> is_installed: false;
+    in property <string> reshade_status: "Aguardando ação...";
+
+    callback install_reshade_clicked();
+    callback uninstall_reshade_clicked();
+    callback install_preset_clicked();
+    callback copy_command_clicked();
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 16px;
+
+        Text {
+            text: "🔮 Gerenciador ReShade (Linux Edition)";
+            font-size: 22px;
+            font-weight: 800;
+            color: Theme.text_primary;
+        }
+
+        // Environment Detector Banner
+        Card {
+            height: 100px;
+            border-color: Theme.accent_color;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 8px;
+                HorizontalLayout {
+                    Text { text: "🐧 Detector de Ambiente Linux: "; font-size: 14px; font-weight: 700; color: Theme.text_primary; }
+                    Text { text: root.env_type; font-size: 14px; font-weight: 800; color: Theme.accent_color; }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: center;
+                    Text { text: root.env_command; font-size: 13px; font-weight: 600; color: Theme.info; horizontal-stretch: 1; vertical-alignment: center; }
+                    PrimaryButton {
+                        text: "📋 Copiar Comando";
+                        btn_color: Theme.surface_header;
+                        hover_color: Theme.surface_hover;
+                        clicked => { root.copy_command_clicked(); }
+                    }
+                }
+            }
+        }
+
+        // Action Buttons
+        Card {
+            VerticalLayout {
+                padding: 20px;
+                spacing: 14px;
+
+                Text {
+                    text: "Injeção e Gerenciamento DX11";
+                    font-size: 15px;
+                    font-weight: 700;
+                    color: Theme.text_primary;
+                }
+
+                HorizontalLayout {
+                    spacing: 12px;
+                    PrimaryButton {
+                        text: "✨ Instalar ReShade (5.9.2 Stable)";
+                        icon_str: "✨";
+                        btn_color: Theme.primary_color;
+                        hover_color: Theme.primary_hover;
+                        clicked => { root.install_reshade_clicked(); }
+                    }
+                    PrimaryButton {
+                        text: "📦 Instalar Preset (.zip)";
+                        icon_str: "📦";
+                        btn_color: Theme.surface_header;
+                        hover_color: Theme.surface_hover;
+                        clicked => { root.install_preset_clicked(); }
+                    }
+                    PrimaryButton {
+                        text: "🗑️ Desinstalar ReShade";
+                        icon_str: "🗑️";
+                        btn_color: Theme.danger;
+                        hover_color: Theme.danger.darker(0.2);
+                        clicked => { root.uninstall_reshade_clicked(); }
+                    }
+                }
+            }
+        }
+
+        // Status Card
+        Card {
+            height: 40px;
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                alignment: center;
+                Text { text: root.reshade_status; font-size: 13px; color: Theme.info; vertical-alignment: center; }
+            }
+        }
+
+        Rectangle { vertical-stretch: 1; }
+    }
+}

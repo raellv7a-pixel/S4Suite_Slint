@@ -1,0 +1,24 @@
+export global Theme {
+    // Theme choices: 0 = Sims Green, 1 = Deep Blue, 2 = Cyber Purple, 3 = Neon Pink
+    in-out property <int> active_theme: 0;
+
+    // Color definitions
+    out property <color> primary_color: active_theme == 0 ? #15803d : (active_theme == 1 ? #1e40af : (active_theme == 2 ? #7e22ce : #be185d));
+    out property <color> primary_hover: active_theme == 0 ? #166534 : (active_theme == 1 ? #1e3a8a : (active_theme == 2 ? #6b21a8 : #9d174d));
+    out property <color> accent_color: active_theme == 0 ? #22c55e : (active_theme == 1 ? #3b82f6 : (active_theme == 2 ? #a855f7 : #f43f5e));
+
+    out property <color> background: #0f172a;
+    out property <color> surface: #1e293b;
+    out property <color> surface_header: #334155;
+    out property <color> surface_hover: #475569;
+    out property <color> border_color: #334155;
+
+    out property <color> text_primary: #f8fafc;
+    out property <color> text_secondary: #94a3b8;
+    out property <color> text_muted: #64748b;
+
+    out property <color> success: #10b981;
+    out property <color> warning: #f59e0b;
+    out property <color> danger: #ef4444;
+    out property <color> info: #06b6d4;
+}

@@ -1,0 +1,77 @@
+import { Theme } from "../palette.slint";
+import { Card } from "../components/card.slint";
+import { PrimaryButton } from "../components/button.slint";
+
+export struct TranslationItem {
+    name: string,
+    size_str: string,
+}
+
+export component TranslationsView inherits Rectangle {
+    in property <[TranslationItem]> installed_translations;
+    in property <string> status_text: "Pronto";
+
+    callback select_translation_clicked();
+    callback delete_translation_clicked(string);
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 16px;
+
+        Text {
+            text: "🌐 Gerenciador de Traduções (01_Traducoes)";
+            font-size: 22px;
+            font-weight: 800;
+            color: Theme.text_primary;
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            PrimaryButton {
+                text: "📥 Instalar / Atualizar Tradução";
+                clicked => { root.select_translation_clicked(); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        Card {
+            vertical-stretch: 1;
+            VerticalLayout {
+                padding: 12px;
+
+                if root.installed_translations.length == 0 : Text {
+                    text: "Nenhuma tradução instalada na pasta 01_Traducoes.";
+                    font-size: 13px;
+                    color: Theme.text_muted;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                for item in root.installed_translations : HorizontalLayout {
+                    height: 40px;
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    alignment: center;
+                    Text { text: "🌐 " + item.name; font-size: 13px; color: Theme.text_primary; horizontal-stretch: 1; vertical-alignment: center; }
+                    Text { text: item.size_str; font-size: 12px; color: Theme.text_secondary; width: 100px; vertical-alignment: center; }
+                    PrimaryButton {
+                        text: "🗑️ Excluir";
+                        btn_color: Theme.danger;
+                        hover_color: Theme.danger.darker(0.2);
+                        clicked => { root.delete_translation_clicked(item.name); }
+                    }
+                }
+            }
+        }
+
+        Card {
+            height: 40px;
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                alignment: center;
+                Text { text: root.status_text; font-size: 13px; color: Theme.info; vertical-alignment: center; }
+            }
+        }
+    }
+}

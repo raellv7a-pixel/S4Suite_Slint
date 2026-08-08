@@ -1,0 +1,191 @@
+import { Theme } from "palette.slint";
+import { Sidebar } from "components/sidebar.slint";
+import { DashboardView } from "views/dashboard.slint";
+import { InstallerView, QueueItem } from "views/installer.slint";
+import { OrganizerView, ModTreeEntry } from "views/organizer.slint";
+import { MergerView, MergeQueueItem } from "views/merger.slint";
+import { TrayView, TrayItem } from "views/tray.slint";
+import { TranslationsView, TranslationItem } from "views/translations.slint";
+import { ReshadeView } from "views/reshade.slint";
+import { ConfigView } from "views/config.slint";
+
+export component MainWindow inherits Window {
+    title: "S4Suite v2.0 - Mod & Content Manager for The Sims 4 (Linux)";
+    preferred-width: 1150px;
+    preferred-height: 800px;
+    background: Theme.background;
+
+    in-out property <int> current_tab: 0;
+
+    // View Properties
+    in property <string> game_path: "Não configurado";
+    in property <string> total_mods_count: "0";
+    in property <string> total_scripts_count: "0";
+    in property <string> total_mods_size: "0 MB";
+    in property <string> total_tray_count: "0";
+    in property <string> dashboard_status: "Pronto";
+
+    in property <[QueueItem]> installer_queue;
+    in property <bool> is_installing: false;
+    in property <string> installer_status: "Aguardando arquivos...";
+
+    in property <[ModTreeEntry]> mod_entries;
+    in property <string> organizer_status: "Pronto";
+    // Merger Dialog
+    in property <bool> show_post_merge_dialog: false;
+    in property <string> post_merge_message: "";
+    callback post_merge_action(string);
+
+    // Organizer Dialog
+    in property <bool> show_duplicates_dialog: false;
+    in property <string> duplicates_message: "";
+    callback close_duplicates_dialog();
+    // Installer Dialog
+    in property <bool> show_careful_scan_dialog: false;
+    in property <string> careful_scan_message: "";
+    callback cancel_install_clicked();
+    callback proceed_install_clicked();
+
+    in property <[MergeQueueItem]> merge_items;
+    in property <string> merge_max_size: "1.0";
+    in property <bool> is_merging: false;
+    in property <string> merge_status: "Pronto";
+
+    in property <[TrayItem]> tray_items;
+    in property <bool> is_importing_tray: false;
+    in property <string> tray_status: "Pronto";
+
+    in property <[TranslationItem]> installed_translations;
+    in property <string> translations_status: "Pronto";
+
+    in property <string> reshade_env_type: "GENERIC";
+    in property <string> reshade_env_command: "WINEDLLOVERRIDES=\"dxgi=n,b\" %command%";
+    in property <bool> is_reshade_installed: false;
+    in property <string> reshade_status: "Pronto";
+
+    in property <string> config_status: "Pronto";
+
+    // Callbacks
+    callback select_tab(int);
+    callback clear_cache();
+    callback backup_saves();
+    callback refresh_stats();
+    callback select_installer_files();
+    callback start_install();
+    callback clear_installer_queue();
+    callback refresh_mod_tree();
+    callback check_scripts();
+    callback find_duplicates();
+    callback clean_junk();
+    callback toggle_disabled_mod();
+    callback select_merger_input();
+    callback select_merger_output();
+    callback start_merge();
+    callback select_tray_files();
+    callback start_tray_import();
+    callback select_translation_file();
+    callback delete_translation(string);
+    callback install_reshade();
+    callback uninstall_reshade();
+    callback install_preset();
+    callback copy_reshade_command();
+    callback select_config_game_path();
+    callback autodetect_game_path();
+    callback save_config();
+
+    HorizontalLayout {
+        Sidebar {
+            current_tab: root.current_tab;
+            tab_changed(idx) => {
+                root.current_tab = idx;
+                root.select_tab(idx);
+            }
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+
+            if root.current_tab == 0 : DashboardView {
+                game_path: root.game_path;
+                total_mods_count: root.total_mods_count;
+                total_scripts_count: root.total_scripts_count;
+                total_mods_size: root.total_mods_size;
+                total_tray_count: root.total_tray_count;
+                status_message: root.dashboard_status;
+                clear_cache_clicked => { root.clear_cache(); }
+                backup_saves_clicked => { root.backup_saves(); }
+            }
+
+            if root.current_tab == 1 : InstallerView {
+                queue_items: root.installer_queue;
+                is_installing: root.is_installing;
+                install_status_text: root.installer_status;
+                start_install_clicked => { root.start_install(); }
+                clear_queue_clicked => { root.clear_installer_queue(); }
+                show_careful_scan_dialog: root.show_careful_scan_dialog;
+                careful_scan_message: root.careful_scan_message;
+                cancel_install_clicked => { root.cancel_install_clicked(); }
+                proceed_install_clicked => { root.proceed_install_clicked(); }
+            }
+            if root.current_tab == 2 : OrganizerView {
+                mod_entries: root.mod_entries;
+                organizer_status: root.organizer_status;
+                refresh_tree_clicked => { root.refresh_mod_tree(); }
+                show_duplicates_dialog: root.show_duplicates_dialog;
+                duplicates_message: root.duplicates_message;
+                close_duplicates_dialog => { root.close_duplicates_dialog(); }
+                find_duplicates_clicked => { root.find_duplicates(); }
+                clean_junk_clicked => { root.clean_junk(); }
+                toggle_disabled_clicked => { root.toggle_disabled_mod(); }
+            }
+
+            if root.current_tab == 3 : MergerView {
+                items: root.merge_items;
+                max_size_gb: root.merge_max_size;
+                is_merging: root.is_merging;
+                show_post_merge_dialog: root.show_post_merge_dialog;
+                post_merge_message: root.post_merge_message;
+                post_merge_action(action) => { root.post_merge_action(action); }
+                select_input_clicked => { root.select_merger_input(); }
+                select_output_clicked => { root.select_merger_output(); }
+                start_merge_clicked => { root.start_merge(); }
+            }
+
+            if root.current_tab == 4 : TrayView {
+                tray_items: root.tray_items;
+                is_importing: root.is_importing_tray;
+                tray_status: root.tray_status;
+                select_tray_files_clicked => { root.select_tray_files(); }
+                start_import_clicked => { root.start_tray_import(); }
+            }
+
+            if root.current_tab == 5 : TranslationsView {
+                installed_translations: root.installed_translations;
+                status_text: root.translations_status;
+                select_translation_clicked => { root.select_translation_file(); }
+                delete_translation_clicked(name) => { root.delete_translation(name); }
+            }
+
+            if root.current_tab == 6 : ReshadeView {
+                env_type: root.reshade_env_type;
+                env_command: root.reshade_env_command;
+                is_installed: root.is_reshade_installed;
+                reshade_status: root.reshade_status;
+                install_reshade_clicked => { root.install_reshade(); }
+                uninstall_reshade_clicked => { root.uninstall_reshade(); }
+                install_preset_clicked => { root.install_preset(); }
+                copy_command_clicked => { root.copy_reshade_command(); }
+            }
+
+            if root.current_tab == 7 : ConfigView {
+                game_path: root.game_path;
+                merge_limit_gb: root.merge_max_size;
+                active_theme_idx: Theme.active_theme;
+                config_status: root.config_status;
+                select_game_path_clicked => { root.select_config_game_path(); }
+                autodetect_game_path_clicked => { root.autodetect_game_path(); }
+                save_config_clicked => { root.save_config(); }
+            }
+        }
+    }
+}
