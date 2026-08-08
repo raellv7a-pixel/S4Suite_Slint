@@ -1,4 +1,5 @@
 import { Theme } from "palette.slint";
+import { I18n } from "i18n.slint";
 import { Sidebar } from "components/sidebar.slint";
 import { DashboardView } from "views/dashboard.slint";
 import { InstallerView, QueueItem } from "views/installer.slint";
@@ -8,6 +9,8 @@ import { TrayView, TrayItem } from "views/tray.slint";
 import { TranslationsView, TranslationItem } from "views/translations.slint";
 import { ReshadeView } from "views/reshade.slint";
 import { ConfigView } from "views/config.slint";
+
+export { I18n, Theme }
 
 export component MainWindow inherits Window {
     title: "S4Suite v2.0 - Mod & Content Manager for The Sims 4 (Linux)";
@@ -70,9 +73,13 @@ export component MainWindow inherits Window {
     in property <string> reshade_env_type: "GENERIC";
     in property <string> reshade_env_command: "WINEDLLOVERRIDES=\"dxgi=n,b\" %command%";
     in property <bool> is_reshade_installed: false;
+    in property <string> reshade_injected_dll: "";
+    in property <string> reshade_presets_count: "0";
+    in property <bool> is_reshade_busy: false;
     in property <string> reshade_status: "Pronto";
 
     in property <string> config_status: "Pronto";
+    in property <string> active_language: "pt";
 
     // Callbacks
     callback select_tab(int);
@@ -101,6 +108,9 @@ export component MainWindow inherits Window {
     callback select_config_game_path();
     callback autodetect_game_path();
     callback save_config();
+    callback language_selected(string);
+    callback theme_selected(int);
+    callback merge_limit_selected(string);
 
     HorizontalLayout {
         Sidebar {
@@ -190,6 +200,9 @@ export component MainWindow inherits Window {
                 env_type: root.reshade_env_type;
                 env_command: root.reshade_env_command;
                 is_installed: root.is_reshade_installed;
+                injected_dll: root.reshade_injected_dll;
+                presets_count: root.reshade_presets_count;
+                is_busy: root.is_reshade_busy;
                 reshade_status: root.reshade_status;
                 install_reshade_clicked => { root.install_reshade(); }
                 uninstall_reshade_clicked => { root.uninstall_reshade(); }
@@ -200,11 +213,15 @@ export component MainWindow inherits Window {
             if root.current_tab == 7 : ConfigView {
                 game_path: root.game_path;
                 merge_limit_gb: root.merge_max_size;
+                active_language: root.active_language;
                 active_theme_idx: Theme.active_theme;
                 config_status: root.config_status;
                 select_game_path_clicked => { root.select_config_game_path(); }
                 autodetect_game_path_clicked => { root.autodetect_game_path(); }
                 save_config_clicked => { root.save_config(); }
+                language_selected(lang) => { root.language_selected(lang); }
+                theme_selected(idx) => { root.theme_selected(idx); }
+                merge_limit_selected(gb) => { root.merge_limit_selected(gb); }
             }
         }
     }

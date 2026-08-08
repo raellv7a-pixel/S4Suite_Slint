@@ -1,5 +1,5 @@
 use crate::core::safety::{safe_remove_file, unique_dest_path};
-use crate::engine::installer::extract_archive_to_staging;
+use crate::engine::installer::extract_archive;
 use crate::engine::tray::full_sha256;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
@@ -96,6 +96,55 @@ pub struct ReshadeManifest {
     pub presets: Vec<String>,
 }
 
+/// Nomes de DLL que o ReShade pode assumir como proxy do DirectX.
+pub const INJECT_DLL_NAMES: [&str; 3] = ["dxgi.dll", "d3d11.dll", "d3d9.dll"];
+
+pub const MANIFEST_NAME: &str = ".s4suite_reshade_manifest.json";
+
+/// Estado da instalação do ReShade em `Game/Bin`.
+#[derive(Debug, Clone, Default)]
+pub struct ReshadeStatus {
+    pub installed: bool,
+    /// DLL efetivamente encontrada em disco (`dxgi.dll`, …).
+    pub injected_dll: Option<String>,
+    /// Manifesto gravado pela S4Suite, quando presente.
+    pub manifest: Option<ReshadeManifest>,
+    pub presets_count: usize,
+}
+
+/// Inspeciona `Game/Bin` e diz se o ReShade está instalado.
+///
+/// A fonte da verdade é o disco, não o manifesto: o usuário pode ter instalado
+/// o ReShade por fora, ou apagado a DLL na mão. Por isso a checagem é feita por
+/// assinatura do binário e o manifesto entra só como informação extra.
+pub fn detect_installation(game_bin_path: &Path) -> ReshadeStatus {
+    let mut status = ReshadeStatus::default();
+
+    for name in INJECT_DLL_NAMES {
+        let candidate = game_bin_path.join(name);
+        if is_reshade_dll(&candidate) {
+            status.installed = true;
+            status.injected_dll = Some(name.to_string());
+            break;
+        }
+    }
+
+    let manifest_path = game_bin_path.join(MANIFEST_NAME);
+    if let Ok(content) = fs::read_to_string(&manifest_path) {
+        status.manifest = serde_json::from_str(&content).ok();
+    }
+
+    let presets_dir = game_bin_path.join("presets");
+    if let Ok(entries) = fs::read_dir(&presets_dir) {
+        status.presets_count = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_file())
+            .count();
+    }
+
+    status
+}
+
 pub fn download_reshade_setup(dest_path: &Path) -> Result<(), ReshadeError> {
     let url = "https://reshade.me/downloads/ReShade_Setup_5.9.2.exe";
     let response = reqwest::blocking::get(url).map_err(|e| ReshadeError::DownloadFailed(e.to_string()))?;
@@ -131,8 +180,12 @@ pub fn install_reshade(
         }
     };
 
+    // Extração crua: o instalador do ReShade é um .exe cheio de DLLs, então o
+    // filtro de executáveis do instalador de mods rejeitaria o pacote inteiro.
+    // A validação correta aqui é a assinatura do binário, feita logo abaixo por
+    // `is_reshade_dll`.
     let staging = temp_dir.path().join("staging");
-    extract_archive_to_staging(&setup_exe_path, &staging)
+    extract_archive(&setup_exe_path, &staging)
         .map_err(|e| ReshadeError::ExtractionFailed(e.to_string()))?;
 
     let reshade_dll_candidate = staging.join("ReShade64.dll");
@@ -173,7 +226,7 @@ pub fn install_reshade(
         presets: Vec::new(),
     };
 
-    let manifest_path = game_bin_path.join(".s4suite_reshade_manifest.json");
+    let manifest_path = game_bin_path.join(MANIFEST_NAME);
     if let Ok(json) = serde_json::to_string_pretty(&manifest) {
         let _ = fs::write(manifest_path, json);
     }
@@ -182,7 +235,7 @@ pub fn install_reshade(
 }
 
 pub fn uninstall_reshade(game_bin_path: &Path, allowed_roots: &[PathBuf]) -> Result<(), ReshadeError> {
-    for dll_name in &["dxgi.dll", "d3d11.dll", "d3d9.dll"] {
+    for dll_name in &INJECT_DLL_NAMES {
         let dll_path = game_bin_path.join(dll_name);
         if is_reshade_dll(&dll_path) {
             let _ = safe_remove_file(&dll_path, allowed_roots);
@@ -204,7 +257,7 @@ pub fn uninstall_reshade(game_bin_path: &Path, allowed_roots: &[PathBuf]) -> Res
         }
     }
 
-    let manifest_path = game_bin_path.join(".s4suite_reshade_manifest.json");
+    let manifest_path = game_bin_path.join(MANIFEST_NAME);
     if manifest_path.exists() {
         let _ = safe_remove_file(&manifest_path, allowed_roots);
     }
@@ -216,8 +269,9 @@ pub fn install_shader_preset(
     game_bin_path: &Path,
     preset_archive: &Path,
 ) -> Result<(), ReshadeError> {
+    // Presets são .ini/.txt do usuário: aqui o filtro de executáveis vale.
     let staging = tempfile::tempdir()?;
-    extract_archive_to_staging(preset_archive, staging.path())
+    crate::engine::installer::extract_archive_to_staging(preset_archive, staging.path())
         .map_err(|e| ReshadeError::ExtractionFailed(e.to_string()))?;
 
     let presets_dir = game_bin_path.join("presets");

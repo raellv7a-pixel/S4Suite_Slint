@@ -1,3 +1,4 @@
+import { I18n } from "../i18n.slint";
 import { Theme } from "../palette.slint";
 import { Card } from "../components/card.slint";
 import { PrimaryButton } from "../components/button.slint";
@@ -35,13 +36,13 @@ export component DashboardView inherits Rectangle {
                 VerticalLayout {
                     alignment: center;
                     Text {
-                        text: "Bem-vindo ao S4 Suite v2.0 (Linux Edition)";
+                        text: I18n.tr("Bem-vindo ao S4 Suite v2.0 (Linux Edition)");
                         font-size: 20px;
                         font-weight: 700;
                         color: Theme.text_primary;
                     }
                     Text {
-                        text: "O Seu Hub Definitivo para Mods e Conteúdos do The Sims 4 no Linux";
+                        text: I18n.tr("O Seu Hub Definitivo para Mods e Conteúdos do The Sims 4 no Linux");
                         font-size: 13px;
                         color: Theme.text_secondary;
                     }
@@ -60,7 +61,7 @@ export component DashboardView inherits Rectangle {
                 VerticalLayout {
                     padding: 16px;
                     alignment: space-between;
-                    Text { text: "📦 Mods Instalados"; font-size: 13px; color: Theme.text_secondary; }
+                    Text { text: I18n.tr("📦 Mods Instalados"); font-size: 13px; color: Theme.text_secondary; }
                     Text { text: root.total_mods_count; font-size: 28px; font-weight: 800; color: Theme.accent_color; }
                 }
             }
@@ -70,7 +71,7 @@ export component DashboardView inherits Rectangle {
                 VerticalLayout {
                     padding: 16px;
                     alignment: space-between;
-                    Text { text: "📜 Scripts (.ts4script)"; font-size: 13px; color: Theme.text_secondary; }
+                    Text { text: I18n.tr("📜 Scripts (.ts4script)"); font-size: 13px; color: Theme.text_secondary; }
                     Text { text: root.total_scripts_count; font-size: 28px; font-weight: 800; color: Theme.info; }
                 }
             }
@@ -80,7 +81,7 @@ export component DashboardView inherits Rectangle {
                 VerticalLayout {
                     padding: 16px;
                     alignment: space-between;
-                    Text { text: "💾 Tamanho Ocupado"; font-size: 13px; color: Theme.text_secondary; }
+                    Text { text: I18n.tr("💾 Tamanho Ocupado"); font-size: 13px; color: Theme.text_secondary; }
                     Text { text: root.total_mods_size; font-size: 28px; font-weight: 800; color: Theme.warning; }
                 }
             }
@@ -90,7 +91,7 @@ export component DashboardView inherits Rectangle {
                 VerticalLayout {
                     padding: 16px;
                     alignment: space-between;
-                    Text { text: "🗂️ Arquivos Tray"; font-size: 13px; color: Theme.text_secondary; }
+                    Text { text: I18n.tr("🗂️ Arquivos Tray"); font-size: 13px; color: Theme.text_secondary; }
                     Text { text: root.total_tray_count; font-size: 28px; font-weight: 800; color: Theme.success; }
                 }
             }
@@ -103,7 +104,7 @@ export component DashboardView inherits Rectangle {
                 spacing: 16px;
 
                 Text {
-                    text: "⚡ Ações Rápidas";
+                    text: I18n.tr("⚡ Ações Rápidas");
                     font-size: 16px;
                     font-weight: 700;
                     color: Theme.text_primary;
@@ -112,21 +113,21 @@ export component DashboardView inherits Rectangle {
                 HorizontalLayout {
                     spacing: 12px;
                     PrimaryButton {
-                        text: "🧹 Limpar Cache do Jogo";
+                        text: I18n.tr("🧹 Limpar Cache do Jogo");
                         icon_str: "🧹";
                         btn_color: Theme.surface_header;
                         hover_color: Theme.surface_hover;
                         clicked => { root.clear_cache_clicked(); }
                     }
                     PrimaryButton {
-                        text: "🛡️ Backup de Saves";
+                        text: I18n.tr("🛡️ Backup de Saves");
                         icon_str: "🛡️";
                         btn_color: Theme.surface_header;
                         hover_color: Theme.surface_hover;
                         clicked => { root.backup_saves_clicked(); }
                     }
                     PrimaryButton {
-                        text: "🔄 Atualizar Estatísticas";
+                        text: I18n.tr("🔄 Atualizar Estatísticas");
                         icon_str: "🔄";
                         btn_color: Theme.primary_color;
                         hover_color: Theme.primary_hover;
@@ -143,11 +144,11 @@ export component DashboardView inherits Rectangle {
                 spacing: 8px;
 
                 HorizontalLayout {
-                    Text { text: "📍 Caminho do Jogo: "; font-size: 13px; font-weight: 600; color: Theme.text_secondary; }
+                    Text { text: I18n.tr("📍 Caminho do Jogo: "); font-size: 13px; font-weight: 600; color: Theme.text_secondary; }
                     Text { text: root.game_path; font-size: 13px; color: Theme.text_primary; }
                 }
                 HorizontalLayout {
-                    Text { text: "ℹ️ Status: "; font-size: 13px; font-weight: 600; color: Theme.text_secondary; }
+                    Text { text: I18n.tr("ℹ️ Status: "); font-size: 13px; font-weight: 600; color: Theme.text_secondary; }
                     Text { text: root.status_message; font-size: 13px; color: Theme.accent_color; }
                 }
             }

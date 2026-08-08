@@ -106,11 +106,21 @@ pub fn detect_dependencies(package_bytes: &[u8]) -> Vec<String> {
     deps
 }
 
+/// Extrai um arquivo compactado **após** recusá-lo se contiver executáveis.
+///
+/// É o caminho para conteúdo do usuário (mods). Componentes que legitimamente
+/// embarcam binários — o instalador do ReShade, por exemplo — devem usar
+/// [`extract_archive`] e validar o binário por assinatura.
 pub fn extract_archive_to_staging(
     archive_path: &Path,
     staging_dir: &Path,
 ) -> Result<PathBuf, InstallerError> {
     scan_archive_security(archive_path)?;
+    extract_archive(archive_path, staging_dir)
+}
+
+/// Extração crua, sem o filtro de executáveis.
+pub fn extract_archive(archive_path: &Path, staging_dir: &Path) -> Result<PathBuf, InstallerError> {
     fs::create_dir_all(staging_dir)?;
 
     let ext = archive_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();

@@ -1,0 +1,21 @@
+// Ponte de tradução para a UI.
+//
+// A chave é o próprio texto em português — mesma convenção do app PyQt, o que
+// permite reaproveitar os locales existentes sem reescrevê-los. Quando não há
+// tradução, a chave volta como está, então o português nunca precisa de arquivo.
+//
+// Uso nas views: `text: I18n.tr("Salvar");`
+export global I18n {
+    /// Idioma ativo: "pt", "en" ou "es". Definido pelo Rust a partir do config.
+    in property <string> lang: "pt";
+
+    /// Implementado no Rust (`core::i18n::t`).
+    pure callback translate(string, string) -> string;
+
+    /// Envolve o callback lendo `lang`, o que registra a dependência: ao trocar
+    /// de idioma, todo binding que chama `tr` reavalia sozinho. Chamar
+    /// `translate` direto da view não teria esse efeito.
+    pure public function tr(key: string) -> string {
+        return translate(root.lang, key);
+    }
+}

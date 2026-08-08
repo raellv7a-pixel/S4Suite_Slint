@@ -1,3 +1,4 @@
+import { I18n } from "../i18n.slint";
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../palette.slint";
 import { Card } from "../components/card.slint";
@@ -39,7 +40,7 @@ export component OrganizerView inherits Rectangle {
         spacing: 16px;
 
         Text {
-            text: "📂 Organizador Global de Mods";
+            text: I18n.tr("📂 Organizador Global de Mods");
             font-size: 22px;
             font-weight: 800;
             color: Theme.text_primary;
@@ -50,25 +51,25 @@ export component OrganizerView inherits Rectangle {
             spacing: 10px;
 
             PrimaryButton {
-                text: "🔄 Recarregar";
+                text: I18n.tr("🔄 Recarregar");
                 btn_color: Theme.surface_header;
                 hover_color: Theme.surface_hover;
                 clicked => { root.refresh_tree_clicked(); }
             }
             PrimaryButton {
-                text: "⚠️ Checar Scripts";
+                text: I18n.tr("⚠️ Checar Scripts");
                 btn_color: Theme.surface_header;
                 hover_color: Theme.surface_hover;
                 clicked => { root.check_scripts_clicked(); }
             }
             PrimaryButton {
-                text: "🔍 Duplicatas";
+                text: I18n.tr("🔍 Duplicatas");
                 btn_color: Theme.surface_header;
                 hover_color: Theme.surface_hover;
                 clicked => { root.find_duplicates_clicked(); }
             }
             PrimaryButton {
-                text: "🧹 Limpar Lixo";
+                text: I18n.tr("🧹 Limpar Lixo");
                 btn_color: Theme.surface_header;
                 hover_color: Theme.surface_hover;
                 clicked => { root.clean_junk_clicked(); }
@@ -76,8 +77,8 @@ export component OrganizerView inherits Rectangle {
             PrimaryButton {
                 // Sem um mod selecionado não há o que alternar.
                 text: root.selected_path == ""
-                    ? "🔴 Selecione um mod"
-                    : (root.selected_is_disabled ? "🟢 Reativar Mod" : "🔴 Desativar Mod");
+                    ? I18n.tr("🔴 Selecione um mod")
+                    : (root.selected_is_disabled ? I18n.tr("🟢 Reativar Mod") : I18n.tr("🔴 Desativar Mod"));
                 enabled: root.selected_path != "";
                 btn_color: Theme.primary_color;
                 hover_color: Theme.primary_hover;
@@ -90,7 +91,7 @@ export component OrganizerView inherits Rectangle {
             vertical-stretch: 1;
 
             if root.mod_entries.length == 0 : Text {
-                text: "Nenhum mod encontrado na pasta Mods.";
+                text: I18n.tr("Nenhum mod encontrado na pasta Mods.");
                 font-size: 13px;
                 color: Theme.text_muted;
                 horizontal-alignment: center;
@@ -192,13 +193,13 @@ export component OrganizerView inherits Rectangle {
                     HorizontalLayout {
                         spacing: 8px;
                         PrimaryButton {
-                            text: "Cancelar";
+                            text: I18n.tr("Cancelar");
                             btn_color: Theme.surface_header;
                             hover_color: Theme.surface_hover;
                             clicked => { root.cancel_action(); }
                         }
                         PrimaryButton {
-                            text: "Confirmar Exclusão";
+                            text: I18n.tr("Confirmar Exclusão");
                             btn_color: Theme.danger;
                             clicked => { root.confirm_action(); }
                         }

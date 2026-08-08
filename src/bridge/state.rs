@@ -1,6 +1,7 @@
 use crate::engine::disabled::DisabledManager;
 use crate::engine::installer::ConflictReport;
 use crate::engine::organizer::DuplicateGroup;
+use crate::engine::tray::{TrayImportCandidate, TRAY_WORK_DIR};
 use parking_lot::Mutex;
 use std::path::{Path, PathBuf};
 
@@ -36,7 +37,14 @@ pub struct AppState {
     /// Destino escolhido para as partes unificadas.
     merger_output: Mutex<Option<PathBuf>>,
 
+    /// Zips e arquivos de tray escolhidos para importar.
+    tray_sources: Mutex<Vec<PathBuf>>,
+    /// Fontes já extraídas e analisadas, aguardando a importação.
+    tray_candidates: Mutex<Vec<TrayImportCandidate>>,
+
     disabled_mgr: DisabledManager,
+    /// Onde as fontes do tray são extraídas antes de irem para o jogo.
+    tray_work_dir: PathBuf,
 }
 
 impl AppState {
@@ -48,7 +56,10 @@ impl AppState {
             pending_organizer: Mutex::new(None),
             merger_inputs: Mutex::new(Vec::new()),
             merger_output: Mutex::new(None),
+            tray_sources: Mutex::new(Vec::new()),
+            tray_candidates: Mutex::new(Vec::new()),
             disabled_mgr: DisabledManager::new(config_dir),
+            tray_work_dir: config_dir.join(TRAY_WORK_DIR),
         }
     }
 
@@ -120,5 +131,34 @@ impl AppState {
     pub fn clear_merger(&self) {
         self.merger_inputs.lock().clear();
         *self.merger_output.lock() = None;
+    }
+
+    // --- Tray ---
+
+    pub fn tray_work_dir(&self) -> &Path {
+        &self.tray_work_dir
+    }
+
+    pub fn set_tray_sources(&self, files: Vec<PathBuf>) {
+        *self.tray_sources.lock() = files;
+    }
+
+    pub fn tray_sources(&self) -> Vec<PathBuf> {
+        self.tray_sources.lock().clone()
+    }
+
+    pub fn set_tray_candidates(&self, candidates: Vec<TrayImportCandidate>) {
+        *self.tray_candidates.lock() = candidates;
+    }
+
+    /// Consome as fontes analisadas. Devolve vazio se a importação já rodou,
+    /// o que protege contra duplo-clique em "Importar".
+    pub fn take_tray_candidates(&self) -> Vec<TrayImportCandidate> {
+        std::mem::take(&mut *self.tray_candidates.lock())
+    }
+
+    pub fn clear_tray(&self) {
+        self.tray_sources.lock().clear();
+        self.tray_candidates.lock().clear();
     }
 }

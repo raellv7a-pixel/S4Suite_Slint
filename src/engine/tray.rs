@@ -6,6 +6,7 @@ use sha2::Sha256;
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use walkdir::WalkDir;
 
 pub struct TrayCacheDb {
@@ -142,10 +143,21 @@ pub fn parse_tray_name(trayitem_path: &Path) -> Option<String> {
     None
 }
 
+/// Reduz o nome detectado a algo seguro como nome de pasta.
+///
+/// Segue o `s4tray.py`: caracteres fora do conjunto permitido são **removidos**,
+/// não substituídos. Remover deixa buracos — `"Maria / Silva"` virava
+/// `"Maria  Silva"`, com espaço duplo no nome da pasta importada — então os
+/// espaços resultantes são colapsados em um só.
 pub fn sanitize_import_name(name: Option<&str>) -> String {
-    let raw = name.unwrap_or("");
-    let re = regex::Regex::new(r"[^a-zA-Z0-9\-_ ]").unwrap();
-    let clean = re.replace_all(raw, "").trim().to_string();
+    static ALLOWED: OnceLock<regex::Regex> = OnceLock::new();
+    static SPACES: OnceLock<regex::Regex> = OnceLock::new();
+
+    let allowed = ALLOWED.get_or_init(|| regex::Regex::new(r"[^a-zA-Z0-9\-_ ]").unwrap());
+    let spaces = SPACES.get_or_init(|| regex::Regex::new(r" {2,}").unwrap());
+
+    let stripped = allowed.replace_all(name.unwrap_or(""), "");
+    let clean = spaces.replace_all(stripped.trim(), " ").to_string();
     if clean.is_empty() {
         "Imported_Item".to_string()
     } else {
@@ -226,6 +238,119 @@ pub fn analyze_tray_source(
         package_files,
         duplicate_count,
     })
+}
+
+/// Diretório de trabalho onde as fontes do tray são extraídas antes da
+/// importação. Fica fora de Mods e do Tray, e é limpo a cada preparação.
+pub const TRAY_WORK_DIR: &str = "tray_staging";
+
+/// Uma fonte selecionada pelo usuário, já extraída e analisada.
+pub struct TrayImportCandidate {
+    pub source: PathBuf,
+    pub analysis: TrayAnalysisResult,
+}
+
+impl TrayImportCandidate {
+    pub fn total_files(&self) -> usize {
+        self.analysis.tray_files.len() + self.analysis.package_files.len()
+    }
+
+    /// Rótulo do tipo de conteúdo, a partir do que foi realmente encontrado.
+    pub fn kind_label(&self) -> &'static str {
+        match (
+            self.analysis.tray_files.is_empty(),
+            self.analysis.package_files.is_empty(),
+        ) {
+            (false, false) => "Sim / Lote + CC",
+            (false, true) => "Sim / Lote",
+            (true, false) => "Somente CC",
+            (true, true) => "Vazio",
+        }
+    }
+}
+
+/// Extrai e analisa cada fonte escolhida pelo usuário.
+///
+/// Aceita `.zip`/`.7z`/`.rar` e também arquivos de tray soltos. Uma fonte que
+/// falhe não derruba as demais: ela vira uma entrada na lista de erros.
+pub fn prepare_tray_candidates(
+    sources: &[PathBuf],
+    work_root: &Path,
+    cache_db: Option<&TrayCacheDb>,
+) -> Result<(Vec<TrayImportCandidate>, Vec<(String, String)>), Box<dyn std::error::Error + Send + Sync>> {
+    if work_root.exists() {
+        fs::remove_dir_all(work_root)?;
+    }
+    fs::create_dir_all(work_root)?;
+
+    let mut candidates = Vec::new();
+    let mut failures = Vec::new();
+
+    for (idx, source) in sources.iter().enumerate() {
+        let label = source
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| source.display().to_string());
+
+        // O índice evita colisão entre dois arquivos de mesmo nome.
+        let dest = work_root.join(format!("{:03}_{}", idx, sanitize_import_name(Some(&label))));
+
+        let prepared = if is_tray_archive(source) {
+            crate::engine::installer::extract_archive(source, &dest)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        } else {
+            copy_loose_tray_file(source, &dest).map_err(|e| e.to_string())
+        };
+
+        if let Err(e) = prepared {
+            let _ = fs::remove_dir_all(&dest);
+            failures.push((label, e));
+            continue;
+        }
+
+        match analyze_tray_source(&dest, cache_db) {
+            Ok(analysis) if analysis.tray_files.is_empty() && analysis.package_files.is_empty() => {
+                let _ = fs::remove_dir_all(&dest);
+                failures.push((label, "nenhum arquivo de Sim, Lote ou CC encontrado".to_string()));
+            }
+            Ok(analysis) => candidates.push(TrayImportCandidate {
+                source: source.clone(),
+                analysis,
+            }),
+            Err(e) => {
+                let _ = fs::remove_dir_all(&dest);
+                failures.push((label, e.to_string()));
+            }
+        }
+    }
+
+    Ok((candidates, failures))
+}
+
+fn is_tray_archive(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase().as_str(),
+        "zip" | "7z" | "rar"
+    )
+}
+
+fn copy_loose_tray_file(source: &Path, dest_dir: &Path) -> io::Result<()> {
+    let filename = source
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    fs::create_dir_all(dest_dir)?;
+    fs::copy(source, dest_dir.join(filename))?;
+    Ok(())
+}
+
+/// Remove o diretório de trabalho. Seguro de chamar quando ele não existe.
+pub fn clear_tray_work_dir(work_root: &Path) -> io::Result<()> {
+    if work_root.exists() {
+        fs::remove_dir_all(work_root)?;
+    }
+    Ok(())
 }
 
 pub fn import_tray_item(

@@ -25,14 +25,15 @@ testável sem event loop.
 | Python (legacy) | Rust | Status |
 |---|---|---|
 | `s4common.py` | `core/config.rs` + `core/safety.rs` | ✅ portado |
-| `s4translator.py` | `core/i18n.rs` | ⚠️ portado, não conectado à UI |
-| `s4theme.py` | `ui/palette.slint` | ⚠️ tema não persiste |
+| `s4translator.py` | `core/i18n.rs` + `ui/i18n.slint` | ✅ ligado à UI |
+| `s4theme.py` | `ui/palette.slint` | ✅ tema persiste no config |
 | `s4installer.py` | `engine/installer.rs` | ✅ fluxo completo e testado |
 | `s4merger.py` | `engine/merger.rs` + `engine/dbpf.rs` | ✅ merge real + pós-merge |
-| `s4tray.py` | `engine/tray.rs` | ⚠️ engine ok, bridge é no-op |
-| `s4reshade.py` | `engine/reshade.rs` | ⚠️ quase completo |
+| `s4tray.py` | `engine/tray.rs` | ✅ importação real e testada |
+| `s4reshade.py` | `engine/reshade.rs` | ⚠️ parcial, retomada adiada |
 | `s4disabled.py` | `engine/disabled.rs` | ✅ ligado ao organizador |
-| `ui/*_tab.py` | `ui/views/*.slint` | ⚠️ layout pronto, strings hardcoded |
+| `ui/translations_tab.py` | `ui/views/translations.slint` | ⚠️ sem engine, só copia |
+| `ui/*_tab.py` | `ui/views/*.slint` | ⚠️ traduzidas; paridade de features pendente |
 
 ## Sequência de trabalho
 
@@ -135,33 +136,109 @@ depende do `DisabledManager`, então inverter a ordem evitaria um TODO.
 A lógica pós-merge vive no `engine/`, não no `bridge/`: é regra de negócio e
 precisa ser testável sem event loop (a regra de ouro no topo deste documento).
 
-### Etapa 4 — Tray
+### Etapa 4 — Tray ✅ concluída
 
-- [ ] `start_tray_import` deve chamar `analyze_tray_source()` e
-      `import_tray_item()`.
-- [ ] Preencher tipo e contagem de arquivos a partir da análise real
-      (hoje é `"Sim / Lote"` e `"1"` hardcoded).
+`start_tray_import` era um no-op decorativo: trocava o texto do status e nada
+saía do lugar. Tipo e contagem vinham hardcoded como `"Sim / Lote"` e `"1"`.
 
-### Etapa 5 — i18n e configurações
+- [x] Fluxo em duas fases igual ao installer: `prepare_tray_candidates()`
+      extrai e analisa as fontes num diretório de trabalho
+      (`TRAY_WORK_DIR`, fora de `Mods` e do `Tray`), depois `import_tray_item()`
+      grava nos destinos reais. Ambas em `spawn_blocking`.
+- [x] `TrayImportCandidate::kind_label()` / `total_files()` alimentam a lista
+      com a classificação real (Sim, Lote, só CC).
+- [x] Candidatos persistidos no `AppState`; `take_tray_candidates()` torna o
+      duplo-clique inofensivo, como no installer.
+- [x] Diretório de trabalho limpo a cada preparação (`clear_tray_work_dir`).
+- [x] 10 testes em `tests/tray_flow.rs`.
 
-- [ ] Expor `language` como property da `MainWindow` e trocar as strings
-      hardcoded das views por lookup traduzido.
-- [ ] Persistir tema e `merge_max_size` no config (`save_config` hoje é
-      um load-and-save sem efeito).
-- [ ] Reconciliar `assets/locales/*.json` com `legacy/locales/*.json`, que têm
-      bem mais chaves (en: 25 KB no legado vs 15 KB no atual; falta `pt.json`
-      quase inteiro, com apenas 82 bytes).
+`sanitize_import_name()` segue o `s4tray.py` — caracteres proibidos são
+removidos, não substituídos — mas colapsa os espaços que a remoção deixa para
+trás, senão `"Maria / Silva"` viraria a pasta `"Maria  Silva"`.
 
-### Etapa 6 — Reshade e acabamento
+### Etapa 5 — i18n e configurações ✅ concluída
 
-- [ ] Setar `is_reshade_installed` a partir do estado real em disco.
-- [ ] Mover o download HTTP do `install_reshade` para `spawn_blocking`
-      (hoje roda em `spawn_local` e trava a UI).
+- [x] `ui/i18n.slint`: global `I18n` com `tr(key)`, que lê `lang` antes de
+      chamar o callback Rust. Ler a property dentro da função é o que registra
+      a dependência — sem isso, trocar de idioma não reavaliaria binding algum
+      e a tela só mudaria depois de um reload.
+- [x] Chave de tradução é o próprio texto em português, mesma convenção do
+      PyQt: os locales do legado são reaproveitados sem reescrita, e o
+      português dispensa arquivo (`pt.json` fica mínimo por design).
+- [x] Todas as views passaram a usar `I18n.tr(...)`; `en.json` e `es.json`
+      reconciliados com o legado (382 e 383 chaves).
+- [x] Tema, idioma e `merge_limit_gb` persistidos de verdade no config e
+      reaplicados na abertura por `apply_config_to_ui()`.
+- [x] 7 testes em `tests/i18n_coverage.rs`, incluindo um que varre os `.slint`
+      atrás de `I18n.tr("…")` e falha se alguma chave não existir nos locales —
+      é o que impede uma string nova de aparecer em português no meio de uma
+      interface em inglês.
 
-### Etapa 7 — Testes e empacotamento
+### Etapa 6 — ReShade ⚠️ parcial (retomada adiada)
 
-- [x] `tests/installer_flow.rs`, `tests/organizer_flow.rs`,
-      `tests/merger_flow.rs` — 30 testes de integração, 35 no total com os
-      unitários.
-- [ ] Cobrir `tray` e `reshade` quando as etapas 4 e 6 fecharem.
-- [ ] Substituir o AppImage do PyInstaller por empacotamento do binário Rust.
+- [x] `detect_installation()` monta o `ReshadeStatus` a partir do disco:
+      DLL injetada, manifesto e contagem de presets.
+- [x] Download HTTP movido para `spawn_blocking` — em `spawn_local` ele rodava
+      na thread da UI e congelava a janela inteira.
+- [x] 8 testes em `tests/reshade_flow.rs`.
+- [ ] **Adiado por decisão do usuário:** o módulo precisa de mais trabalho de
+      implementação e será retomado depois da paridade dos demais. Inclui
+      revisar o `legacy/reshade.exe` versionado no repositório.
+
+## Paridade restante
+
+Comparação linha a linha entre `legacy/ui/*.py` e `ui/views/*.slint`. O port é
+funcional, mas estas peças do app PyQt ainda não existem no Rust/Slint.
+
+### Etapa 7 — Engine de traduções
+
+Hoje `on_select_translation_file` faz um `fs::copy` cru. O legado chama
+`install_mod()`: extrai `.zip`/`.7z`, valida o `.package` e reporta o erro.
+
+- [ ] `engine/translations.rs` portando `install_mod`.
+- [ ] Bridge em `spawn_blocking`, com falha visível na UI em vez de `let _ =`.
+- [ ] `tests/translations_flow.rs`.
+
+### Etapa 8 — Organizador completo
+
+A maior lacuna: `organizer_tab.py` tem 1112 linhas contra 211 do `.slint`.
+
+- [ ] Gerenciamento de arquivos: nova pasta, mover, copiar, renomear, excluir —
+      tudo through `core::safety`, nunca `fs::` direto.
+- [ ] Busca/filtro na árvore de mods.
+- [ ] Painel de desativados: restaurar e excluir em lote.
+- [ ] Auto-fix de profundidade de script (`check_script_depth` já detecta, mas
+      não corrige pela UI).
+
+### Etapa 9 — Tray e merger com paridade
+
+- [ ] Tray: pasta de destino por item, aplicar-a-todos, pular pacotes.
+- [ ] Merger: fila de jobs com destino editável por job (hoje é um merge por
+      vez).
+
+### Etapa 10 — Installer e dashboard: acabamento
+
+- [ ] `detect_mutually_exclusive` (diálogo de escolha entre variantes do mesmo
+      mod) e `detect_dependencies` — o segundo existe no engine e não é exibido.
+- [ ] Cards clicáveis do dashboard com diálogos de detalhe: tamanho por pasta,
+      scripts, tray.
+
+### Etapa 11 — Validação de todos os motores
+
+**Critério de conclusão do port.** O projeto só é dado como concluído quando
+todo motor passar aqui.
+
+- [x] Suíte por engine: installer (12), organizer (8), merger (10), tray (10),
+      reshade (8), i18n (7) + 5 unitários — 60 testes verdes.
+- [ ] Cobrir `disabled`, `dbpf` e `translations` com suíte própria.
+- [ ] Um teste headless de bridge por motor, garantindo que o callback Slint
+      chama o engine de verdade. É a classe de bug que já apareceu três vezes
+      neste port: `on_start_merge` simulado, `check_scripts` desconectado e
+      `start_tray_import` no-op — todos com engine correto e testado por trás.
+- [ ] Validação manual com a pasta `Mods` real, motor por motor, registrada em
+      `docs/VALIDACAO.md`.
+
+### Etapa 12 — Empacotamento
+
+- [ ] Substituir o AppImage do PyInstaller por empacotamento do binário Rust
+      (`cargo build --release`, `.desktop`, ícone).

@@ -1,3 +1,4 @@
+import { I18n } from "../i18n.slint";
 import { Theme } from "../palette.slint";
 import { Card } from "../components/card.slint";
 import { PrimaryButton } from "../components/button.slint";
@@ -30,7 +31,7 @@ export component MergerView inherits Rectangle {
         padding: 24px;
         spacing: 16px;
         Text {
-            text: "🔗 Unificador de Packages (Merger V2)";
+            text: I18n.tr("🔗 Unificador de Packages (Merger V2)");
             font-size: 22px;
             font-weight: 800;
             color: Theme.text_primary;
@@ -47,13 +48,13 @@ export component MergerView inherits Rectangle {
                 VerticalLayout {
                     alignment: center;
                     Text {
-                        text: "Merge de Alta Performance (DBPF Engine V2 em Rust)";
+                        text: I18n.tr("Merge de Alta Performance (DBPF Engine V2 em Rust)");
                         font-size: 14px;
                         font-weight: 700;
                         color: Theme.text_primary;
                     }
                     Text {
-                        text: "Unifica centenas de .package em partes organizadas com ordenação TGI para acelerar o jogo.";
+                        text: I18n.tr("Unifica centenas de .package em partes organizadas com ordenação TGI para acelerar o jogo.");
                         font-size: 12px;
                         color: Theme.text_secondary;
                     }
@@ -65,12 +66,12 @@ export component MergerView inherits Rectangle {
         HorizontalLayout {
             spacing: 12px;
             PrimaryButton {
-                text: "📁 Selecionar Pasta de Origem";
+                text: I18n.tr("📁 Selecionar Pasta de Origem");
                 enabled: !root.is_merging;
                 clicked => { root.select_input_clicked(); }
             }
             PrimaryButton {
-                text: "📁 Selecionar Pasta de Destino";
+                text: I18n.tr("📁 Selecionar Pasta de Destino");
                 enabled: !root.is_merging;
                 btn_color: Theme.surface_header;
                 hover_color: Theme.surface_hover;
@@ -78,7 +79,7 @@ export component MergerView inherits Rectangle {
             }
             Rectangle { horizontal-stretch: 1; }
             PrimaryButton {
-                text: root.is_merging ? "⏳ Unificando..." : "🚀 Iniciar Unificação";
+                text: root.is_merging ? I18n.tr("⏳ Unificando...") : I18n.tr("🚀 Iniciar Unificação");
                 // Sem origem e destino definidos não há merge possível.
                 enabled: !root.is_merging && root.items.length > 0 && root.output_dir != "";
                 btn_color: Theme.accent_color;
@@ -90,14 +91,14 @@ export component MergerView inherits Rectangle {
         HorizontalLayout {
             spacing: 16px;
             Text {
-                text: "Origem: " + (root.input_dir == "" ? "não selecionada" : root.input_dir);
+                text: I18n.tr("Origem: ") + (root.input_dir == "" ? I18n.tr("não selecionada") : root.input_dir);
                 font-size: 11px;
                 color: Theme.text_muted;
                 horizontal-stretch: 1;
                 overflow: elide;
             }
             Text {
-                text: "Destino: " + (root.output_dir == "" ? "não selecionado" : root.output_dir);
+                text: I18n.tr("Destino: ") + (root.output_dir == "" ? I18n.tr("não selecionado") : root.output_dir);
                 font-size: 11px;
                 color: root.output_dir == "" ? Theme.warning : Theme.text_muted;
                 horizontal-stretch: 1;
@@ -112,7 +113,7 @@ export component MergerView inherits Rectangle {
                 padding: 12px;
 
                 if root.items.length == 0 : Text {
-                    text: "Nenhum arquivo .package selecionado para merge.";
+                    text: I18n.tr("Nenhum arquivo .package selecionado para merge.");
                     font-size: 13px;
                     color: Theme.text_muted;
                     horizontal-alignment: center;
@@ -168,16 +169,16 @@ export component MergerView inherits Rectangle {
                 width: 500px;
                 VerticalLayout {
                     padding: 24px; spacing: 16px;
-                    Text { text: "✅ Merge Concluído"; font-size: 18px; font-weight: 700; color: Theme.text_primary; }
+                    Text { text: I18n.tr("✅ Merge Concluído"); font-size: 18px; font-weight: 700; color: Theme.text_primary; }
                     Text { text: root.post_merge_message; font-size: 14px; color: Theme.text_secondary; wrap: word-wrap; }
-                    Text { text: "O que deseja fazer com os arquivos originais?"; font-size: 14px; font-weight: 700; color: Theme.text_primary; }
+                    Text { text: I18n.tr("O que deseja fazer com os arquivos originais?"); font-size: 14px; font-weight: 700; color: Theme.text_primary; }
                     
                     VerticalLayout {
                         spacing: 8px;
-                        PrimaryButton { text: "Manter Originais (Recomendado para Testes)"; btn_color: Theme.surface_header; clicked => { root.post_merge_action("keep"); } }
-                        PrimaryButton { text: "Desativar (.disabled)"; btn_color: Theme.warning; clicked => { root.post_merge_action("disable"); } }
-                        PrimaryButton { text: "Mover para Backup (Zip)"; btn_color: Theme.info; clicked => { root.post_merge_action("backup"); } }
-                        PrimaryButton { text: "Excluir Definitivamente"; btn_color: Theme.danger; clicked => { root.post_merge_action("delete"); } }
+                        PrimaryButton { text: I18n.tr("Manter Originais (Recomendado para Testes)"); btn_color: Theme.surface_header; clicked => { root.post_merge_action("keep"); } }
+                        PrimaryButton { text: I18n.tr("Desativar (.disabled)"); btn_color: Theme.warning; clicked => { root.post_merge_action("disable"); } }
+                        PrimaryButton { text: I18n.tr("Mover para Backup (Zip)"); btn_color: Theme.info; clicked => { root.post_merge_action("backup"); } }
+                        PrimaryButton { text: I18n.tr("Excluir Definitivamente"); btn_color: Theme.danger; clicked => { root.post_merge_action("delete"); } }
                     }
                 }
             }

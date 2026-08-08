@@ -1,3 +1,4 @@
+import { I18n } from "../i18n.slint";
 import { Theme } from "../palette.slint";
 import { Card } from "../components/card.slint";
 import { PrimaryButton } from "../components/button.slint";
@@ -21,7 +22,7 @@ export component TrayView inherits Rectangle {
         spacing: 16px;
 
         Text {
-            text: "🗂️ Importador de Sims e Lotes (Tray Importer V3)";
+            text: I18n.tr("🗂️ Importador de Sims e Lotes (Tray Importer V3)");
             font-size: 22px;
             font-weight: 800;
             color: Theme.text_primary;
@@ -30,12 +31,13 @@ export component TrayView inherits Rectangle {
         HorizontalLayout {
             spacing: 12px;
             PrimaryButton {
-                text: "📁 Selecionar Zips / Arquivos Tray";
+                text: I18n.tr("📁 Selecionar Zips / Arquivos Tray");
+                enabled: !root.is_importing;
                 clicked => { root.select_tray_files_clicked(); }
             }
             Rectangle { horizontal-stretch: 1; }
             PrimaryButton {
-                text: "📥 Iniciar Importação em Lote";
+                text: root.is_importing ? I18n.tr("⏳ Processando...") : I18n.tr("📥 Iniciar Importação em Lote");
                 enabled: root.tray_items.length > 0 && !root.is_importing;
                 btn_color: Theme.primary_color;
                 hover_color: Theme.primary_hover;
@@ -49,7 +51,7 @@ export component TrayView inherits Rectangle {
                 padding: 12px;
 
                 if root.tray_items.length == 0 : Text {
-                    text: "Nenhum arquivo de Sim/Lote na fila de importação.";
+                    text: I18n.tr("Nenhum arquivo de Sim/Lote na fila de importação.");
                     font-size: 13px;
                     color: Theme.text_muted;
                     horizontal-alignment: center;
@@ -63,7 +65,7 @@ export component TrayView inherits Rectangle {
                     alignment: center;
                     Text { text: "👤 " + item.name; font-size: 13px; font-weight: 600; color: Theme.text_primary; horizontal-stretch: 1; vertical-alignment: center; }
                     Text { text: item.type_str; font-size: 12px; color: Theme.text_secondary; width: 120px; vertical-alignment: center; }
-                    Text { text: item.files_count + " arquivos"; font-size: 12px; color: Theme.accent_color; width: 100px; vertical-alignment: center; }
+                    Text { text: item.files_count + " " + I18n.tr("arquivos"); font-size: 12px; color: Theme.accent_color; width: 100px; vertical-alignment: center; }
                 }
             }
         }

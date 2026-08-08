@@ -1,3 +1,4 @@
+import { I18n } from "../i18n.slint";
 import { Theme } from "../palette.slint";
 import { Card } from "../components/card.slint";
 import { PrimaryButton } from "../components/button.slint";
@@ -12,13 +13,18 @@ export component ConfigView inherits Rectangle {
     callback select_game_path_clicked();
     callback autodetect_game_path_clicked();
     callback save_config_clicked();
+    /// "pt" | "en" | "es"
+    callback language_selected(string);
+    callback theme_selected(int);
+    /// Limite de tamanho por parte gerada pelo merger, em GB.
+    callback merge_limit_selected(string);
 
     VerticalLayout {
         padding: 24px;
         spacing: 16px;
 
         Text {
-            text: "⚙️ Configurações do Aplicativo";
+            text: I18n.tr("⚙️ Configurações do Aplicativo");
             font-size: 22px;
             font-weight: 800;
             color: Theme.text_primary;
@@ -30,19 +36,19 @@ export component ConfigView inherits Rectangle {
                 padding: 20px;
                 spacing: 12px;
 
-                Text { text: "Pasta Raiz do The Sims 4 (Game/Bin)"; font-size: 15px; font-weight: 700; color: Theme.text_primary; }
+                Text { text: I18n.tr("Pasta Raiz do The Sims 4 (Game/Bin)"); font-size: 15px; font-weight: 700; color: Theme.text_primary; }
 
                 HorizontalLayout {
                     spacing: 10px;
                     Text { text: root.game_path != "" ? root.game_path : "Não configurada"; font-size: 13px; color: Theme.text_secondary; horizontal-stretch: 1; vertical-alignment: center; }
                     PrimaryButton {
-                        text: "📁 Procurar";
+                        text: I18n.tr("📁 Procurar");
                         btn_color: Theme.surface_header;
                         hover_color: Theme.surface_hover;
                         clicked => { root.select_game_path_clicked(); }
                     }
                     PrimaryButton {
-                        text: "🔍 Auto-Detectar";
+                        text: I18n.tr("🔍 Auto-Detectar");
                         btn_color: Theme.primary_color;
                         hover_color: Theme.primary_hover;
                         clicked => { root.autodetect_game_path_clicked(); }
@@ -57,38 +63,101 @@ export component ConfigView inherits Rectangle {
                 padding: 20px;
                 spacing: 16px;
 
-                Text { text: "Personalização Visual & Idioma"; font-size: 15px; font-weight: 700; color: Theme.text_primary; }
+                Text { text: I18n.tr("Personalização Visual & Idioma"); font-size: 15px; font-weight: 700; color: Theme.text_primary; }
 
-                HorizontalLayout {
-                    spacing: 16px;
-
-                    VerticalLayout {
-                        spacing: 6px;
-                        Text { text: "Tema Visual:"; font-size: 13px; color: Theme.text_secondary; }
-                        HorizontalLayout {
-                            spacing: 8px;
-                            PrimaryButton {
-                                text: "🟢 Sims Green";
-                                btn_color: root.active_theme_idx == 0 ? #15803d : Theme.surface_header;
-                                clicked => { Theme.active_theme = 0; }
-                            }
-                            PrimaryButton {
-                                text: "🔵 Deep Blue";
-                                btn_color: root.active_theme_idx == 1 ? #1e40af : Theme.surface_header;
-                                clicked => { Theme.active_theme = 1; }
-                            }
-                            PrimaryButton {
-                                text: "🟣 Cyber Purple";
-                                btn_color: root.active_theme_idx == 2 ? #7e22ce : Theme.surface_header;
-                                clicked => { Theme.active_theme = 2; }
-                            }
-                            PrimaryButton {
-                                text: "🩷 Neon Pink";
-                                btn_color: root.active_theme_idx == 3 ? #be185d : Theme.surface_header;
-                                clicked => { Theme.active_theme = 3; }
-                            }
+                VerticalLayout {
+                    spacing: 6px;
+                    Text { text: I18n.tr("Tema Visual:"); font-size: 13px; color: Theme.text_secondary; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        PrimaryButton {
+                            text: I18n.tr("🟢 Sims Green");
+                            btn_color: root.active_theme_idx == 0 ? #15803d : Theme.surface_header;
+                            clicked => { Theme.active_theme = 0; root.theme_selected(0); }
+                        }
+                        PrimaryButton {
+                            text: I18n.tr("🔵 Deep Blue");
+                            btn_color: root.active_theme_idx == 1 ? #1e40af : Theme.surface_header;
+                            clicked => { Theme.active_theme = 1; root.theme_selected(1); }
+                        }
+                        PrimaryButton {
+                            text: I18n.tr("🟣 Cyber Purple");
+                            btn_color: root.active_theme_idx == 2 ? #7e22ce : Theme.surface_header;
+                            clicked => { Theme.active_theme = 2; root.theme_selected(2); }
+                        }
+                        PrimaryButton {
+                            text: I18n.tr("🩷 Neon Pink");
+                            btn_color: root.active_theme_idx == 3 ? #be185d : Theme.surface_header;
+                            clicked => { Theme.active_theme = 3; root.theme_selected(3); }
                         }
                     }
+                }
+
+                // Idioma: a troca é imediata, sem reiniciar — os bindings que
+                // chamam I18n.tr dependem de I18n.lang e reavaliam sozinhos.
+                VerticalLayout {
+                    spacing: 6px;
+                    Text { text: I18n.tr("Idioma:"); font-size: 13px; color: Theme.text_secondary; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        PrimaryButton {
+                            text: "🇧🇷 Português";
+                            btn_color: root.active_language == "pt" ? Theme.primary_color : Theme.surface_header;
+                            clicked => { root.language_selected("pt"); }
+                        }
+                        PrimaryButton {
+                            text: "🇺🇸 English";
+                            btn_color: root.active_language == "en" ? Theme.primary_color : Theme.surface_header;
+                            clicked => { root.language_selected("en"); }
+                        }
+                        PrimaryButton {
+                            text: "🇪🇸 Español";
+                            btn_color: root.active_language == "es" ? Theme.primary_color : Theme.surface_header;
+                            clicked => { root.language_selected("es"); }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                }
+            }
+        }
+
+        // Merger Section
+        Card {
+            VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+
+                Text { text: I18n.tr("Limite de Tamanho por Parte (Merger)"); font-size: 15px; font-weight: 700; color: Theme.text_primary; }
+                Text {
+                    text: I18n.tr("Packages muito grandes podem travar o carregamento do jogo. 1 GB é o valor seguro para a maioria dos casos.");
+                    font-size: 12px;
+                    color: Theme.text_muted;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    PrimaryButton {
+                        text: "0.5 GB";
+                        btn_color: root.merge_limit_gb == "0.5" ? Theme.primary_color : Theme.surface_header;
+                        clicked => { root.merge_limit_selected("0.5"); }
+                    }
+                    PrimaryButton {
+                        text: "1.0 GB";
+                        btn_color: root.merge_limit_gb == "1" || root.merge_limit_gb == "1.0" ? Theme.primary_color : Theme.surface_header;
+                        clicked => { root.merge_limit_selected("1.0"); }
+                    }
+                    PrimaryButton {
+                        text: "2.0 GB";
+                        btn_color: root.merge_limit_gb == "2" || root.merge_limit_gb == "2.0" ? Theme.primary_color : Theme.surface_header;
+                        clicked => { root.merge_limit_selected("2.0"); }
+                    }
+                    PrimaryButton {
+                        text: "4.0 GB";
+                        btn_color: root.merge_limit_gb == "4" || root.merge_limit_gb == "4.0" ? Theme.primary_color : Theme.surface_header;
+                        clicked => { root.merge_limit_selected("4.0"); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
                 }
             }
         }
@@ -97,7 +166,7 @@ export component ConfigView inherits Rectangle {
         HorizontalLayout {
             spacing: 12px;
             PrimaryButton {
-                text: "💾 Salvar Configurações";
+                text: I18n.tr("💾 Salvar Configurações");
                 icon_str: "💾";
                 btn_color: Theme.accent_color;
                 clicked => { root.save_config_clicked(); }

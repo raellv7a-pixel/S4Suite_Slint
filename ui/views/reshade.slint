@@ -1,3 +1,4 @@
+import { I18n } from "../i18n.slint";
 import { Theme } from "../palette.slint";
 import { Card } from "../components/card.slint";
 import { PrimaryButton } from "../components/button.slint";
@@ -6,6 +7,11 @@ export component ReshadeView inherits Rectangle {
     in property <string> env_type: "GENERIC";
     in property <string> env_command: "WINEDLLOVERRIDES=\"dxgi=n,b\" %command%";
     in property <bool> is_installed: false;
+    /// DLL usada como proxy: "dxgi.dll", "d3d11.dll"...
+    in property <string> injected_dll: "";
+    in property <string> presets_count: "0";
+    /// Download + injeção em andamento.
+    in property <bool> is_busy: false;
     in property <string> reshade_status: "Aguardando ação...";
 
     callback install_reshade_clicked();
@@ -18,7 +24,7 @@ export component ReshadeView inherits Rectangle {
         spacing: 16px;
 
         Text {
-            text: "🔮 Gerenciador ReShade (Linux Edition)";
+            text: I18n.tr("🔮 Gerenciador ReShade (Linux Edition)");
             font-size: 22px;
             font-weight: 800;
             color: Theme.text_primary;
@@ -33,7 +39,7 @@ export component ReshadeView inherits Rectangle {
                 padding: 16px;
                 spacing: 8px;
                 HorizontalLayout {
-                    Text { text: "🐧 Detector de Ambiente Linux: "; font-size: 14px; font-weight: 700; color: Theme.text_primary; }
+                    Text { text: I18n.tr("🐧 Detector de Ambiente Linux: "); font-size: 14px; font-weight: 700; color: Theme.text_primary; }
                     Text { text: root.env_type; font-size: 14px; font-weight: 800; color: Theme.accent_color; }
                 }
                 HorizontalLayout {
@@ -41,7 +47,7 @@ export component ReshadeView inherits Rectangle {
                     alignment: center;
                     Text { text: root.env_command; font-size: 13px; font-weight: 600; color: Theme.info; horizontal-stretch: 1; vertical-alignment: center; }
                     PrimaryButton {
-                        text: "📋 Copiar Comando";
+                        text: I18n.tr("📋 Copiar Comando");
                         btn_color: Theme.surface_header;
                         hover_color: Theme.surface_hover;
                         clicked => { root.copy_command_clicked(); }
@@ -57,31 +63,61 @@ export component ReshadeView inherits Rectangle {
                 spacing: 14px;
 
                 Text {
-                    text: "Injeção e Gerenciamento DX11";
+                    text: I18n.tr("Injeção e Gerenciamento DX11");
                     font-size: 15px;
                     font-weight: 700;
                     color: Theme.text_primary;
                 }
 
+                // Estado real lido do disco, não do manifesto: o usuário pode
+                // ter instalado o ReShade por fora ou apagado a DLL na mão.
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: root.is_installed
+                            ? "🟢 " + I18n.tr("ReShade instalado") + " (" + root.injected_dll + ")"
+                            : "⚪ " + I18n.tr("ReShade não instalado");
+                        font-size: 13px;
+                        font-weight: 600;
+                        color: root.is_installed ? Theme.success : Theme.text_muted;
+                        vertical-alignment: center;
+                    }
+                    if root.is_installed : Text {
+                        text: "·  " + root.presets_count + " " + I18n.tr("preset(s)");
+                        font-size: 13px;
+                        color: Theme.text_secondary;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+
                 HorizontalLayout {
                     spacing: 12px;
                     PrimaryButton {
-                        text: "✨ Instalar ReShade (5.9.2 Stable)";
+                        text: root.is_busy
+                            ? I18n.tr("⏳ Baixando e injetando...")
+                            : (root.is_installed
+                                ? I18n.tr("🔄 Reinstalar ReShade (5.9.2)")
+                                : I18n.tr("✨ Instalar ReShade (5.9.2 Stable)"));
                         icon_str: "✨";
+                        enabled: !root.is_busy;
                         btn_color: Theme.primary_color;
                         hover_color: Theme.primary_hover;
                         clicked => { root.install_reshade_clicked(); }
                     }
                     PrimaryButton {
-                        text: "📦 Instalar Preset (.zip)";
+                        text: I18n.tr("📦 Instalar Preset (.zip)");
                         icon_str: "📦";
+                        // Preset sem ReShade instalado não tem o que carregar.
+                        enabled: root.is_installed && !root.is_busy;
                         btn_color: Theme.surface_header;
                         hover_color: Theme.surface_hover;
                         clicked => { root.install_preset_clicked(); }
                     }
                     PrimaryButton {
-                        text: "🗑️ Desinstalar ReShade";
+                        text: I18n.tr("🗑️ Desinstalar ReShade");
                         icon_str: "🗑️";
+                        enabled: root.is_installed && !root.is_busy;
                         btn_color: Theme.danger;
                         hover_color: Theme.danger.darker(0.2);
                         clicked => { root.uninstall_reshade_clicked(); }

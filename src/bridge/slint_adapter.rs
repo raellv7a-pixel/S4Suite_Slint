@@ -12,7 +12,13 @@ use crate::engine::organizer::{
     auto_fix_script_depth, check_script_depth, detect_duplicates, find_junk_files, remove_files,
     scan_mods_tree,
 };
-use crate::engine::reshade::{detect_environment, install_reshade, install_shader_preset, uninstall_reshade};
+use crate::engine::reshade::{
+    detect_environment, detect_installation, install_reshade, install_shader_preset,
+    uninstall_reshade,
+};
+use crate::engine::tray::{
+    clear_tray_work_dir, import_tray_item, prepare_tray_candidates, TrayCacheDb,
+};
 use crate::MainWindow;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use std::fs::{self, File};
@@ -23,6 +29,12 @@ use std::sync::Arc;
 
 pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, state: Arc<AppState>) {
     let weak_win = window.as_weak();
+
+    // Tradução: a UI chama I18n.tr(chave), que repassa para core::i18n::t com
+    // o idioma corrente. Precisa ser instalado antes do primeiro refresh.
+    let i18n = window.global::<crate::I18n>();
+    i18n.on_translate(|lang, key| SharedString::from(t(key.as_str(), lang.as_str())));
+    i18n.set_lang(SharedString::from(config_mgr.load().language.clone()));
 
     // Initial stats load
     refresh_dashboard_stats(&weak_win, &config_mgr);
@@ -803,34 +815,182 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     });
 
     // Callback: select_tray_files
+    // Extrai e analisa cada fonte para mostrar o que ela realmente contém.
+    // Antes a fila exibia "Sim / Lote" e "1" fixos, sem abrir os arquivos.
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_select_tray_files(move || {
-        if let Some(files) = rfd::FileDialog::new()
-            .add_filter("Sims / Lot Archives", &["zip", "7z", "rar", "trayitem", "householdbinary"])
+        let Some(files) = rfd::FileDialog::new()
+            .add_filter(
+                "Sims / Lot Archives",
+                &["zip", "7z", "rar", "trayitem", "householdbinary", "sgi", "hhi", "bpi", "blueprint", "room", "rmi"],
+            )
             .pick_files()
-        {
-            let model = Rc::new(VecModel::default());
-            for f in files {
-                model.push(crate::TrayItem {
-                    name: SharedString::from(f.file_name().unwrap_or_default().to_string_lossy().to_string()),
-                    type_str: SharedString::from("Sim / Lote"),
-                    files_count: SharedString::from("1"),
-                });
-            }
-            if let Some(w) = weak_clone.upgrade() {
-                w.set_tray_items(ModelRc::from(model));
-                w.set_tray_status(SharedString::from("Arquivos de Tray adicionados à fila."));
-            }
+        else {
+            return;
+        };
+
+        state_clone.set_tray_sources(files.clone());
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_is_importing_tray(true);
+            w.set_tray_status(SharedString::from("🔎 Extraindo e analisando arquivos de Tray..."));
         }
+
+        let work_dir = state_clone.tray_work_dir().to_path_buf();
+        let db_path = cfg_clone.config_dir().join("mods_cache.db");
+        let weak_async = weak_clone.clone();
+        let state_async = Arc::clone(&state_clone);
+
+        tokio::task::spawn_blocking(move || {
+            // O cache de hashes é um bônus: sem ele a análise roda igual,
+            // apenas sem marcar CC que já está instalado.
+            let cache = TrayCacheDb::open(&db_path).ok();
+            let result = prepare_tray_candidates(&files, &work_dir, cache.as_ref());
+
+            match result {
+                Ok((candidates, failures)) => {
+                    let rows: Vec<(String, String, String)> = candidates
+                        .iter()
+                        .map(|c| {
+                            let dups = c.analysis.duplicate_count;
+                            let count = if dups > 0 {
+                                format!("{} ({} dup.)", c.total_files(), dups)
+                            } else {
+                                c.total_files().to_string()
+                            };
+                            (
+                                c.analysis.detected_name.clone(),
+                                c.kind_label().to_string(),
+                                count,
+                            )
+                        })
+                        .collect();
+
+                    let mut status = if rows.is_empty() {
+                        "⚠️ Nenhum Sim, Lote ou CC encontrado nos arquivos escolhidos.".to_string()
+                    } else {
+                        format!("{} item(ns) prontos para importar.", rows.len())
+                    };
+                    if !failures.is_empty() {
+                        status.push_str(&format!(
+                            " ⚠️ {} ignorado(s): {}",
+                            failures.len(),
+                            failures
+                                .iter()
+                                .map(|(n, e)| format!("{} ({})", n, e))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ));
+                    }
+
+                    state_async.set_tray_candidates(candidates);
+
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = weak_async.upgrade() {
+                            let model = Rc::new(VecModel::default());
+                            for (name, kind, count) in rows {
+                                model.push(crate::TrayItem {
+                                    name: SharedString::from(name),
+                                    type_str: SharedString::from(kind),
+                                    files_count: SharedString::from(count),
+                                });
+                            }
+                            w.set_is_importing_tray(false);
+                            w.set_tray_items(ModelRc::from(model));
+                            w.set_tray_status(SharedString::from(status));
+                        }
+                    });
+                }
+                Err(e) => {
+                    let msg = format!("❌ Falha ao analisar os arquivos: {}", e);
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = weak_async.upgrade() {
+                            w.set_is_importing_tray(false);
+                            w.set_tray_status(SharedString::from(msg));
+                        }
+                    });
+                }
+            }
+        });
     });
 
     // Callback: start_tray_import
+    // Copia os arquivos de Tray para a pasta Tray e o CC para
+    // Mods/Imported_Sims/<nome>. Antes só trocava o texto do status.
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_start_tray_import(move || {
+        let config = cfg_clone.load();
+        let Some(sims_path) = config.sims4_path.clone() else {
+            if let Some(w) = weak_clone.upgrade() {
+                w.set_tray_status(SharedString::from("⚠️ Configure a pasta do jogo antes de importar."));
+            }
+            return;
+        };
+
+        let candidates = state_clone.take_tray_candidates();
+        if candidates.is_empty() {
+            if let Some(w) = weak_clone.upgrade() {
+                w.set_tray_status(SharedString::from("⚠️ Nenhum item analisado na fila. Selecione arquivos primeiro."));
+            }
+            return;
+        }
+
+        let tray_dir = get_tray_dir(&sims_path);
+        let mods_dir = get_mods_dir(&sims_path);
+        let allowed_roots = vec![tray_dir.clone(), mods_dir.clone()];
+        let work_dir = state_clone.tray_work_dir().to_path_buf();
+
         if let Some(w) = weak_clone.upgrade() {
             w.set_is_importing_tray(true);
-            w.set_tray_status(SharedString::from("📥 Importando arquivos de Sims e Lotes..."));
+            w.set_tray_status(SharedString::from("📥 Importando Sims, Lotes e CC..."));
         }
+
+        let weak_async = weak_clone.clone();
+        let state_async = Arc::clone(&state_clone);
+        tokio::task::spawn_blocking(move || {
+            let mut tray_total = 0;
+            let mut cc_total = 0;
+            let mut skipped_total = 0;
+            let mut failures: Vec<String> = Vec::new();
+
+            for candidate in &candidates {
+                match import_tray_item(&candidate.analysis, &tray_dir, &mods_dir, &allowed_roots) {
+                    Ok((tray_n, cc_n, skipped)) => {
+                        tray_total += tray_n;
+                        cc_total += cc_n;
+                        skipped_total += skipped;
+                    }
+                    // `import_tray_item` reverte a própria cópia; seguimos com
+                    // os demais itens.
+                    Err(e) => failures.push(format!("{} ({})", candidate.analysis.detected_name, e)),
+                }
+            }
+
+            let _ = clear_tray_work_dir(&work_dir);
+            state_async.clear_tray();
+
+            let mut msg = format!(
+                "✅ Importação concluída: {} arquivo(s) de Tray e {} de CC.",
+                tray_total, cc_total
+            );
+            if skipped_total > 0 {
+                msg.push_str(&format!(" {} CC já instalado(s) foram ignorados.", skipped_total));
+            }
+            if !failures.is_empty() {
+                msg.push_str(&format!(" ⚠️ Falhas: {}", failures.join(", ")));
+            }
+
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(w) = weak_async.upgrade() {
+                    w.set_is_importing_tray(false);
+                    w.set_tray_items(ModelRc::from(Rc::new(VecModel::default())));
+                    w.set_tray_status(SharedString::from(msg));
+                }
+            });
+        });
     });
 
     // Callback: select_translation_file
@@ -872,26 +1032,40 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     });
 
     // Callback: install_reshade
+    // O download do setup são dezenas de MB por HTTP: em `spawn_local` isso
+    // rodava na thread da UI e congelava a janela inteira.
     let cfg_clone = Arc::clone(&config_mgr);
     let weak_clone = weak_win.clone();
     window.on_install_reshade(move || {
         let config = cfg_clone.load();
-        if let Some(sims_path) = &config.sims4_path {
-            let game_bin = sims_path.join("Game").join("Bin");
+        let Some(sims_path) = config.sims4_path.clone() else {
             if let Some(w) = weak_clone.upgrade() {
-                w.set_reshade_status(SharedString::from("🌐 Baixando e injetando ReShade (5.9.2)..."));
+                w.set_reshade_status(SharedString::from("⚠️ Configure a pasta do jogo antes de instalar o ReShade."));
             }
-            let weak_async = weak_clone.clone();
-            slint::spawn_local(async move {
-                let res = install_reshade(&game_bin, None, false);
-                if let Some(w) = weak_async.upgrade() {
-                    match res {
-                        Ok(_) => w.set_reshade_status(SharedString::from("✅ ReShade (5.9.2) instalado com sucesso!")),
-                        Err(e) => w.set_reshade_status(SharedString::from(format!("❌ Erro ao instalar ReShade: {}", e))),
-                    }
-                }
-            }).unwrap();
+            return;
+        };
+        let game_bin = game_bin_dir(&sims_path);
+
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_is_reshade_busy(true);
+            w.set_reshade_status(SharedString::from("🌐 Baixando e injetando ReShade (5.9.2)..."));
         }
+
+        let weak_async = weak_clone.clone();
+        let cfg_async = Arc::clone(&cfg_clone);
+        tokio::task::spawn_blocking(move || {
+            let msg = match install_reshade(&game_bin, None, false) {
+                Ok(()) => "✅ ReShade (5.9.2) instalado com sucesso!".to_string(),
+                Err(e) => format!("❌ Erro ao instalar ReShade: {}", e),
+            };
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(w) = weak_async.upgrade() {
+                    w.set_is_reshade_busy(false);
+                    w.set_reshade_status(SharedString::from(msg));
+                }
+                refresh_reshade_env(&weak_async, &cfg_async);
+            });
+        });
     });
 
     // Callback: uninstall_reshade
@@ -899,14 +1073,21 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let weak_clone = weak_win.clone();
     window.on_uninstall_reshade(move || {
         let config = cfg_clone.load();
-        if let Some(sims_path) = &config.sims4_path {
-            let game_bin = sims_path.join("Game").join("Bin");
-            let allowed_roots = vec![game_bin.clone()];
-            let _ = uninstall_reshade(&game_bin, &allowed_roots);
-            if let Some(w) = weak_clone.upgrade() {
-                w.set_reshade_status(SharedString::from("🗑️ ReShade desinstalado e backups restaurados."));
-            }
+        let Some(sims_path) = config.sims4_path.clone() else {
+            return;
+        };
+        let game_bin = game_bin_dir(&sims_path);
+        let allowed_roots = vec![game_bin.clone()];
+
+        let msg = match uninstall_reshade(&game_bin, &allowed_roots) {
+            Ok(()) => "🗑️ ReShade desinstalado e backups restaurados.".to_string(),
+            Err(e) => format!("❌ Falha ao desinstalar: {}", e),
+        };
+
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_reshade_status(SharedString::from(msg));
         }
+        refresh_reshade_env(&weak_clone, &cfg_clone);
     });
 
     // Callback: install_preset
@@ -914,18 +1095,27 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let weak_clone = weak_win.clone();
     window.on_install_preset(move || {
         let config = cfg_clone.load();
-        if let Some(sims_path) = &config.sims4_path {
-            let game_bin = sims_path.join("Game").join("Bin");
-            if let Some(file) = rfd::FileDialog::new()
-                .add_filter("Preset Zip", &["zip"])
-                .pick_file()
-            {
-                let _ = install_shader_preset(&game_bin, &file);
-                if let Some(w) = weak_clone.upgrade() {
-                    w.set_reshade_status(SharedString::from("📦 Preset de gráficos instalado."));
-                }
-            }
+        let Some(sims_path) = config.sims4_path.clone() else {
+            return;
+        };
+        let game_bin = game_bin_dir(&sims_path);
+
+        let Some(file) = rfd::FileDialog::new()
+            .add_filter("Preset Zip", &["zip"])
+            .pick_file()
+        else {
+            return;
+        };
+
+        let msg = match install_shader_preset(&game_bin, &file) {
+            Ok(()) => "📦 Preset de gráficos instalado na pasta presets/.".to_string(),
+            Err(e) => format!("❌ Não foi possível instalar o preset: {}", e),
+        };
+
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_reshade_status(SharedString::from(msg));
         }
+        refresh_reshade_env(&weak_clone, &cfg_clone);
     });
 
     // Callback: copy_reshade_command
@@ -977,16 +1167,98 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         }
     });
 
+    // Callback: language_selected
+    // A troca é imediata: I18n.lang alimenta os bindings que chamam tr().
+    let cfg_clone = Arc::clone(&config_mgr);
+    let weak_clone = weak_win.clone();
+    window.on_language_selected(move |lang| {
+        let mut cfg = cfg_clone.load();
+        cfg.language = lang.to_string();
+        let saved = cfg_clone.save(&cfg).is_ok();
+
+        if let Some(w) = weak_clone.upgrade() {
+            w.global::<crate::I18n>().set_lang(lang.clone());
+            w.set_active_language(lang);
+            w.set_config_status(SharedString::from(if saved {
+                t("✅ Configurações salvas!", &cfg.language)
+            } else {
+                "⚠️ Idioma alterado, mas não foi possível gravar o arquivo de configuração.".to_string()
+            }));
+        }
+    });
+
+    // Callback: theme_selected
+    let cfg_clone = Arc::clone(&config_mgr);
+    let weak_clone = weak_win.clone();
+    window.on_theme_selected(move |idx| {
+        let mut cfg = cfg_clone.load();
+        cfg.theme = theme_name_from_index(idx).to_string();
+        let saved = cfg_clone.save(&cfg).is_ok();
+
+        if let Some(w) = weak_clone.upgrade() {
+            if !saved {
+                w.set_config_status(SharedString::from(
+                    "⚠️ Tema aplicado, mas não foi possível gravá-lo no arquivo de configuração.",
+                ));
+            }
+        }
+    });
+
+    // Callback: merge_limit_selected
+    let cfg_clone = Arc::clone(&config_mgr);
+    let weak_clone = weak_win.clone();
+    window.on_merge_limit_selected(move |gb| {
+        let Ok(value) = gb.parse::<f64>() else { return };
+        let mut cfg = cfg_clone.load();
+        cfg.merge_limit_gb = value;
+        let _ = cfg_clone.save(&cfg);
+
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_merge_max_size(gb);
+            w.set_config_status(SharedString::from(format!(
+                "Limite de {} GB por parte gerada pelo merger.",
+                value
+            )));
+        }
+    });
+
     // Callback: save_config
     let cfg_clone = Arc::clone(&config_mgr);
     let weak_clone = weak_win.clone();
     window.on_save_config(move || {
         let cfg = cfg_clone.load();
-        let _ = cfg_clone.save(&cfg);
+        let msg = match cfg_clone.save(&cfg) {
+            Ok(()) => t("✅ Configurações salvas!", &cfg.language),
+            Err(e) => format!("❌ Não foi possível salvar: {}", e),
+        };
         if let Some(w) = weak_clone.upgrade() {
-            w.set_config_status(SharedString::from("✅ Configurações salvas!"));
+            w.set_config_status(SharedString::from(msg));
         }
     });
+
+    // Reflete na UI o que estava salvo no config.
+    apply_config_to_ui(&weak_win, &config_mgr);
+}
+
+const THEME_NAMES: [&str; 4] = ["Sims Green", "Deep Blue", "Cyber Purple", "Neon Pink"];
+
+fn theme_name_from_index(idx: i32) -> &'static str {
+    THEME_NAMES.get(idx as usize).copied().unwrap_or(THEME_NAMES[0])
+}
+
+fn theme_index_from_name(name: &str) -> i32 {
+    THEME_NAMES.iter().position(|n| *n == name).unwrap_or(0) as i32
+}
+
+/// Carrega idioma, tema e limite do merger do arquivo de configuração para a UI.
+fn apply_config_to_ui(weak_win: &slint::Weak<MainWindow>, config_mgr: &ConfigManager) {
+    let cfg = config_mgr.load();
+    if let Some(w) = weak_win.upgrade() {
+        w.set_active_language(SharedString::from(cfg.language.clone()));
+        w.global::<crate::I18n>().set_lang(SharedString::from(cfg.language));
+        w.global::<crate::Theme>().set_active_theme(theme_index_from_name(&cfg.theme));
+        w.set_merge_max_size(SharedString::from(format!("{}", cfg.merge_limit_gb)));
+    }
 }
 
 fn to_string_model(items: Vec<String>) -> ModelRc<SharedString> {
@@ -1087,11 +1359,16 @@ fn refresh_organizer_tree(weak_win: &slint::Weak<MainWindow>, config_mgr: &Confi
     }
 }
 
+/// Pasta dos binários do jogo, onde a DLL do ReShade é injetada.
+fn game_bin_dir(sims4_path: &Path) -> PathBuf {
+    sims4_path.join("Game").join("Bin")
+}
+
 fn refresh_reshade_env(weak_win: &slint::Weak<MainWindow>, config_mgr: &ConfigManager) {
     let config = config_mgr.load();
     if let Some(w) = weak_win.upgrade() {
         if let Some(sims_path) = &config.sims4_path {
-            let game_bin = sims_path.join("Game").join("Bin");
+            let game_bin = game_bin_dir(sims_path);
             let (env_type, env_cmd) = detect_environment(&game_bin);
             let env_str = match env_type {
                 crate::engine::reshade::LinuxEnvType::Steam => "Steam (Proton)",
@@ -1100,6 +1377,15 @@ fn refresh_reshade_env(weak_win: &slint::Weak<MainWindow>, config_mgr: &ConfigMa
             };
             w.set_reshade_env_type(SharedString::from(env_str));
             w.set_reshade_env_command(SharedString::from(env_cmd));
+
+            // Estado real em disco: até agora `is_reshade_installed` nunca era
+            // preenchido, então a tela sempre dizia "não instalado".
+            let status = detect_installation(&game_bin);
+            w.set_is_reshade_installed(status.installed);
+            w.set_reshade_injected_dll(SharedString::from(
+                status.injected_dll.clone().unwrap_or_default(),
+            ));
+            w.set_reshade_presets_count(SharedString::from(status.presets_count.to_string()));
         }
     }
 }

@@ -1,3 +1,4 @@
+import { I18n } from "../i18n.slint";
 import { Theme } from "../palette.slint";
 
 export component SidebarItem inherits Rectangle {
@@ -67,13 +68,13 @@ export component Sidebar inherits Rectangle {
                 VerticalLayout {
                     alignment: center;
                     Text {
-                        text: "S4Suite";
+                        text: I18n.tr("S4Suite");
                         font-size: 20px;
                         font-weight: 800;
                         color: Theme.text_primary;
                     }
                     Text {
-                        text: "Linux Edition v2.0";
+                        text: I18n.tr("Linux Edition v2.0");
                         font-size: 11px;
                         color: Theme.accent_color;
                     }
@@ -84,49 +85,49 @@ export component Sidebar inherits Rectangle {
         Rectangle { height: 12px; }
 
         SidebarItem {
-            text: "Início";
+            text: I18n.tr("Início");
             icon_str: "🏠";
             active: current_tab == 0;
             clicked => { current_tab = 0; root.tab_changed(0); }
         }
         SidebarItem {
-            text: "Instalador";
+            text: I18n.tr("Instalador");
             icon_str: "📦";
             active: current_tab == 1;
             clicked => { current_tab = 1; root.tab_changed(1); }
         }
         SidebarItem {
-            text: "Organizador";
+            text: I18n.tr("Organizador");
             icon_str: "📂";
             active: current_tab == 2;
             clicked => { current_tab = 2; root.tab_changed(2); }
         }
         SidebarItem {
-            text: "Merger";
+            text: I18n.tr("Merger");
             icon_str: "🔗";
             active: current_tab == 3;
             clicked => { current_tab = 3; root.tab_changed(3); }
         }
         SidebarItem {
-            text: "Tray Importer";
+            text: I18n.tr("Tray Importer");
             icon_str: "🗂️";
             active: current_tab == 4;
             clicked => { current_tab = 4; root.tab_changed(4); }
         }
         SidebarItem {
-            text: "Traduções";
+            text: I18n.tr("Traduções");
             icon_str: "🌐";
             active: current_tab == 5;
             clicked => { current_tab = 5; root.tab_changed(5); }
         }
         SidebarItem {
-            text: "ReShade";
+            text: I18n.tr("ReShade");
             icon_str: "🔮";
             active: current_tab == 6;
             clicked => { current_tab = 6; root.tab_changed(6); }
         }
         SidebarItem {
-            text: "Configurações";
+            text: I18n.tr("Configurações");
             icon_str: "⚙️";
             active: current_tab == 7;
             clicked => { current_tab = 7; root.tab_changed(7); }
@@ -135,7 +136,7 @@ export component Sidebar inherits Rectangle {
         Rectangle { vertical-stretch: 1; }
 
         Text {
-            text: "Rust + Slint Native";
+            text: I18n.tr("Rust + Slint Native");
             font-size: 11px;
             color: Theme.text_muted;
             horizontal-alignment: center;

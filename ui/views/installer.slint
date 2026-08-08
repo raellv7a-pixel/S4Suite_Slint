@@ -1,3 +1,4 @@
+import { I18n } from "../i18n.slint";
 import { Theme } from "../palette.slint";
 import { Card } from "../components/card.slint";
 import { PrimaryButton } from "../components/button.slint";
@@ -28,7 +29,7 @@ export component InstallerView inherits Rectangle {
 
         // Title
         Text {
-            text: "📦 Smart Mod Installer V4";
+            text: I18n.tr("📦 Smart Mod Installer V4");
             font-size: 22px;
             font-weight: 800;
             color: Theme.text_primary;
@@ -45,14 +46,14 @@ export component InstallerView inherits Rectangle {
                 alignment: center;
 
                 Text {
-                    text: "📥 Arraste arquivos (.zip, .7z, .rar, .package, .ts4script) para esta área";
+                    text: I18n.tr("📥 Arraste arquivos (.zip, .7z, .rar, .package, .ts4script) para esta área");
                     font-size: 15px;
                     font-weight: 600;
                     color: Theme.text_primary;
                     horizontal-alignment: center;
                 }
                 Text {
-                    text: "O Smart Installer verifica segurança contra executáveis, resolve conflitos e cria backups de rollback.";
+                    text: I18n.tr("O Smart Installer verifica segurança contra executáveis, resolve conflitos e cria backups de rollback.");
                     font-size: 12px;
                     color: Theme.text_secondary;
                     horizontal-alignment: center;
@@ -61,7 +62,7 @@ export component InstallerView inherits Rectangle {
                 HorizontalLayout {
                     alignment: center;
                     PrimaryButton {
-                        text: "📁 Selecionar Arquivos de Mods";
+                        text: I18n.tr("📁 Selecionar Arquivos de Mods");
                         icon_str: "📁";
                         clicked => { root.select_files_clicked(); }
                     }
@@ -73,7 +74,7 @@ export component InstallerView inherits Rectangle {
         HorizontalLayout {
             spacing: 12px;
             Text {
-                text: "Fila de Instalação (" + root.queue_items.length + " itens)";
+                text: I18n.tr("Fila de Instalação") + " (" + root.queue_items.length + ")";
                 font-size: 16px;
                 font-weight: 700;
                 color: Theme.text_primary;
@@ -81,13 +82,13 @@ export component InstallerView inherits Rectangle {
                 horizontal-stretch: 1;
             }
             PrimaryButton {
-                text: "🧹 Limpar Fila";
+                text: I18n.tr("🧹 Limpar Fila");
                 btn_color: Theme.surface_header;
                 hover_color: Theme.surface_hover;
                 clicked => { root.clear_queue_clicked(); }
             }
             PrimaryButton {
-                text: "⚡ Iniciar Instalação";
+                text: I18n.tr("⚡ Iniciar Instalação");
                 enabled: root.queue_items.length > 0 && !root.is_installing;
                 clicked => { root.start_install_clicked(); }
             }
@@ -100,7 +101,7 @@ export component InstallerView inherits Rectangle {
                 padding: 12px;
 
                 if root.queue_items.length == 0 : Text {
-                    text: "Nenhum arquivo na fila de instalação.";
+                    text: I18n.tr("Nenhum arquivo na fila de instalação.");
                     font-size: 13px;
                     color: Theme.text_muted;
                     horizontal-alignment: center;
@@ -144,13 +145,13 @@ export component InstallerView inherits Rectangle {
                 width: 500px;
                 VerticalLayout {
                     padding: 24px; spacing: 16px;
-                    Text { text: "⚠️ Scan Cuidadoso"; font-size: 18px; font-weight: 700; color: Theme.warning; }
+                    Text { text: I18n.tr("⚠️ Scan Cuidadoso"); font-size: 18px; font-weight: 700; color: Theme.warning; }
                     Text { text: root.careful_scan_message; font-size: 14px; color: Theme.text_primary; wrap: word-wrap; }
                     
                     HorizontalLayout {
                         spacing: 12px;
-                        PrimaryButton { text: "❌ Cancelar Instalação"; btn_color: Theme.surface_header; clicked => { root.cancel_install_clicked(); } }
-                        PrimaryButton { text: "⚡ Prosseguir com Instalação"; btn_color: Theme.accent_color; clicked => { root.proceed_install_clicked(); } }
+                        PrimaryButton { text: I18n.tr("❌ Cancelar Instalação"); btn_color: Theme.surface_header; clicked => { root.cancel_install_clicked(); } }
+                        PrimaryButton { text: I18n.tr("⚡ Prosseguir com Instalação"); btn_color: Theme.accent_color; clicked => { root.proceed_install_clicked(); } }
                     }
                 }
             }
