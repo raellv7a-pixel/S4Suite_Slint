@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 #[derive(RustEmbed)]
-#[folder = "locales/"]
+#[folder = "assets/locales/"]
 struct LocaleAssets;
 
 pub struct Translator {
