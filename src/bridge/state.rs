@@ -1,6 +1,6 @@
 use crate::engine::disabled::DisabledManager;
 use crate::engine::installer::ConflictReport;
-use crate::engine::organizer::DuplicateGroup;
+use crate::engine::organizer::{DuplicateGroup, TransferMode};
 use crate::engine::tray::{TrayImportCandidate, TRAY_WORK_DIR};
 use parking_lot::Mutex;
 use std::path::{Path, PathBuf};
@@ -13,6 +13,25 @@ use std::path::{Path, PathBuf};
 pub enum PendingOrganizerAction {
     RemoveDuplicates(Vec<DuplicateGroup>),
     CleanJunk(Vec<PathBuf>),
+    /// Exclusão de itens escolhidos à mão no explorador.
+    DeleteSelection(Vec<PathBuf>),
+    /// Exclusão definitiva de mods que estavam apenas desativados.
+    DeleteDisabled(Vec<PathBuf>),
+}
+
+/// Para que serve o texto que o usuário está digitando no diálogo.
+///
+/// Um só diálogo atende os dois casos; sem guardar a intenção, o "OK" não teria
+/// como saber se cria uma pasta ou renomeia o item.
+pub enum PendingInput {
+    CreateFolder { parent: PathBuf },
+    Rename { target: PathBuf },
+}
+
+/// Transferência esperando o usuário escolher a pasta de destino.
+pub struct PendingTransfer {
+    pub sources: Vec<PathBuf>,
+    pub mode: TransferMode,
 }
 
 /// Estado que precisa sobreviver entre callbacks da UI.
@@ -27,10 +46,19 @@ pub struct AppState {
     /// Análise de conflitos aguardando confirmação no diálogo.
     pending_install: Mutex<Option<ConflictReport>>,
 
-    /// Item selecionado na árvore do organizador.
-    selected_mod: Mutex<Option<PathBuf>>,
+    /// Itens marcados na árvore do organizador. As operações do explorador
+    /// agem sobre este conjunto, como no menu de contexto do app PyQt.
+    selected_mods: Mutex<Vec<PathBuf>>,
+    /// Texto de busca ativo, preservado entre recargas da árvore.
+    organizer_search: Mutex<String>,
     /// Remoção aguardando confirmação no diálogo do organizador.
     pending_organizer: Mutex<Option<PendingOrganizerAction>>,
+    /// Nome sendo digitado (nova pasta ou renomeação).
+    pending_input: Mutex<Option<PendingInput>>,
+    /// Mover/copiar aguardando a escolha do destino.
+    pending_transfer: Mutex<Option<PendingTransfer>>,
+    /// Desativados marcados no painel, para restaurar ou excluir em lote.
+    selected_disabled: Mutex<Vec<PathBuf>>,
 
     /// Packages encontrados na pasta de origem do merge.
     merger_inputs: Mutex<Vec<PathBuf>>,
@@ -52,8 +80,12 @@ impl AppState {
         Self {
             installer_sources: Mutex::new(Vec::new()),
             pending_install: Mutex::new(None),
-            selected_mod: Mutex::new(None),
+            selected_mods: Mutex::new(Vec::new()),
+            organizer_search: Mutex::new(String::new()),
             pending_organizer: Mutex::new(None),
+            pending_input: Mutex::new(None),
+            pending_transfer: Mutex::new(None),
+            selected_disabled: Mutex::new(Vec::new()),
             merger_inputs: Mutex::new(Vec::new()),
             merger_output: Mutex::new(None),
             tray_sources: Mutex::new(Vec::new()),
@@ -94,12 +126,43 @@ impl AppState {
 
     // --- Organizador ---
 
-    pub fn set_selected_mod(&self, path: Option<PathBuf>) {
-        *self.selected_mod.lock() = path;
+    /// Marca ou desmarca um item da árvore, devolvendo se ele ficou marcado.
+    pub fn toggle_selected_mod(&self, path: PathBuf) -> bool {
+        let mut selected = self.selected_mods.lock();
+        match selected.iter().position(|p| *p == path) {
+            Some(idx) => {
+                selected.remove(idx);
+                false
+            }
+            None => {
+                selected.push(path);
+                true
+            }
+        }
     }
 
-    pub fn selected_mod(&self) -> Option<PathBuf> {
-        self.selected_mod.lock().clone()
+    pub fn selected_mods(&self) -> Vec<PathBuf> {
+        self.selected_mods.lock().clone()
+    }
+
+    pub fn clear_selected_mods(&self) {
+        self.selected_mods.lock().clear();
+    }
+
+    /// Descarta da seleção o que não existe mais em disco.
+    ///
+    /// Depois de mover ou excluir, os caminhos antigos continuariam marcados e
+    /// a próxima operação agiria sobre arquivos que já não estão lá.
+    pub fn prune_selected_mods(&self) {
+        self.selected_mods.lock().retain(|p| p.exists());
+    }
+
+    pub fn set_organizer_search(&self, query: String) {
+        *self.organizer_search.lock() = query;
+    }
+
+    pub fn organizer_search(&self) -> String {
+        self.organizer_search.lock().clone()
     }
 
     pub fn set_pending_organizer(&self, action: PendingOrganizerAction) {
@@ -108,6 +171,44 @@ impl AppState {
 
     pub fn take_pending_organizer(&self) -> Option<PendingOrganizerAction> {
         self.pending_organizer.lock().take()
+    }
+
+    pub fn set_pending_input(&self, input: PendingInput) {
+        *self.pending_input.lock() = Some(input);
+    }
+
+    pub fn take_pending_input(&self) -> Option<PendingInput> {
+        self.pending_input.lock().take()
+    }
+
+    pub fn set_pending_transfer(&self, transfer: PendingTransfer) {
+        *self.pending_transfer.lock() = Some(transfer);
+    }
+
+    pub fn take_pending_transfer(&self) -> Option<PendingTransfer> {
+        self.pending_transfer.lock().take()
+    }
+
+    pub fn toggle_selected_disabled(&self, path: PathBuf) -> bool {
+        let mut selected = self.selected_disabled.lock();
+        match selected.iter().position(|p| *p == path) {
+            Some(idx) => {
+                selected.remove(idx);
+                false
+            }
+            None => {
+                selected.push(path);
+                true
+            }
+        }
+    }
+
+    pub fn selected_disabled(&self) -> Vec<PathBuf> {
+        self.selected_disabled.lock().clone()
+    }
+
+    pub fn clear_selected_disabled(&self) {
+        self.selected_disabled.lock().clear();
     }
 
     // --- Merger ---

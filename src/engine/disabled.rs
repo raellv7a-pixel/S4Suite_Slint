@@ -125,6 +125,88 @@ impl DisabledManager {
     }
 }
 
+/// Um mod desativado, como aparece no painel de desativados.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DisabledMod {
+    pub path: PathBuf,
+    /// Nome sem o sufixo `.disabled`, que é o que o usuário reconhece.
+    pub name: String,
+    pub reason: String,
+    pub note: String,
+    /// Está no manifesto mas sumiu do disco — o usuário apagou por fora.
+    pub missing: bool,
+}
+
+impl DisabledManager {
+    /// Lista os mods desativados dentro de `mods_dir`.
+    ///
+    /// A fonte da verdade é o disco, não o manifesto: um `.disabled` renomeado
+    /// à mão por fora do app precisa aparecer aqui, senão fica invisível e sem
+    /// como ser reativado. O manifesto só enriquece o que foi encontrado, e as
+    /// entradas órfãs entram marcadas como `missing` para poderem ser limpas.
+    pub fn list_disabled(&self, mods_dir: &Path) -> Vec<DisabledMod> {
+        let manifest = self.load_manifest();
+        let mut items = Vec::new();
+        let mut seen: Vec<String> = Vec::new();
+
+        for entry in crate::engine::walk_user_mods(mods_dir, usize::MAX) {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let fname = entry.file_name().to_string_lossy().to_string();
+            if !fname.ends_with(".disabled") {
+                continue;
+            }
+
+            let key = path.display().to_string();
+            let record = manifest.get(&key);
+            seen.push(key);
+
+            items.push(DisabledMod {
+                path: path.to_path_buf(),
+                name: fname.trim_end_matches(".disabled").to_string(),
+                reason: record.map(|e| e.reason.clone()).unwrap_or_else(|| "manual".to_string()),
+                note: record.map(|e| e.note.clone()).unwrap_or_default(),
+                missing: false,
+            });
+        }
+
+        for (key, record) in &manifest {
+            if seen.iter().any(|s| s == key) {
+                continue;
+            }
+            let path = PathBuf::from(key);
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().trim_end_matches(".disabled").to_string())
+                .unwrap_or_else(|| key.clone());
+            items.push(DisabledMod {
+                path,
+                name,
+                reason: record.reason.clone(),
+                note: record.note.clone(),
+                missing: true,
+            });
+        }
+
+        items.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        items
+    }
+
+    /// Remove do manifesto as entradas cujo arquivo não existe mais.
+    pub fn prune_missing(&self) -> Result<usize, io::Error> {
+        let mut manifest = self.load_manifest();
+        let before = manifest.len();
+        manifest.retain(|key, _| Path::new(key).exists());
+        let removed = before - manifest.len();
+        if removed > 0 {
+            self.save_manifest(&manifest)?;
+        }
+        Ok(removed)
+    }
+}
+
 fn chrono_like_now() -> String {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
     format!("{}", now.as_secs())

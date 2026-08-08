@@ -1,4 +1,6 @@
-use crate::bridge::state::{AppState, PendingOrganizerAction};
+use crate::bridge::state::{
+    AppState, PendingInput, PendingOrganizerAction, PendingTransfer,
+};
 use crate::core::config::{get_mods_dir, get_saves_dir, get_tray_dir, ConfigManager};
 use crate::core::i18n::t;
 use crate::engine::installer::{
@@ -9,8 +11,9 @@ use crate::engine::merger::{
     apply_post_merge_action, common_ancestor, merge_sims4_packages, MergeTask, PostMergeAction,
 };
 use crate::engine::organizer::{
-    auto_fix_script_depth, check_script_depth, detect_duplicates, find_junk_files, remove_files,
-    scan_mods_tree,
+    auto_fix_script_depth, check_script_depth, create_folder, detect_duplicates, filter_tree,
+    find_junk_files, remove_entries, remove_files, rename_item, scan_mods_tree, transfer_items,
+    TransferMode,
 };
 use crate::engine::reshade::{
     detect_environment, detect_installation, install_reshade, install_shader_preset,
@@ -39,18 +42,19 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
 
     // Initial stats load
     refresh_dashboard_stats(&weak_win, &config_mgr);
-    refresh_organizer_tree(&weak_win, &config_mgr);
+    refresh_organizer_tree(&weak_win, &config_mgr, &state);
     refresh_reshade_env(&weak_win, &config_mgr);
     refresh_translations_list(&weak_win, &config_mgr);
 
     // Callback: select_tab
     let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_select_tab(move |idx| {
         if idx == 0 {
             refresh_dashboard_stats(&weak_clone, &cfg_clone);
         } else if idx == 2 {
-            refresh_organizer_tree(&weak_clone, &cfg_clone);
+            refresh_organizer_tree(&weak_clone, &cfg_clone, &state_clone);
         } else if idx == 5 {
             refresh_translations_list(&weak_clone, &cfg_clone);
         } else if idx == 6 {
@@ -350,27 +354,65 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     });
     // Callback: refresh_mod_tree
     let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_refresh_mod_tree(move || {
-        refresh_organizer_tree(&weak_clone, &cfg_clone);
+        refresh_organizer_tree(&weak_clone, &cfg_clone, &state_clone);
     });
 
     // Callback: select_mod_entry
+    //
+    // Um clique alterna a marcação, como a multisseleção da árvore no app PyQt.
+    // `selected_mod_path` continua apontando para o último **arquivo** tocado,
+    // porque ativar/desativar age sobre um só e não vale para pastas.
+    let cfg_clone = Arc::clone(&config_mgr);
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_select_mod_entry(move |path| {
         let path_buf = PathBuf::from(path.as_str());
-        let is_disabled = path.as_str().ends_with(".disabled");
-        state_clone.set_selected_mod(Some(path_buf));
+        let ficou_marcado = state_clone.toggle_selected_mod(path_buf.clone());
+        let is_file = path_buf.is_file();
 
         if let Some(w) = weak_clone.upgrade() {
-            w.set_selected_mod_path(path);
-            w.set_selected_mod_is_disabled(is_disabled);
+            if is_file && ficou_marcado {
+                w.set_selected_mod_path(path.clone());
+                w.set_selected_mod_is_disabled(path.as_str().ends_with(".disabled"));
+            } else if !ficou_marcado && w.get_selected_mod_path() == path {
+                w.set_selected_mod_path(SharedString::default());
+                w.set_selected_mod_is_disabled(false);
+            }
         }
+        refresh_organizer_tree(&weak_clone, &cfg_clone, &state_clone);
+    });
+
+    // Callback: organizer_search_changed
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_organizer_search_changed(move |query| {
+        state_clone.set_organizer_search(query.to_string());
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_organizer_search(query);
+        }
+        refresh_organizer_tree(&weak_clone, &cfg_clone, &state_clone);
+    });
+
+    // Callback: clear_mod_selection
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_clear_mod_selection(move || {
+        state_clone.clear_selected_mods();
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_selected_mod_path(SharedString::default());
+            w.set_selected_mod_is_disabled(false);
+        }
+        refresh_organizer_tree(&weak_clone, &cfg_clone, &state_clone);
     });
 
     // Callback: check_scripts
     let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_check_scripts(move || {
         let config = cfg_clone.load();
@@ -383,7 +425,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                 }
             } else {
                 let fixed = auto_fix_script_depth(&issues, &mods_dir).unwrap_or(0);
-                refresh_organizer_tree(&weak_clone, &cfg_clone);
+                refresh_organizer_tree(&weak_clone, &cfg_clone, &state_clone);
                 if let Some(w) = weak_clone.upgrade() {
                     w.set_organizer_status(SharedString::from(format!(
                         "🔧 {} script(s) movidos para 00_Scripts_Corrigidos",
@@ -422,8 +464,8 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         };
 
         // O caminho selecionado deixou de existir de qualquer forma.
-        state_clone.set_selected_mod(None);
-        refresh_organizer_tree(&weak_clone, &cfg_clone);
+        state_clone.clear_selected_mods();
+        refresh_organizer_tree(&weak_clone, &cfg_clone, &state_clone);
 
         if let Some(w) = weak_clone.upgrade() {
             w.set_selected_mod_path(SharedString::default());
@@ -432,6 +474,358 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                 Ok(msg) => msg,
                 Err(e) => format!("❌ Não foi possível alternar o mod: {}", e),
             }));
+        }
+    });
+
+    // --- Explorador de arquivos do organizador ---
+    //
+    // Nova pasta e renomear compartilham um único diálogo de texto; a intenção
+    // fica no `AppState` para o "Confirmar" saber qual das duas executar.
+
+    // Callback: create_mod_folder
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_create_mod_folder(move || {
+        let config = cfg_clone.load();
+        let Some(sims_path) = config.sims4_path.clone() else { return };
+        let mods_dir = get_mods_dir(&sims_path);
+
+        // Com uma pasta marcada, a nova nasce dentro dela; senão, na raiz.
+        let selected = state_clone.selected_mods();
+        let parent = selected
+            .iter()
+            .find(|p| p.is_dir())
+            .cloned()
+            .unwrap_or_else(|| mods_dir.clone());
+
+        state_clone.set_pending_input(PendingInput::CreateFolder { parent: parent.clone() });
+
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_organizer_input_title(SharedString::from(format!(
+                "Nova pasta em {}",
+                display_path(&parent, &mods_dir)
+            )));
+            w.set_organizer_input_placeholder(SharedString::from("Nome da nova pasta"));
+            w.set_organizer_input_initial(SharedString::default());
+            w.set_show_organizer_input(true);
+        }
+    });
+
+    // Callback: rename_selected_mod
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_rename_selected_mod(move || {
+        let config = cfg_clone.load();
+        let Some(sims_path) = config.sims4_path.clone() else { return };
+        let mods_dir = get_mods_dir(&sims_path);
+
+        let selected = state_clone.selected_mods();
+        let [target] = selected.as_slice() else {
+            if let Some(w) = weak_clone.upgrade() {
+                w.set_organizer_status(SharedString::from(
+                    "⚠️ Marque exatamente um item para renomear.",
+                ));
+            }
+            return;
+        };
+
+        let atual = target.file_name().unwrap_or_default().to_string_lossy().to_string();
+        state_clone.set_pending_input(PendingInput::Rename { target: target.clone() });
+
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_organizer_input_title(SharedString::from(format!(
+                "Renomear {}",
+                display_path(target, &mods_dir)
+            )));
+            w.set_organizer_input_placeholder(SharedString::from("Novo nome"));
+            w.set_organizer_input_initial(SharedString::from(atual));
+            w.set_show_organizer_input(true);
+        }
+    });
+
+    // Callback: confirm_organizer_input
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_confirm_organizer_input(move |nome| {
+        let config = cfg_clone.load();
+        let Some(sims_path) = config.sims4_path.clone() else { return };
+        let mods_dir = get_mods_dir(&sims_path);
+
+        // `take` fecha a porta para um duplo-clique executar a ação duas vezes.
+        let Some(pending) = state_clone.take_pending_input() else { return };
+
+        let msg = match pending {
+            PendingInput::CreateFolder { parent } => {
+                match create_folder(&parent, nome.as_str(), &mods_dir) {
+                    Ok(dir) => format!("📁 Pasta criada: {}", display_path(&dir, &mods_dir)),
+                    Err(e) => format!("❌ {}", e),
+                }
+            }
+            PendingInput::Rename { target } => {
+                match rename_item(&target, nome.as_str(), &mods_dir) {
+                    Ok(novo) => {
+                        state_clone.clear_selected_mods();
+                        format!("✏️ Renomeado para {}", display_path(&novo, &mods_dir))
+                    }
+                    Err(e) => format!("❌ {}", e),
+                }
+            }
+        };
+
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_show_organizer_input(false);
+        }
+        refresh_organizer_tree(&weak_clone, &cfg_clone, &state_clone);
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_organizer_status(SharedString::from(msg));
+        }
+    });
+
+    // Callback: cancel_organizer_input
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_cancel_organizer_input(move || {
+        state_clone.take_pending_input();
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_show_organizer_input(false);
+        }
+    });
+
+    // Callback: move_selected_mods / copy_selected_mods
+    // Ambos abrem o mesmo seletor de pasta; o modo fica guardado no estado.
+    for modo in [TransferMode::Move, TransferMode::Copy] {
+        let cfg_clone = Arc::clone(&config_mgr);
+        let state_clone = Arc::clone(&state);
+        let weak_clone = weak_win.clone();
+        let abrir_seletor = move || {
+            let config = cfg_clone.load();
+            let Some(sims_path) = config.sims4_path.clone() else { return };
+            let mods_dir = get_mods_dir(&sims_path);
+
+            let sources = state_clone.selected_mods();
+            if sources.is_empty() {
+                if let Some(w) = weak_clone.upgrade() {
+                    w.set_organizer_status(SharedString::from(
+                        "⚠️ Marque os itens que deseja transferir.",
+                    ));
+                }
+                return;
+            }
+
+            state_clone.set_pending_transfer(PendingTransfer { sources, mode: modo });
+
+            let model = Rc::new(VecModel::default());
+            for (label, path) in folder_choices(&mods_dir) {
+                model.push(crate::FolderChoice {
+                    label: SharedString::from(label),
+                    path_str: SharedString::from(path.display().to_string()),
+                });
+            }
+
+            if let Some(w) = weak_clone.upgrade() {
+                w.set_folder_choices(ModelRc::from(model));
+                w.set_folder_picker_title(SharedString::from(match modo {
+                    TransferMode::Move => "Mover para...",
+                    TransferMode::Copy => "Copiar para...",
+                }));
+                w.set_show_folder_picker(true);
+            }
+        };
+
+        match modo {
+            TransferMode::Move => window.on_move_selected_mods(abrir_seletor),
+            TransferMode::Copy => window.on_copy_selected_mods(abrir_seletor),
+        }
+    }
+
+    // Callback: folder_destination_picked
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_folder_destination_picked(move |destino| {
+        let config = cfg_clone.load();
+        let Some(sims_path) = config.sims4_path.clone() else { return };
+        let mods_dir = get_mods_dir(&sims_path);
+
+        let Some(pending) = state_clone.take_pending_transfer() else { return };
+        let dest = PathBuf::from(destino.as_str());
+
+        let msg = match transfer_items(&pending.sources, &dest, pending.mode, &mods_dir) {
+            Ok(outcome) => {
+                let verbo = match pending.mode {
+                    TransferMode::Move => "movido(s)",
+                    TransferMode::Copy => "copiado(s)",
+                };
+                let mut texto = format!(
+                    "✅ {} item(ns) {} para {}.",
+                    outcome.done,
+                    verbo,
+                    display_path(&dest, &mods_dir)
+                );
+                // O arquivo chegou ao destino, mas o jogo não vai carregá-lo lá.
+                if !outcome.script_warnings.is_empty() {
+                    texto.push_str(&format!(
+                        " ⚠️ {} script(s) ficaram fundos demais para o jogo carregar.",
+                        outcome.script_warnings.len()
+                    ));
+                }
+                if !outcome.failures.is_empty() {
+                    texto.push_str(&format!(" ❌ {} falha(s).", outcome.failures.len()));
+                }
+                texto
+            }
+            Err(e) => format!("❌ {}", e),
+        };
+
+        state_clone.clear_selected_mods();
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_show_folder_picker(false);
+            w.set_selected_mod_path(SharedString::default());
+        }
+        refresh_organizer_tree(&weak_clone, &cfg_clone, &state_clone);
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_organizer_status(SharedString::from(msg));
+        }
+    });
+
+    // Callback: cancel_folder_pick
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_cancel_folder_pick(move || {
+        state_clone.take_pending_transfer();
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_show_folder_picker(false);
+        }
+    });
+
+    // Callback: delete_selected_mods
+    // Nada é apagado às cegas: o diálogo lista o que vai embora, como no resto
+    // do organizador.
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_delete_selected_mods(move || {
+        let config = cfg_clone.load();
+        let Some(sims_path) = config.sims4_path.clone() else { return };
+        let mods_dir = get_mods_dir(&sims_path);
+
+        let alvos = state_clone.selected_mods();
+        if alvos.is_empty() {
+            return;
+        }
+
+        let rotulos: Vec<String> = alvos.iter().map(|p| display_path(p, &mods_dir)).collect();
+        state_clone.set_pending_organizer(PendingOrganizerAction::DeleteSelection(alvos.clone()));
+
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_organizer_confirm_title(SharedString::from("Confirmar exclusão"));
+            w.set_organizer_confirm_message(SharedString::from(format!(
+                "{} item(ns) serão apagados permanentemente:",
+                alvos.len()
+            )));
+            w.set_organizer_confirm_items(to_string_model(rotulos));
+            w.set_show_organizer_confirm(true);
+        }
+    });
+
+    // --- Painel de desativados ---
+
+    // Callback: open_disabled_panel
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_open_disabled_panel(move || {
+        state_clone.clear_selected_disabled();
+        refresh_disabled_panel(&weak_clone, &cfg_clone, &state_clone);
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_show_disabled_panel(true);
+        }
+    });
+
+    // Callback: close_disabled_panel
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_close_disabled_panel(move || {
+        state_clone.clear_selected_disabled();
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_show_disabled_panel(false);
+        }
+    });
+
+    // Callback: toggle_disabled_selection
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_toggle_disabled_selection(move |path| {
+        state_clone.toggle_selected_disabled(PathBuf::from(path.as_str()));
+        refresh_disabled_panel(&weak_clone, &cfg_clone, &state_clone);
+    });
+
+    // Callback: restore_selected_disabled
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_restore_selected_disabled(move || {
+        let config = cfg_clone.load();
+        let Some(sims_path) = config.sims4_path.clone() else { return };
+        let mods_dir = get_mods_dir(&sims_path);
+        let mgr = state_clone.disabled_manager();
+
+        let mut restaurados = 0;
+        let mut falhas = Vec::new();
+        for path in state_clone.selected_disabled() {
+            match mgr.enable_mod(&path, &mods_dir) {
+                Ok(_) => restaurados += 1,
+                Err(e) => falhas.push(format!("{}: {}", file_label(&path), e)),
+            }
+        }
+
+        // Um registro órfão não tem arquivo para restaurar; some do manifesto.
+        let _ = mgr.prune_missing();
+        state_clone.clear_selected_disabled();
+
+        let mut msg = format!("🟢 {} mod(s) reativado(s).", restaurados);
+        if !falhas.is_empty() {
+            msg.push_str(&format!(" ❌ Falhas: {}", falhas.join(", ")));
+        }
+
+        refresh_disabled_panel(&weak_clone, &cfg_clone, &state_clone);
+        refresh_organizer_tree(&weak_clone, &cfg_clone, &state_clone);
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_organizer_status(SharedString::from(msg));
+        }
+    });
+
+    // Callback: delete_selected_disabled
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_delete_selected_disabled(move || {
+        let config = cfg_clone.load();
+        let Some(sims_path) = config.sims4_path.clone() else { return };
+        let mods_dir = get_mods_dir(&sims_path);
+
+        let alvos = state_clone.selected_disabled();
+        if alvos.is_empty() {
+            return;
+        }
+
+        let rotulos: Vec<String> = alvos.iter().map(|p| display_path(p, &mods_dir)).collect();
+        state_clone.set_pending_organizer(PendingOrganizerAction::DeleteDisabled(alvos.clone()));
+
+        if let Some(w) = weak_clone.upgrade() {
+            // O painel sai da frente para o diálogo de confirmação aparecer.
+            w.set_show_disabled_panel(false);
+            w.set_organizer_confirm_title(SharedString::from("Excluir mods desativados"));
+            w.set_organizer_confirm_message(SharedString::from(format!(
+                "{} mod(s) desativado(s) serão apagados de vez — isto não pode ser desfeito:",
+                alvos.len()
+            )));
+            w.set_organizer_confirm_items(to_string_model(rotulos));
+            w.set_show_organizer_confirm(true);
         }
     });
 
@@ -552,18 +946,35 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             w.set_organizer_status(SharedString::from("🗑️ Removendo arquivos..."));
         }
 
-        let (targets, what) = match pending {
+        // `usa_pastas` decide entre `remove_files`, que recusa diretórios de
+        // propósito, e `remove_entries`. Na limpeza de lixo e nas duplicatas
+        // uma pasta na lista só poderia ser engano; no explorador o usuário
+        // marcou a pasta de propósito.
+        let (targets, what, usa_pastas) = match pending {
             PendingOrganizerAction::RemoveDuplicates(groups) => (
                 groups.iter().flat_map(|g| g.redundant()).collect::<Vec<_>>(),
                 "duplicata(s)",
+                false,
             ),
-            PendingOrganizerAction::CleanJunk(files) => (files, "arquivo(s) de lixo"),
+            PendingOrganizerAction::CleanJunk(files) => (files, "arquivo(s) de lixo", false),
+            PendingOrganizerAction::DeleteSelection(paths) => (paths, "item(ns)", true),
+            PendingOrganizerAction::DeleteDisabled(paths) => {
+                (paths, "mod(s) desativado(s)", false)
+            }
         };
+
+        state_clone.clear_selected_mods();
+        state_clone.clear_selected_disabled();
 
         let weak_async = weak_clone.clone();
         let cfg_async = Arc::clone(&cfg_clone);
+        let state_async = Arc::clone(&state_clone);
         tokio::task::spawn_blocking(move || {
-            let outcome = remove_files(&targets, &allowed_roots);
+            let outcome = if usa_pastas {
+                remove_entries(&targets, &allowed_roots)
+            } else {
+                remove_files(&targets, &allowed_roots)
+            };
             let mut msg = format!(
                 "🗑️ {} {} removidos ({} liberados).",
                 outcome.removed,
@@ -575,7 +986,8 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             }
 
             let _ = slint::invoke_from_event_loop(move || {
-                refresh_organizer_tree(&weak_async, &cfg_async);
+                refresh_organizer_tree(&weak_async, &cfg_async, &state_async);
+                refresh_disabled_panel(&weak_async, &cfg_async, &state_async);
                 if let Some(w) = weak_async.upgrade() {
                     w.set_organizer_status(SharedString::from(msg));
                 }
@@ -1310,6 +1722,18 @@ fn to_string_model(items: Vec<String>) -> ModelRc<SharedString> {
     ModelRc::from(model)
 }
 
+/// Caminho como o usuário o reconhece: relativo a `Mods`, nunca o absoluto.
+///
+/// A tela ficaria ilegível com `/home/user/.steam/.../The Sims 4/Mods/...`
+/// repetido em cada linha de um diálogo de exclusão.
+fn display_path(path: &Path, mods_dir: &Path) -> String {
+    match path.strip_prefix(mods_dir) {
+        Ok(rel) if rel.as_os_str().is_empty() => "Mods".to_string(),
+        Ok(rel) => format!("Mods/{}", rel.display()),
+        Err(_) => path.display().to_string(),
+    }
+}
+
 fn file_label(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -1378,26 +1802,109 @@ fn refresh_dashboard_stats(weak_win: &slint::Weak<MainWindow>, config_mgr: &Conf
     }
 }
 
-fn refresh_organizer_tree(weak_win: &slint::Weak<MainWindow>, config_mgr: &ConfigManager) {
+fn refresh_organizer_tree(
+    weak_win: &slint::Weak<MainWindow>,
+    config_mgr: &ConfigManager,
+    state: &AppState,
+) {
     let config = config_mgr.load();
-    if let Some(w) = weak_win.upgrade() {
-        if let Some(sims_path) = &config.sims4_path {
-            let mods_dir = get_mods_dir(sims_path);
-            let nodes = scan_mods_tree(&mods_dir);
-            let model = Rc::new(VecModel::default());
-            for node in nodes {
-                model.push(crate::ModTreeEntry {
-                    name: SharedString::from(node.name),
-                    is_dir: node.is_dir,
-                    size_str: SharedString::from(crate::bridge::slint_models::format_size_bytes(node.size)),
-                    disabled: node.disabled,
-                    path_str: SharedString::from(node.path.display().to_string()),
-                });
-            }
-            w.set_mod_entries(ModelRc::from(model));
-            w.set_organizer_status(SharedString::from("Árvore de mods atualizada."));
-        }
+    let Some(w) = weak_win.upgrade() else { return };
+    let Some(sims_path) = &config.sims4_path else { return };
+
+    let mods_dir = get_mods_dir(sims_path);
+    // Mover e excluir invalidam caminhos que continuariam marcados.
+    state.prune_selected_mods();
+    let selected = state.selected_mods();
+
+    let nodes = scan_mods_tree(&mods_dir);
+    let visible = filter_tree(&nodes, &state.organizer_search());
+
+    let model = Rc::new(VecModel::default());
+    for node in &visible {
+        let depth = node
+            .path
+            .strip_prefix(&mods_dir)
+            .map(|rel| rel.components().count().saturating_sub(1))
+            .unwrap_or(0);
+
+        model.push(crate::ModTreeEntry {
+            name: SharedString::from(node.name.clone()),
+            is_dir: node.is_dir,
+            size_str: SharedString::from(crate::bridge::slint_models::format_size_bytes(node.size)),
+            disabled: node.disabled,
+            path_str: SharedString::from(node.path.display().to_string()),
+            selected: selected.contains(&node.path),
+            depth: depth as i32,
+        });
     }
+
+    w.set_mod_entries(ModelRc::from(model));
+    w.set_organizer_selected_count(selected.len() as i32);
+
+    let query = state.organizer_search();
+    w.set_organizer_status(SharedString::from(if query.trim().is_empty() {
+        format!("{} item(ns) na pasta Mods.", visible.len())
+    } else {
+        format!("🔎 {} resultado(s) para \"{}\".", visible.len(), query)
+    }));
+}
+
+/// Repopula o painel de desativados a partir do disco.
+fn refresh_disabled_panel(
+    weak_win: &slint::Weak<MainWindow>,
+    config_mgr: &ConfigManager,
+    state: &AppState,
+) {
+    let config = config_mgr.load();
+    let Some(w) = weak_win.upgrade() else { return };
+    let Some(sims_path) = &config.sims4_path else { return };
+
+    let mods_dir = get_mods_dir(sims_path);
+    let selected = state.selected_disabled();
+    let model = Rc::new(VecModel::default());
+
+    for item in state.disabled_manager().list_disabled(&mods_dir) {
+        model.push(crate::DisabledEntry {
+            name: SharedString::from(item.name),
+            reason: SharedString::from(reason_label(&item.reason)),
+            note: SharedString::from(item.note),
+            path_str: SharedString::from(item.path.display().to_string()),
+            selected: selected.contains(&item.path),
+            missing: item.missing,
+        });
+    }
+
+    w.set_disabled_entries(ModelRc::from(model));
+    w.set_disabled_selected_count(selected.len() as i32);
+}
+
+/// Traduz a chave gravada no manifesto para o rótulo que o usuário vê. Mesmas
+/// razões do `REASONS` do app PyQt.
+fn reason_label(reason: &str) -> &'static str {
+    match reason {
+        "suspected_bug" => "Suspeita de bug",
+        "testing" => "Em teste",
+        "outdated" => "Desatualizado",
+        "duplicate" => "Duplicado",
+        _ => "Manual",
+    }
+}
+
+/// Pastas que podem receber uma transferência: as de dentro de `Mods`, mais a
+/// própria raiz.
+fn folder_choices(mods_dir: &Path) -> Vec<(String, PathBuf)> {
+    let mut choices = vec![("Mods (raiz)".to_string(), mods_dir.to_path_buf())];
+
+    for node in scan_mods_tree(mods_dir).into_iter().filter(|n| n.is_dir) {
+        let label = node
+            .path
+            .strip_prefix(mods_dir)
+            .map(|rel| format!("Mods/{}", rel.display()))
+            .unwrap_or_else(|_| node.name.clone());
+        choices.push((label, node.path));
+    }
+
+    choices
 }
 
 /// Pasta dos binários do jogo, onde a DLL do ReShade é injetada.

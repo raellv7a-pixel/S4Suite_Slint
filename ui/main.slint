@@ -3,7 +3,7 @@ import { I18n } from "i18n.slint";
 import { Sidebar } from "components/sidebar.slint";
 import { DashboardView } from "views/dashboard.slint";
 import { InstallerView, QueueItem } from "views/installer.slint";
-import { OrganizerView, ModTreeEntry } from "views/organizer.slint";
+import { OrganizerView, ModTreeEntry, FolderChoice, DisabledEntry } from "views/organizer.slint";
 import { MergerView, MergeQueueItem } from "views/merger.slint";
 import { TrayView, TrayItem } from "views/tray.slint";
 import { TranslationsView, TranslationItem } from "views/translations.slint";
@@ -36,6 +36,40 @@ export component MainWindow inherits Window {
     in property <string> organizer_status: "Pronto";
     in property <string> selected_mod_path: "";
     in property <bool> selected_mod_is_disabled: false;
+    in property <string> organizer_search: "";
+    in property <int> organizer_selected_count: 0;
+    callback organizer_search_changed(string);
+    callback create_mod_folder();
+    callback move_selected_mods();
+    callback copy_selected_mods();
+    callback rename_selected_mod();
+    callback delete_selected_mods();
+    callback clear_mod_selection();
+
+    // Diálogo de texto do organizador (nova pasta / renomear).
+    in property <bool> show_organizer_input: false;
+    in property <string> organizer_input_title: "";
+    in property <string> organizer_input_placeholder: "";
+    in property <string> organizer_input_initial: "";
+    callback confirm_organizer_input(string);
+    callback cancel_organizer_input();
+
+    // Escolha da pasta de destino de mover/copiar.
+    in property <bool> show_folder_picker: false;
+    in property <string> folder_picker_title: "";
+    in property <[FolderChoice]> folder_choices;
+    callback folder_destination_picked(string);
+    callback cancel_folder_pick();
+
+    // Painel de mods desativados.
+    in property <bool> show_disabled_panel: false;
+    in property <[DisabledEntry]> disabled_entries;
+    in property <int> disabled_selected_count: 0;
+    callback open_disabled_panel();
+    callback close_disabled_panel();
+    callback toggle_disabled_selection(string);
+    callback restore_selected_disabled();
+    callback delete_selected_disabled();
     // Merger Dialog
     in property <bool> show_post_merge_dialog: false;
     in property <string> post_merge_message: "";
@@ -163,6 +197,38 @@ export component MainWindow inherits Window {
                 clean_junk_clicked => { root.clean_junk(); }
                 entry_clicked(path) => { root.select_mod_entry(path); }
                 toggle_disabled_clicked(path) => { root.toggle_disabled_mod(path); }
+
+                search_query: root.organizer_search;
+                search_changed(q) => { root.organizer_search_changed(q); }
+                selected_count: root.organizer_selected_count;
+                create_folder_clicked => { root.create_mod_folder(); }
+                move_items_clicked => { root.move_selected_mods(); }
+                copy_items_clicked => { root.copy_selected_mods(); }
+                rename_item_clicked => { root.rename_selected_mod(); }
+                delete_items_clicked => { root.delete_selected_mods(); }
+                clear_selection_clicked => { root.clear_mod_selection(); }
+
+                show_input_dialog: root.show_organizer_input;
+                input_title: root.organizer_input_title;
+                input_placeholder: root.organizer_input_placeholder;
+                input_initial: root.organizer_input_initial;
+                confirm_input(name) => { root.confirm_organizer_input(name); }
+                cancel_input => { root.cancel_organizer_input(); }
+
+                show_folder_picker: root.show_folder_picker;
+                folder_picker_title: root.folder_picker_title;
+                folder_choices: root.folder_choices;
+                folder_picked(path) => { root.folder_destination_picked(path); }
+                cancel_folder_pick => { root.cancel_folder_pick(); }
+
+                show_disabled_panel: root.show_disabled_panel;
+                disabled_entries: root.disabled_entries;
+                disabled_selected_count: root.disabled_selected_count;
+                show_disabled_clicked => { root.open_disabled_panel(); }
+                close_disabled_panel => { root.close_disabled_panel(); }
+                toggle_disabled_selection(path) => { root.toggle_disabled_selection(path); }
+                restore_selected_disabled => { root.restore_selected_disabled(); }
+                delete_selected_disabled => { root.delete_selected_disabled(); }
             }
 
             if root.current_tab == 3 : MergerView {

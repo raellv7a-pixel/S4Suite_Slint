@@ -381,5 +381,19 @@
   "preset(s)": "preset(s)",
   "⏳ Baixando e injetando...": "⏳ Descargando e inyectando...",
   "⏳ Processando...": "⏳ Procesando...",
-  "🔄 Reinstalar ReShade (5.9.2)": "🔄 Reinstalar ReShade (5.9.2)"
+  "🔄 Reinstalar ReShade (5.9.2)": "🔄 Reinstalar ReShade (5.9.2)",
+  " item(ns) marcado(s)": " elemento(s) seleccionado(s)",
+  "Copiar Para...": "Copiar a...",
+  "Escolha a pasta de destino:": "Elige la carpeta de destino:",
+  "Limpar seleção": "Limpiar selección",
+  "Mover Para...": "Mover a...",
+  "Nada marcado": "Nada seleccionado",
+  "Nenhum mod desativado no momento.": "No hay mods desactivados por ahora.",
+  "Renomear": "Renombrar",
+  "➕ Nova Pasta": "➕ Nueva Carpeta",
+  "🔎 Buscar por nome...": "🔎 Buscar por nombre...",
+  "🗑️ Excluir Definitivamente": "🗑️ Eliminar Definitivamente",
+  "🚫 Mods Desativados": "🚫 Mods Desactivados",
+  "🚫 Ver Desativados": "🚫 Ver Desactivados",
+  "🟢 Restaurar Selecionados": "🟢 Restaurar Seleccionados"
 }
