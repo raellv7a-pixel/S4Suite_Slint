@@ -188,6 +188,7 @@ export component MainWindow inherits Window {
                 status_message: root.dashboard_status;
                 clear_cache_clicked => { root.clear_cache(); }
                 backup_saves_clicked => { root.backup_saves(); }
+                refresh_stats_clicked => { root.refresh_stats(); }
                 folder_size_details: root.folder_size_details;
                 scripts_details: root.scripts_details;
                 tray_details: root.tray_details;
@@ -197,6 +198,7 @@ export component MainWindow inherits Window {
                 queue_items: root.installer_queue;
                 is_installing: root.is_installing;
                 install_status_text: root.installer_status;
+                select_files_clicked => { root.select_installer_files(); }
                 start_install_clicked => { root.start_install(); }
                 clear_queue_clicked => { root.clear_installer_queue(); }
                 show_careful_scan_dialog: root.show_careful_scan_dialog;

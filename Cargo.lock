@@ -5131,6 +5131,7 @@ dependencies = [
  "dunce",
  "encoding_rs",
  "glob",
+ "i-slint-backend-testing",
  "indexmap",
  "md-5",
  "parking_lot",

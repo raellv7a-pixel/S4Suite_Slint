@@ -51,6 +51,7 @@ pub struct PackageResource {
     pub compressed: u16,
 }
 
+#[derive(Debug, Clone)]
 pub struct DBPFHeader {
     pub major: u32,
     pub minor: u32,
@@ -95,6 +96,14 @@ impl DBPFReader {
         let header = Self::read_header(reader)?;
         if header.index_count == 0 {
             return Ok((header, Vec::new()));
+        }
+
+        // Um package truncado ou corrompido aponta o índice para fora do
+        // arquivo. Sem esta checagem o erro sai como "falha de I/O", que não
+        // diz nada a quem está tentando entender por que o mod não carrega.
+        let file_len = reader.seek(SeekFrom::End(0))?;
+        if header.index_offset as u64 >= file_len {
+            return Err(DBPFError::IndexOutOfBounds(header.index_offset as u64));
         }
 
         reader.seek(SeekFrom::Start(header.index_offset as u64))?;

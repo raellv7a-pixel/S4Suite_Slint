@@ -34,6 +34,15 @@ impl ConfigManager {
         let config_dir = dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("~/.config"))
             .join("s4suite");
+        Self::with_dir(config_dir)
+    }
+
+    /// Constrói um gerenciador apontando para um diretório específico.
+    ///
+    /// Os testes precisam disso: com [`new`](Self::new) eles compartilhariam o
+    /// arquivo de config real da máquina, corrompendo-o e disputando o mesmo
+    /// `rename` entre threads.
+    pub fn with_dir(config_dir: PathBuf) -> Result<Self, io::Error> {
         fs::create_dir_all(&config_dir)?;
         let config_file = config_dir.join("config.json");
         Ok(Self {
