@@ -34,3 +34,7 @@ dist/
 *.log
 *.tmp
 *.corrupt
+
+# Config local do Claude Code
+.claude/settings.local.json
+.claude/*.tmp.*

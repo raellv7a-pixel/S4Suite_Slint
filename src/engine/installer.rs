@@ -2,9 +2,16 @@ use crate::core::safety::{safe_remove_file, unique_dest_path};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use walkdir::WalkDir;
+
+/// Pasta de trabalho onde os arquivos são extraídos antes de irem para Mods.
+pub const STAGING_DIR_NAME: &str = ".s4suite_staging";
+/// Cópias de segurança dos arquivos sobrescritos durante uma instalação.
+pub const BACKUP_DIR_NAME: &str = ".s4suite_backups";
+/// Base gerenciada pela S4Suite dentro de Mods (mesma convenção do app PyQt).
+pub const MANAGED_BASE_DIR: &str = "00_Triagem_Novos";
 
 #[derive(Debug, thiserror::Error)]
 pub enum InstallerError {
@@ -16,6 +23,39 @@ pub enum InstallerError {
     ExtractionFailed(String),
     #[error("Erro de I/O: {0}")]
     Io(#[from] io::Error),
+}
+
+/// Normaliza o nome de um mod para servir de identidade de pasta.
+/// `"Meu Mod v2.1.zip"` -> `"meu_mod_v2_1"`.
+pub fn install_identity_name(path: &Path) -> String {
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("mod");
+    let sanitized: String = stem
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    let trimmed = sanitized.trim_matches('_').to_lowercase();
+    if trimmed.is_empty() {
+        "mod".to_string()
+    } else {
+        trimmed
+    }
+}
+
+/// Um arquivo só é instalável se for `.package` ou `.ts4script` e não for
+/// resíduo de sistema de arquivos (`._foo`, `.DS_Store`).
+pub fn is_valid_mod_file(filename: &str) -> bool {
+    if filename.starts_with("._") || filename.eq_ignore_ascii_case(".DS_Store") {
+        return false;
+    }
+    let lower = filename.to_lowercase();
+    lower.ends_with(".package") || lower.ends_with(".ts4script")
+}
+
+fn is_archive(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase().as_str(),
+        "zip" | "7z" | "rar"
+    )
 }
 
 pub fn scan_archive_security(archive_path: &Path) -> Result<(), InstallerError> {
@@ -90,18 +130,113 @@ pub fn extract_archive_to_staging(
         }
     }
 
-    // Fallback 7z process
-    let status = Command::new("7z")
+    // Fallback 7z process. Usamos `output()` para capturar stdout/stderr — com
+    // `status()` o 7z escreve direto no terminal que lançou a aplicação.
+    let output = Command::new("7z")
         .arg("x")
         .arg(archive_path)
         .arg(format!("-o{}", staging_dir.display()))
         .arg("-y")
-        .status();
+        .output();
 
-    match status {
-        Ok(s) if s.success() => Ok(staging_dir.to_path_buf()),
-        _ => Err(InstallerError::ExtractionFailed("Falha ao extrair arquivo compactado".to_string())),
+    match output {
+        Ok(o) if o.status.success() => Ok(staging_dir.to_path_buf()),
+        Ok(_) => Err(InstallerError::ExtractionFailed(
+            "formato não reconhecido ou arquivo corrompido".to_string(),
+        )),
+        Err(_) => Err(InstallerError::ExtractionFailed(
+            "não foi possível extrair (instale o 7z para suportar .rar e .7z)".to_string(),
+        )),
     }
+}
+
+/// Resultado da preparação do staging: quantas fontes entraram e quais falharam.
+#[derive(Debug, Default)]
+pub struct StagingReport {
+    pub prepared: usize,
+    pub failures: Vec<(String, String)>,
+}
+
+/// Materializa em `staging_dir` o conteúdo de todas as fontes selecionadas
+/// pelo usuário, cada uma sob um subdiretório com sua identidade.
+///
+/// Este era o elo faltante do instalador: `calculate_conflicts` sempre leu o
+/// staging, mas nada nunca o populava. Aceita tanto arquivos compactados
+/// quanto `.package`/`.ts4script` avulsos.
+pub fn prepare_staging(
+    sources: &[PathBuf],
+    staging_dir: &Path,
+) -> Result<StagingReport, InstallerError> {
+    if staging_dir.exists() {
+        fs::remove_dir_all(staging_dir)?;
+    }
+    fs::create_dir_all(staging_dir)?;
+
+    let mut report = StagingReport::default();
+
+    for source in sources {
+        let identity = install_identity_name(source);
+        let dest = staging_dir.join(&identity);
+        let label = source
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| source.display().to_string());
+
+        let outcome = if is_archive(source) {
+            extract_archive_to_staging(source, &dest).map(|_| ())
+        } else {
+            copy_loose_mod_to_staging(source, &dest)
+        };
+
+        match outcome {
+            Ok(()) => report.prepared += 1,
+            Err(e) => {
+                // Uma fonte ruim não pode abortar o lote inteiro: descartamos
+                // o que ela deixou pela metade e seguimos com as demais.
+                let _ = fs::remove_dir_all(&dest);
+                report.failures.push((label, e.to_string()));
+            }
+        }
+    }
+
+    if report.prepared == 0 {
+        let detail = report
+            .failures
+            .iter()
+            .map(|(name, err)| format!("{}: {}", name, err))
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(if detail.is_empty() {
+            InstallerError::NoUsefulFiles
+        } else {
+            InstallerError::ExtractionFailed(detail)
+        });
+    }
+
+    Ok(report)
+}
+
+fn copy_loose_mod_to_staging(source: &Path, dest_dir: &Path) -> Result<(), InstallerError> {
+    let filename = source
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    if !is_valid_mod_file(&filename) {
+        return Err(InstallerError::NoUsefulFiles);
+    }
+
+    fs::create_dir_all(dest_dir)?;
+    fs::copy(source, dest_dir.join(&filename))?;
+    Ok(())
+}
+
+/// Remove o staging. Seguro de chamar quando ele não existe.
+pub fn clear_staging(staging_dir: &Path) -> io::Result<()> {
+    if staging_dir.exists() {
+        fs::remove_dir_all(staging_dir)?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,10 +250,36 @@ pub enum ConflictType {
 pub struct StagedFile {
     pub src_path: PathBuf,
     pub rel_path: PathBuf,
+    /// Identidade do mod de origem: primeiro componente de `rel_path`.
+    pub mod_root: String,
     pub filename: String,
     pub size: u64,
     pub conflict: ConflictType,
     pub existing_dest: Option<PathBuf>,
+}
+
+impl StagedFile {
+    pub fn is_script(&self) -> bool {
+        self.filename.to_lowercase().ends_with(".ts4script")
+    }
+
+    /// Onde este arquivo será gravado dentro de `Mods`.
+    ///
+    /// Atualizações vão para o caminho já existente. Arquivos novos vão para a
+    /// base gerenciada. Scripts ficam rasos de propósito: o jogo só carrega
+    /// `.ts4script` até um nível de subpasta, então `00_Triagem_Novos/x.ts4script`
+    /// é o mais fundo que podemos ir sem quebrar o mod.
+    pub fn destination(&self, mods_dir: &Path) -> PathBuf {
+        if let Some(existing) = &self.existing_dest {
+            return existing.clone();
+        }
+        let managed = mods_dir.join(MANAGED_BASE_DIR);
+        if self.is_script() {
+            managed.join(&self.filename)
+        } else {
+            managed.join(&self.rel_path)
+        }
+    }
 }
 
 pub struct ConflictReport {
@@ -137,8 +298,18 @@ pub fn calculate_conflicts(
     let mut updates = 0;
     let mut new_files = 0;
 
+    // O staging e os backups moram dentro de Mods. Sem excluí-los aqui, os
+    // arquivos recém-extraídos apareceriam como "já instalados" e toda a fila
+    // seria classificada como ExactMatch.
     let mut existing_map: HashMap<String, (PathBuf, u64)> = HashMap::new();
-    for entry in WalkDir::new(mods_dir).into_iter().filter_map(|e| e.ok()) {
+    for entry in WalkDir::new(mods_dir)
+        .into_iter()
+        .filter_entry(|e| {
+            let name = e.file_name().to_string_lossy();
+            !(e.file_type().is_dir() && (name == STAGING_DIR_NAME || name == BACKUP_DIR_NAME))
+        })
+        .filter_map(|e| e.ok())
+    {
         if entry.path().is_file() {
             let fname = entry.file_name().to_string_lossy().to_string();
             let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
@@ -152,48 +323,45 @@ pub fn calculate_conflicts(
             continue;
         }
 
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-        if ext != "package" && ext != "ts4script" {
+        let filename = entry.file_name().to_string_lossy().to_string();
+        if !is_valid_mod_file(&filename) {
             continue;
         }
 
-        let filename = entry.file_name().to_string_lossy().to_string();
         let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
         let rel_path = path.strip_prefix(staging_dir).unwrap_or(path).to_path_buf();
+        let mod_root = rel_path
+            .components()
+            .find_map(|c| match c {
+                Component::Normal(part) => Some(part.to_string_lossy().to_string()),
+                _ => None,
+            })
+            .unwrap_or_else(|| "mod".to_string());
 
-        if let Some((existing_dest, existing_size)) = existing_map.get(&filename) {
-            if *existing_size == size {
+        let (conflict, existing_dest) = match existing_map.get(&filename) {
+            Some((dest, existing_size)) if *existing_size == size => {
                 exact_matches += 1;
-                staged_files.push(StagedFile {
-                    src_path: path.to_path_buf(),
-                    rel_path,
-                    filename,
-                    size,
-                    conflict: ConflictType::ExactMatch,
-                    existing_dest: Some(existing_dest.clone()),
-                });
-            } else {
-                updates += 1;
-                staged_files.push(StagedFile {
-                    src_path: path.to_path_buf(),
-                    rel_path,
-                    filename,
-                    size,
-                    conflict: ConflictType::SizeDiff,
-                    existing_dest: Some(existing_dest.clone()),
-                });
+                (ConflictType::ExactMatch, Some(dest.clone()))
             }
-        } else {
-            new_files += 1;
-            staged_files.push(StagedFile {
-                src_path: path.to_path_buf(),
-                rel_path,
-                filename,
-                size,
-                conflict: ConflictType::NewFile,
-                existing_dest: None,
-            });
-        }
+            Some((dest, _)) => {
+                updates += 1;
+                (ConflictType::SizeDiff, Some(dest.clone()))
+            }
+            None => {
+                new_files += 1;
+                (ConflictType::NewFile, None)
+            }
+        };
+
+        staged_files.push(StagedFile {
+            src_path: path.to_path_buf(),
+            rel_path,
+            mod_root,
+            filename,
+            size,
+            conflict,
+            existing_dest,
+        });
     }
 
     if staged_files.is_empty() {
@@ -213,19 +381,23 @@ pub fn execute_installation(
     mods_dir: &Path,
     allowed_roots: &[PathBuf],
 ) -> Result<(usize, usize), InstallerError> {
-    let backup_dir = mods_dir.join(".s4suite_backups");
+    let backup_dir = mods_dir.join(BACKUP_DIR_NAME);
     fs::create_dir_all(&backup_dir)?;
 
     let mut installed_count = 0;
+    let mut skipped_count = 0;
     let mut backup_copies: Vec<(PathBuf, PathBuf)> = Vec::new();
     let mut new_destinations: Vec<PathBuf> = Vec::new();
 
     let mut execute = || -> Result<(), io::Error> {
         for file in &report.staged_files {
-            let target_dest = match &file.existing_dest {
-                Some(existing) => existing.clone(),
-                None => mods_dir.join(&file.filename),
-            };
+            // Byte-por-byte já presente: copiar de novo só gasta I/O.
+            if file.conflict == ConflictType::ExactMatch {
+                skipped_count += 1;
+                continue;
+            }
+
+            let target_dest = file.destination(mods_dir);
 
             if target_dest.exists() {
                 let backup_file = unique_dest_path(&backup_dir, &file.filename);
@@ -255,5 +427,5 @@ pub fn execute_installation(
         return Err(InstallerError::Io(e));
     }
 
-    Ok((installed_count, report.exact_matches))
+    Ok((installed_count, skipped_count))
 }

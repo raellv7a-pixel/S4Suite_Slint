@@ -27,7 +27,7 @@ testável sem event loop.
 | `s4common.py` | `core/config.rs` + `core/safety.rs` | ✅ portado |
 | `s4translator.py` | `core/i18n.rs` | ⚠️ portado, não conectado à UI |
 | `s4theme.py` | `ui/palette.slint` | ⚠️ tema não persiste |
-| `s4installer.py` | `engine/installer.rs` | ⚠️ engine ok, bridge quebrado |
+| `s4installer.py` | `engine/installer.rs` | ✅ fluxo completo e testado |
 | `s4merger.py` | `engine/merger.rs` + `engine/dbpf.rs` | ⚠️ engine ok, bridge é fachada |
 | `s4tray.py` | `engine/tray.rs` | ⚠️ engine ok, bridge é no-op |
 | `s4reshade.py` | `engine/reshade.rs` | ⚠️ quase completo |
@@ -39,19 +39,47 @@ testável sem event loop.
 As etapas estão ordenadas por dependência e por risco. Cada uma deve terminar
 com `cargo check` verde e o fluxo exercitável na UI.
 
-### Etapa 1 — Installer (fluxo mais central, hoje quebrado ponta a ponta)
+### Etapa 1 — Installer ✅ concluída
 
-O `on_start_install` analisa `.s4suite_staging`, mas nada nunca extrai arquivos
-para lá: `extract_archive_to_staging()` e `scan_archive_security()` existem no
-engine e não são chamados por ninguém.
+O elo que faltava: `on_start_install` analisava `.s4suite_staging`, mas nada
+nunca extraía arquivos para lá. `extract_archive_to_staging()` e
+`scan_archive_security()` existiam no engine sem nenhum chamador.
 
-- [ ] Guardar os arquivos escolhidos em `select_installer_files` num estado
-      compartilhado (hoje só viram linhas visuais na fila).
-- [ ] `start_install`: scan de segurança → extração para staging → cálculo de
-      conflitos → diálogo. Tudo em `spawn_blocking`.
-- [ ] Propagar erro real para a UI (hoje `if let Ok(...)` engole a falha e a
-      tela fica travada em "processando").
-- [ ] Limpar o staging também nos caminhos de erro e de cancelamento.
+- [x] `bridge/state.rs`: `AppState` guarda os caminhos reais dos arquivos
+      selecionados e a análise pendente entre callbacks.
+- [x] `engine::installer::prepare_staging()`: extrai cada fonte sob sua
+      identidade (`Meu Mod v2.1.zip` → `meu_mod_v2_1/`), aceita `.package`
+      avulso e isola falhas por arquivo em vez de abortar o lote.
+- [x] Fluxo em duas fases: analisar (staging) → confirmar → gravar em Mods.
+      Ambas em `spawn_blocking`; erro real chega à UI em vez de travar a tela
+      em "processando".
+- [x] Staging é limpo em erro, cancelamento e limpeza de fila.
+- [x] `take_pending_install()` torna o duplo-clique em "Prosseguir" inofensivo.
+- [x] 12 testes de integração em `tests/installer_flow.rs`.
+
+**Dois bugs de engine corrigidos aqui:**
+
+1. `calculate_conflicts` varria `Mods` inteiro para montar o mapa de arquivos
+   existentes — incluindo o próprio `.s4suite_staging`, que mora dentro de
+   `Mods`. Cada arquivo recém-extraído se encontrava e era classificado como
+   `ExactMatch`, então **nada era instalado**. Staging e backups agora são
+   excluídos da varredura (teste de regressão:
+   `staging_nao_e_confundido_com_mods_ja_instalados`).
+2. Arquivos novos eram despejados na raiz de `Mods` com nome achatado.
+   Agora seguem a convenção do app PyQt: `Mods/00_Triagem_Novos/<mod>/…`,
+   com `.ts4script` mantido raso — o jogo só carrega scripts até um nível de
+   subpasta.
+
+**Decisões de comportamento:**
+
+- Arquivos idênticos (`ExactMatch`) são pulados, não recopiados.
+- Toda sobrescrita passa por `.s4suite_backups/`, e `execute_installation`
+  reverte a operação inteira se qualquer cópia falhar.
+
+**Ainda não portado do `s4installer.py`** (fica para um refinamento futuro):
+`detect_mutually_exclusive` (diálogo de escolha entre variantes do mesmo mod)
+e `detect_dependencies` — este último existe no engine mas ainda não é exibido
+na UI.
 
 ### Etapa 2 — Merger
 

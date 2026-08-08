@@ -1,6 +1,10 @@
+use crate::bridge::state::AppState;
 use crate::core::config::{get_mods_dir, get_saves_dir, get_tray_dir, ConfigManager};
 use crate::core::i18n::t;
-use crate::engine::installer::{calculate_conflicts, execute_installation};
+use crate::engine::installer::{
+    calculate_conflicts, clear_staging, execute_installation, prepare_staging, ConflictType,
+    STAGING_DIR_NAME,
+};
 use crate::engine::organizer::{auto_fix_script_depth, check_script_depth, detect_duplicates, find_junk_files, scan_mods_tree};
 use crate::engine::reshade::{detect_environment, install_reshade, install_shader_preset, uninstall_reshade};
 use crate::MainWindow;
@@ -11,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
-pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>) {
+pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, state: Arc<AppState>) {
     let weak_win = window.as_weak();
 
     // Initial stats load
@@ -100,16 +104,20 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>) {
     });
 
     // Callback: select_installer_files
+    let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_select_installer_files(move || {
         if let Some(files) = rfd::FileDialog::new()
             .add_filter("Mods & Archives", &["zip", "7z", "rar", "package", "ts4script"])
             .pick_files()
         {
+            // Os caminhos reais ficam no estado; a fila da tela é só o reflexo.
+            state_clone.set_installer_sources(files.clone());
+
             if let Some(w) = weak_clone.upgrade() {
                 let model = Rc::new(VecModel::default());
-                for f in files {
-                    let size = fs::metadata(&f).map(|m| m.len()).unwrap_or(0);
+                for f in &files {
+                    let size = fs::metadata(f).map(|m| m.len()).unwrap_or(0);
                     model.push(crate::QueueItem {
                         name: SharedString::from(f.file_name().unwrap_or_default().to_string_lossy().to_string()),
                         size_str: SharedString::from(crate::bridge::slint_models::format_size_bytes(size)),
@@ -117,86 +125,186 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>) {
                     });
                 }
                 w.set_installer_queue(ModelRc::from(model));
-                w.set_installer_status(SharedString::from("Arquivos carregados na fila. Clique em Iniciar Instalação."));
+                w.set_installer_status(SharedString::from(format!(
+                    "{} arquivo(s) na fila. Clique em Iniciar Instalação.",
+                    files.len()
+                )));
             }
         }
     });
 
     // Callback: start_install
+    // Fase 1 de 2: valida, extrai para o staging e calcula conflitos. Nada é
+    // gravado em Mods até o usuário confirmar no diálogo.
     let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_start_install(move || {
         let config = cfg_clone.load();
-        if let Some(sims_path) = &config.sims4_path {
-            let mods_dir = get_mods_dir(sims_path);
-            let staging = mods_dir.join(".s4suite_staging");
+        let Some(sims_path) = config.sims4_path.clone() else {
+            set_installer_error(&weak_clone, "⚠️ Configure a pasta do jogo antes de instalar mods.");
+            return;
+        };
 
-            if let Some(w) = weak_clone.upgrade() {
-                w.set_is_installing(true);
-                w.set_installer_status(SharedString::from("⚙️ Processando e analisando mods..."));
-            }
+        let sources = state_clone.installer_sources();
+        if sources.is_empty() {
+            set_installer_error(&weak_clone, "⚠️ Nenhum arquivo na fila. Selecione mods primeiro.");
+            return;
+        }
 
-            let weak_async = weak_clone.clone();
-            tokio::task::spawn_blocking(move || {
-                if let Ok(report) = calculate_conflicts(&staging, &mods_dir) {
+        let mods_dir = get_mods_dir(&sims_path);
+        let staging = mods_dir.join(STAGING_DIR_NAME);
+
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_is_installing(true);
+            w.set_installer_status(SharedString::from("⚙️ Verificando segurança e extraindo arquivos..."));
+        }
+
+        let weak_async = weak_clone.clone();
+        let state_async = Arc::clone(&state_clone);
+        tokio::task::spawn_blocking(move || {
+            let outcome = prepare_staging(&sources, &staging)
+                .and_then(|staging_report| {
+                    calculate_conflicts(&staging, &mods_dir).map(|conflicts| (staging_report, conflicts))
+                });
+
+            match outcome {
+                Ok((staging_report, conflicts)) => {
+                    let summary = format!(
+                        "O instalador encontrou:\n\
+                         • {} mods novos\n\
+                         • {} atualizações\n\
+                         • {} já instalados (serão ignorados)\n\n\
+                         Deseja aplicar essas alterações à sua pasta Mods?",
+                        conflicts.new_files, conflicts.updates, conflicts.exact_matches
+                    );
+                    let warnings = if staging_report.failures.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            "\n\n⚠️ {} arquivo(s) ignorado(s): {}",
+                            staging_report.failures.len(),
+                            staging_report
+                                .failures
+                                .iter()
+                                .map(|(name, err)| format!("{} ({})", name, err))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    };
+                    let statuses: Vec<(String, String)> = conflicts
+                        .staged_files
+                        .iter()
+                        .map(|f| {
+                            let label = match f.conflict {
+                                ConflictType::ExactMatch => "Já instalado",
+                                ConflictType::SizeDiff => "Atualização",
+                                ConflictType::NewFile => "Novo",
+                            };
+                            (f.filename.clone(), label.to_string())
+                        })
+                        .collect();
+
+                    state_async.set_pending_install(conflicts);
+
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(w) = weak_async.upgrade() {
-                            w.set_careful_scan_message(SharedString::from(format!(
-                                "O instalador encontrou:\n- {} mods exatos\n- {} atualizações\n- {} mods novos\n\nDeseja aplicar essas alterações à sua pasta Mods?",
-                                report.exact_matches, report.updates, report.new_files
-                            )));
+                            let model = Rc::new(VecModel::default());
+                            for (name, status) in statuses {
+                                model.push(crate::QueueItem {
+                                    name: SharedString::from(name),
+                                    size_str: SharedString::default(),
+                                    status: SharedString::from(status),
+                                });
+                            }
+                            w.set_installer_queue(ModelRc::from(model));
+                            w.set_careful_scan_message(SharedString::from(format!("{}{}", summary, warnings)));
                             w.set_show_careful_scan_dialog(true);
                         }
                     });
-                } else {
+                }
+                Err(e) => {
+                    // Falhou antes de tocar em Mods: só o staging precisa sumir.
+                    let _ = clear_staging(&staging);
+                    let msg = format!("❌ {}", e);
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(w) = weak_async.upgrade() {
                             w.set_is_installing(false);
-                            w.set_installer_status(SharedString::from("Nenhum arquivo válido encontrado para instalação."));
+                            w.set_installer_status(SharedString::from(msg));
                         }
                     });
                 }
-            });
-        }
+            }
+        });
     });
 
+    // Fase 2 de 2: o usuário confirmou. Aqui sim escrevemos em Mods.
     let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_proceed_install_clicked(move || {
         let config = cfg_clone.load();
-        if let Some(sims_path) = &config.sims4_path {
-            let mods_dir = get_mods_dir(sims_path);
-            let staging = mods_dir.join(".s4suite_staging");
-            let allowed_roots = vec![mods_dir.clone()];
+        let Some(sims_path) = config.sims4_path.clone() else {
+            return;
+        };
 
-            if let Some(w) = weak_clone.upgrade() {
-                w.set_show_careful_scan_dialog(false);
-                w.set_installer_status(SharedString::from("⚡ Aplicando modificações em disco..."));
-            }
-            
-            let weak_async = weak_clone.clone();
-            tokio::task::spawn_blocking(move || {
-                if let Ok(report) = calculate_conflicts(&staging, &mods_dir) {
-                    if let Ok((installed, _)) = execute_installation(&report, &mods_dir, &allowed_roots) {
-                        let _ = fs::remove_dir_all(&staging);
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(w) = weak_async.upgrade() {
-                                w.set_is_installing(false);
-                                w.set_installer_queue(ModelRc::from(Rc::new(VecModel::default())));
-                                w.set_installer_status(SharedString::from(format!(
-                                    "✅ Instalação concluída! {} mods instalados/atualizados.",
-                                    installed
-                                )));
-                            }
-                        });
+        // `take` garante que um duplo-clique não instale duas vezes.
+        let Some(report) = state_clone.take_pending_install() else {
+            return;
+        };
+
+        let mods_dir = get_mods_dir(&sims_path);
+        let staging = mods_dir.join(STAGING_DIR_NAME);
+        let allowed_roots = vec![mods_dir.clone()];
+
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_show_careful_scan_dialog(false);
+            w.set_installer_status(SharedString::from("⚡ Aplicando modificações em disco..."));
+        }
+
+        let weak_async = weak_clone.clone();
+        let state_async = Arc::clone(&state_clone);
+        tokio::task::spawn_blocking(move || {
+            let result = execute_installation(&report, &mods_dir, &allowed_roots);
+            let _ = clear_staging(&staging);
+
+            let (msg, clear_queue) = match result {
+                Ok((installed, skipped)) => {
+                    state_async.clear_installer();
+                    let mut m = format!("✅ Instalação concluída! {} mod(s) instalados.", installed);
+                    if skipped > 0 {
+                        m.push_str(&format!(" {} já estavam atualizados.", skipped));
                     }
+                    (m, true)
+                }
+                // `execute_installation` reverte sozinho; a fila fica para retentar.
+                Err(e) => (format!("❌ Falha na instalação (alterações revertidas): {}", e), false),
+            };
+
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(w) = weak_async.upgrade() {
+                    w.set_is_installing(false);
+                    if clear_queue {
+                        w.set_installer_queue(ModelRc::from(Rc::new(VecModel::default())));
+                    }
+                    w.set_installer_status(SharedString::from(msg));
                 }
             });
-        }
+        });
     });
 
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_cancel_install_clicked(move || {
+        // Cancelar precisa remover o staging: senão os arquivos extraídos ficam
+        // dentro de Mods e o jogo tenta carregá-los.
+        let config = cfg_clone.load();
+        if let Some(sims_path) = &config.sims4_path {
+            let _ = clear_staging(&get_mods_dir(sims_path).join(STAGING_DIR_NAME));
+        }
+        state_clone.take_pending_install();
+
         if let Some(w) = weak_clone.upgrade() {
             w.set_show_careful_scan_dialog(false);
             w.set_is_installing(false);
@@ -205,10 +313,19 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>) {
     });
 
     // Callback: clear_installer_queue
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_clear_installer_queue(move || {
+        let config = cfg_clone.load();
+        if let Some(sims_path) = &config.sims4_path {
+            let _ = clear_staging(&get_mods_dir(sims_path).join(STAGING_DIR_NAME));
+        }
+        state_clone.clear_installer();
+
         if let Some(w) = weak_clone.upgrade() {
             w.set_installer_queue(ModelRc::from(Rc::new(VecModel::default())));
+            w.set_is_installing(false);
             w.set_installer_status(SharedString::from("Fila limpa."));
         }
     });
@@ -560,6 +677,14 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>) {
             w.set_config_status(SharedString::from("✅ Configurações salvas!"));
         }
     });
+}
+
+/// Devolve o instalador ao estado ocioso mostrando o motivo da recusa.
+fn set_installer_error(weak_win: &slint::Weak<MainWindow>, message: &str) {
+    if let Some(w) = weak_win.upgrade() {
+        w.set_is_installing(false);
+        w.set_installer_status(SharedString::from(message));
+    }
 }
 
 fn refresh_dashboard_stats(weak_win: &slint::Weak<MainWindow>, config_mgr: &ConfigManager) {
