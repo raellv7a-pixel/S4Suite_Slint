@@ -1,5 +1,5 @@
 use crate::bridge::state::{
-    AppState, PendingInput, PendingOrganizerAction, PendingTransfer,
+    AppState, PendingInput, PendingOrganizerAction, PendingTransfer, QueuedJob,
 };
 use crate::core::config::{get_mods_dir, get_saves_dir, get_tray_dir, ConfigManager};
 use crate::core::i18n::t;
@@ -8,7 +8,8 @@ use crate::engine::installer::{
     MANAGED_BASE_DIR, STAGING_DIR_NAME,
 };
 use crate::engine::merger::{
-    apply_post_merge_action, common_ancestor, merge_sims4_packages, MergeTask, PostMergeAction,
+    apply_post_merge_action, common_ancestor, merge_sims4_packages, run_merge_queue, JobStatus,
+    MergeJob, MergeTask, PostMergeAction,
 };
 use crate::engine::organizer::{
     auto_fix_script_depth, check_script_depth, create_folder, detect_duplicates, filter_tree,
@@ -1063,9 +1064,204 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         }
     });
 
+    // --- Fila de tarefas do merger ---
+
+    // Callback: add_merge_job
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_add_merge_job(move || {
+        let inputs = state_clone.merger_inputs();
+        let Some(output_dir) = state_clone.merger_output() else {
+            if let Some(w) = weak_clone.upgrade() {
+                w.set_merge_status(SharedString::from(
+                    "⚠️ Escolha a pasta de destino antes de adicionar à fila.",
+                ));
+            }
+            return;
+        };
+        if inputs.is_empty() {
+            if let Some(w) = weak_clone.upgrade() {
+                w.set_merge_status(SharedString::from(
+                    "⚠️ Nenhum package na origem para virar uma tarefa.",
+                ));
+            }
+            return;
+        }
+
+        // O nome sai da pasta de origem, que é como o usuário reconhece o
+        // grupo: "Cabelos", "Roupas".
+        let nome = common_ancestor(&inputs)
+            .map(|root| file_label(&root))
+            .unwrap_or_else(|| "Tarefa".to_string());
+
+        let total = inputs.len();
+        state_clone.push_merge_job(QueuedJob {
+            name: nome.clone(),
+            input_files: inputs,
+            output_dir,
+            post_action: state_clone.merge_post_action(),
+            status: JobStatus::Pending,
+        });
+
+        // A origem é liberada para o usuário montar o próximo grupo.
+        state_clone.clear_merger();
+        refresh_merge_jobs(&weak_clone, &state_clone);
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_merge_items(ModelRc::from(Rc::new(VecModel::default())));
+            w.set_merge_input_dir(SharedString::default());
+            w.set_merge_output_dir(SharedString::default());
+            w.set_merge_status(SharedString::from(format!(
+                "➕ Tarefa \"{}\" adicionada à fila com {} package(s).",
+                nome, total
+            )));
+        }
+    });
+
+    // Callback: merge_job_clicked
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_merge_job_clicked(move |index| {
+        state_clone.toggle_selected_job(index as usize);
+        refresh_merge_jobs(&weak_clone, &state_clone);
+    });
+
+    // Callback: remove_merge_job
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_remove_merge_job(move || {
+        let removidos = state_clone.remove_selected_jobs();
+        refresh_merge_jobs(&weak_clone, &state_clone);
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_merge_status(SharedString::from(format!(
+                "{} tarefa(s) removida(s) da fila.",
+                removidos
+            )));
+        }
+    });
+
+    // Callback: merge_post_action_selected
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_merge_post_action_selected(move |acao| {
+        let parsed = PostMergeAction::parse(acao.as_str());
+        state_clone.set_merge_post_action(parsed);
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_merge_post_action(acao);
+            w.set_merge_status(SharedString::from(format!(
+                "Originais das próximas tarefas: {}.",
+                post_action_label(parsed)
+            )));
+        }
+    });
+
+    // Callback: start_merge_queue
+    //
+    // Roda a fila inteira em `spawn_blocking`. A pós-ação de cada tarefa é
+    // decidida pelo engine: com merge parcial, apagar ou desativar os originais
+    // perderia o conteúdo que não entrou.
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_start_merge_queue(move || {
+        let jobs = state_clone.merge_jobs();
+        if jobs.is_empty() {
+            return;
+        }
+
+        let limite_bytes = (cfg_clone.load().merge_limit_gb * 1_073_741_824.0) as u64;
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_is_merging(true);
+            w.set_merge_progress(0.0);
+            w.set_merge_status(SharedString::from(format!(
+                "🚀 Executando fila com {} tarefa(s)...",
+                jobs.len()
+            )));
+        }
+
+        let engine_jobs: Vec<MergeJob> = jobs
+            .iter()
+            .map(|j| MergeJob {
+                name: j.name.clone(),
+                input_files: j.input_files.clone(),
+                output_dir: j.output_dir.clone(),
+                max_size_bytes: limite_bytes,
+                post_action: j.post_action,
+            })
+            .collect();
+
+        let weak_async = weak_clone.clone();
+        let state_async = Arc::clone(&state_clone);
+        tokio::task::spawn_blocking(move || {
+            let total_jobs = engine_jobs.len();
+
+            let on_job = {
+                let weak = weak_async.clone();
+                let state = Arc::clone(&state_async);
+                move |index: usize, status: JobStatus| {
+                    state.set_job_status(index, status);
+                    let weak_ui = weak.clone();
+                    let state_ui = Arc::clone(&state);
+                    let _ = slint::invoke_from_event_loop(move || {
+                        refresh_merge_jobs(&weak_ui, &state_ui);
+                    });
+                }
+            };
+
+            let on_progress = {
+                let weak = weak_async.clone();
+                move |index: usize, current: usize, total: usize, texto: &str| {
+                    // O avanço mostrado é o da fila inteira, não o da tarefa:
+                    // uma barra que reinicia a cada tarefa esconde o quanto
+                    // ainda falta no total.
+                    let dentro = if total == 0 { 0.0 } else { current as f32 / total as f32 };
+                    let geral = (index as f32 + dentro) / total_jobs as f32;
+                    let msg = format!("[{}/{}] {}", index + 1, total_jobs, texto);
+                    let weak_ui = weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = weak_ui.upgrade() {
+                            w.set_merge_progress(geral);
+                            w.set_merge_status(SharedString::from(msg));
+                        }
+                    });
+                }
+            };
+
+            let outcomes = run_merge_queue(
+                &engine_jobs,
+                state_async.disabled_manager(),
+                on_job,
+                on_progress,
+            );
+
+            let concluidas = outcomes.iter().filter(|o| o.status == JobStatus::Done).count();
+            let parciais = outcomes.iter().filter(|o| o.status == JobStatus::Partial).count();
+            let falhas = outcomes.iter().filter(|o| o.status == JobStatus::Failed).count();
+
+            let mut msg = format!("✅ Fila concluída: {} de {} tarefa(s).", concluidas, total_jobs);
+            if parciais > 0 {
+                msg.push_str(&format!(
+                    " ⚠️ {} parcial(is) — os originais foram mantidos.",
+                    parciais
+                ));
+            }
+            if falhas > 0 {
+                msg.push_str(&format!(" ❌ {} falha(s).", falhas));
+            }
+
+            let _ = slint::invoke_from_event_loop(move || {
+                refresh_merge_jobs(&weak_async, &state_async);
+                if let Some(w) = weak_async.upgrade() {
+                    w.set_is_merging(false);
+                    w.set_merge_progress(1.0);
+                    w.set_merge_status(SharedString::from(msg));
+                }
+            });
+        });
+    });
+
     // Callback: start_merge
-    // Antes isto era uma simulação: mostrava o diálogo sem nunca chamar o
-    // engine. Agora roda o merge DBPF de verdade, com progresso.
+    // Unifica só a origem atual, sem passar pela fila — o atalho para quem tem
+    // um grupo só.
     let cfg_clone = Arc::clone(&config_mgr);
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
@@ -1254,6 +1450,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         let db_path = cfg_clone.config_dir().join("mods_cache.db");
         let weak_async = weak_clone.clone();
         let state_async = Arc::clone(&state_clone);
+        let cfg_async = Arc::clone(&cfg_clone);
 
         tokio::task::spawn_blocking(move || {
             // O cache de hashes é um bônus: sem ele a análise roda igual,
@@ -1263,27 +1460,11 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
 
             match result {
                 Ok((candidates, failures)) => {
-                    let rows: Vec<(String, String, String)> = candidates
-                        .iter()
-                        .map(|c| {
-                            let dups = c.analysis.duplicate_count;
-                            let count = if dups > 0 {
-                                format!("{} ({} dup.)", c.total_files(), dups)
-                            } else {
-                                c.total_files().to_string()
-                            };
-                            (
-                                c.analysis.detected_name.clone(),
-                                c.kind_label().to_string(),
-                                count,
-                            )
-                        })
-                        .collect();
-
-                    let mut status = if rows.is_empty() {
+                    let total = candidates.len();
+                    let mut status = if total == 0 {
                         "⚠️ Nenhum Sim, Lote ou CC encontrado nos arquivos escolhidos.".to_string()
                     } else {
-                        format!("{} item(ns) prontos para importar.", rows.len())
+                        format!("{} item(ns) prontos para importar.", total)
                     };
                     if !failures.is_empty() {
                         status.push_str(&format!(
@@ -1299,18 +1480,11 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
 
                     state_async.set_tray_candidates(candidates);
 
+                    let cfg_ui = Arc::clone(&cfg_async);
                     let _ = slint::invoke_from_event_loop(move || {
+                        refresh_tray_queue(&weak_async, &cfg_ui, &state_async);
                         if let Some(w) = weak_async.upgrade() {
-                            let model = Rc::new(VecModel::default());
-                            for (name, kind, count) in rows {
-                                model.push(crate::TrayItem {
-                                    name: SharedString::from(name),
-                                    type_str: SharedString::from(kind),
-                                    files_count: SharedString::from(count),
-                                });
-                            }
                             w.set_is_importing_tray(false);
-                            w.set_tray_items(ModelRc::from(model));
                             w.set_tray_status(SharedString::from(status));
                         }
                     });
@@ -1326,6 +1500,90 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                 }
             }
         });
+    });
+
+    // --- Ações por item da fila do tray ---
+
+    // Callback: tray_item_clicked
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_tray_item_clicked(move |index| {
+        state_clone.toggle_selected_tray(index as usize);
+        refresh_tray_queue(&weak_clone, &cfg_clone, &state_clone);
+    });
+
+    // Callback: set_tray_destination_selected / _all
+    //
+    // O destino é uma pasta dentro de Mods escolhida pelo usuário: um Sim que
+    // só traz cabelos vai para a pasta de cabelos, não para uma pasta com o
+    // nome dele.
+    for apenas_marcados in [true, false] {
+        let cfg_clone = Arc::clone(&config_mgr);
+        let state_clone = Arc::clone(&state);
+        let weak_clone = weak_win.clone();
+        let escolher_destino = move || {
+            let config = cfg_clone.load();
+            let Some(sims_path) = config.sims4_path.clone() else { return };
+            let mods_dir = get_mods_dir(&sims_path);
+
+            let Some(dir) = rfd::FileDialog::new().set_directory(&mods_dir).pick_folder() else {
+                return;
+            };
+
+            // Fora de Mods o jogo não carrega nada — recusamos em vez de
+            // copiar para um lugar inútil.
+            if dir != mods_dir && !crate::core::safety::is_path_inside(&dir, &mods_dir) {
+                if let Some(w) = weak_clone.upgrade() {
+                    w.set_tray_status(SharedString::from(
+                        "⚠️ Escolha uma pasta dentro de Mods: fora dela o jogo não carrega o CC.",
+                    ));
+                }
+                return;
+            }
+
+            state_clone.update_tray_candidates(apenas_marcados, |c| {
+                c.cc_target = Some(dir.clone());
+            });
+
+            refresh_tray_queue(&weak_clone, &cfg_clone, &state_clone);
+            if let Some(w) = weak_clone.upgrade() {
+                w.set_tray_status(SharedString::from(format!(
+                    "📂 CC de {} irá para {}.",
+                    if apenas_marcados { "itens marcados" } else { "todos os itens" },
+                    display_path(&dir, &mods_dir)
+                )));
+            }
+        };
+
+        if apenas_marcados {
+            window.on_set_tray_destination_selected(escolher_destino);
+        } else {
+            window.on_set_tray_destination_all(escolher_destino);
+        }
+    }
+
+    // Callback: skip_selected_tray
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_skip_selected_tray(move || {
+        // Alterna: o mesmo botão desfaz o "pular" de quem já estava pulado.
+        state_clone.update_tray_candidates(true, |c| c.skipped = !c.skipped);
+        refresh_tray_queue(&weak_clone, &cfg_clone, &state_clone);
+    });
+
+    // Callback: clear_tray_queue
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_clear_tray_queue(move || {
+        let _ = clear_tray_work_dir(state_clone.tray_work_dir());
+        state_clone.clear_tray();
+        refresh_tray_queue(&weak_clone, &cfg_clone, &state_clone);
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_tray_status(SharedString::from("Fila de importação limpa."));
+        }
     });
 
     // Callback: start_tray_import
@@ -1370,7 +1628,11 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             let mut failures: Vec<String> = Vec::new();
 
             for candidate in &candidates {
-                match import_tray_item(&candidate.analysis, &tray_dir, &mods_dir, &allowed_roots) {
+                if candidate.skipped {
+                    continue;
+                }
+                let cc_dir = candidate.cc_dir(&mods_dir);
+                match import_tray_item(&candidate.analysis, &tray_dir, &cc_dir, &allowed_roots) {
                     Ok((tray_n, cc_n, skipped)) => {
                         tray_total += tray_n;
                         cc_total += cc_n;
@@ -1847,6 +2109,76 @@ fn refresh_organizer_tree(
     } else {
         format!("🔎 {} resultado(s) para \"{}\".", visible.len(), query)
     }));
+}
+
+/// Redesenha a fila do tray a partir dos candidatos guardados no estado.
+fn refresh_tray_queue(
+    weak_win: &slint::Weak<MainWindow>,
+    config_mgr: &ConfigManager,
+    state: &AppState,
+) {
+    let config = config_mgr.load();
+    let Some(w) = weak_win.upgrade() else { return };
+    let Some(sims_path) = &config.sims4_path else { return };
+
+    let mods_dir = get_mods_dir(sims_path);
+    let marcados = state.selected_tray();
+
+    let model = Rc::new(VecModel::default());
+    state.with_tray_candidates(|candidates| {
+        for (index, c) in candidates.iter().enumerate() {
+            let dups = c.analysis.duplicate_count;
+            let count = if dups > 0 {
+                format!("{} ({} dup.)", c.total_files(), dups)
+            } else {
+                c.total_files().to_string()
+            };
+
+            model.push(crate::TrayItem {
+                name: SharedString::from(c.analysis.detected_name.clone()),
+                type_str: SharedString::from(c.kind_label()),
+                files_count: SharedString::from(count),
+                cc_target_label: SharedString::from(display_path(&c.cc_dir(&mods_dir), &mods_dir)),
+                skipped: c.skipped,
+                selected: marcados.contains(&index),
+                index: index as i32,
+            });
+        }
+    });
+
+    w.set_tray_items(ModelRc::from(model));
+    w.set_tray_selected_count(marcados.len() as i32);
+}
+
+/// Redesenha a fila de tarefas do merger.
+fn refresh_merge_jobs(weak_win: &slint::Weak<MainWindow>, state: &AppState) {
+    let Some(w) = weak_win.upgrade() else { return };
+    let marcados = state.selected_jobs();
+
+    let model = Rc::new(VecModel::default());
+    for (index, job) in state.merge_jobs().iter().enumerate() {
+        model.push(crate::MergeJobItem {
+            name: SharedString::from(job.name.clone()),
+            files_count: SharedString::from(format!("{} packages", job.input_files.len())),
+            output_label: SharedString::from(file_label(&job.output_dir)),
+            post_label: SharedString::from(post_action_label(job.post_action)),
+            status_label: SharedString::from(job.status.label()),
+            index: index as i32,
+            selected: marcados.contains(&index),
+        });
+    }
+
+    w.set_merge_jobs(ModelRc::from(model));
+    w.set_merge_jobs_selected_count(marcados.len() as i32);
+}
+
+fn post_action_label(action: PostMergeAction) -> &'static str {
+    match action {
+        PostMergeAction::Keep => "manter originais",
+        PostMergeAction::Disable => "desativar originais",
+        PostMergeAction::Backup => "backup em zip",
+        PostMergeAction::Delete => "excluir originais",
+    }
 }
 
 /// Repopula o painel de desativados a partir do disco.

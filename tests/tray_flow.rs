@@ -202,7 +202,7 @@ fn importacao_separa_tray_do_cc_nas_pastas_certas() {
     let c = &candidatos[0];
 
     let (tray_n, cc_n, pulados) =
-        import_tray_item(&c.analysis, &fx.tray_dir, &fx.mods_dir, &fx.roots()).unwrap();
+        import_tray_item(&c.analysis, &fx.tray_dir, &c.cc_dir(&fx.mods_dir), &fx.roots()).unwrap();
 
     assert_eq!(tray_n, 1);
     assert_eq!(cc_n, 1);
@@ -227,4 +227,50 @@ fn limpeza_do_diretorio_de_trabalho_e_idempotente() {
 
     // Chamar de novo com o diretório já ausente não pode falhar.
     clear_tray_work_dir(&fx.work_dir).unwrap();
+}
+
+#[test]
+fn destino_do_cc_pode_ser_trocado_por_item() {
+    let fx = Fixture::new();
+    let archive = fx.downloads.join("SimComCabelo.zip");
+    make_zip(
+        &archive,
+        &[
+            ("Sim.trayitem", b"tray-binary".to_vec()),
+            ("cabelo.package", package_bytes("cc")),
+        ],
+    );
+
+    let (mut candidatos, _) = prepare_tray_candidates(&[archive], &fx.work_dir, None).unwrap();
+    // Um Sim que só traz cabelos costuma ir para a pasta de cabelos, não para
+    // uma pasta com o nome do Sim.
+    let escolhida = fx.mods_dir.join("CC/Cabelos");
+    candidatos[0].cc_target = Some(escolhida.clone());
+
+    let c = &candidatos[0];
+    import_tray_item(&c.analysis, &fx.tray_dir, &c.cc_dir(&fx.mods_dir), &fx.roots()).unwrap();
+
+    assert!(escolhida.join("cabelo.package").exists());
+    assert!(
+        !fx.mods_dir.join("Imported_Sims").exists(),
+        "o destino padrão não deveria ter sido usado"
+    );
+    // Os binários de Tray não seguem o CC: eles só funcionam na pasta Tray.
+    assert!(fx.tray_dir.join("Sim.trayitem").exists());
+}
+
+#[test]
+fn destino_padrao_e_uma_subpasta_com_o_nome_do_item() {
+    let fx = Fixture::new();
+    let archive = fx.downloads.join("Maria.zip");
+    make_zip(&archive, &[("cabelo.package", package_bytes("cc"))]);
+
+    let (candidatos, _) = prepare_tray_candidates(&[archive], &fx.work_dir, None).unwrap();
+    let c = &candidatos[0];
+
+    assert_eq!(
+        c.cc_dir(&fx.mods_dir),
+        fx.mods_dir.join("Imported_Sims").join(&c.analysis.detected_name)
+    );
+    assert!(!c.skipped, "um item recém-analisado entra na fila para importar");
 }

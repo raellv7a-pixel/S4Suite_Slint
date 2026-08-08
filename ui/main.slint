@@ -4,7 +4,7 @@ import { Sidebar } from "components/sidebar.slint";
 import { DashboardView } from "views/dashboard.slint";
 import { InstallerView, QueueItem } from "views/installer.slint";
 import { OrganizerView, ModTreeEntry, FolderChoice, DisabledEntry } from "views/organizer.slint";
-import { MergerView, MergeQueueItem } from "views/merger.slint";
+import { MergerView, MergeQueueItem, MergeJobItem } from "views/merger.slint";
 import { TrayView, TrayItem } from "views/tray.slint";
 import { TranslationsView, TranslationItem } from "views/translations.slint";
 import { ReshadeView } from "views/reshade.slint";
@@ -96,10 +96,24 @@ export component MainWindow inherits Window {
     in property <string> merge_input_dir: "";
     in property <string> merge_output_dir: "";
     in property <float> merge_progress: 0.0;
+    in property <[MergeJobItem]> merge_jobs;
+    in property <int> merge_jobs_selected_count: 0;
+    in property <string> merge_post_action: "keep";
+    callback add_merge_job();
+    callback remove_merge_job();
+    callback merge_job_clicked(int);
+    callback merge_post_action_selected(string);
+    callback start_merge_queue();
 
     in property <[TrayItem]> tray_items;
     in property <bool> is_importing_tray: false;
     in property <string> tray_status: "Pronto";
+    in property <int> tray_selected_count: 0;
+    callback tray_item_clicked(int);
+    callback set_tray_destination_selected();
+    callback set_tray_destination_all();
+    callback skip_selected_tray();
+    callback clear_tray_queue();
 
     in property <[TranslationItem]> installed_translations;
     in property <string> translations_status: "Pronto";
@@ -245,6 +259,15 @@ export component MainWindow inherits Window {
                 select_input_clicked => { root.select_merger_input(); }
                 select_output_clicked => { root.select_merger_output(); }
                 start_merge_clicked => { root.start_merge(); }
+
+                jobs: root.merge_jobs;
+                jobs_selected_count: root.merge_jobs_selected_count;
+                post_action: root.merge_post_action;
+                add_job_clicked => { root.add_merge_job(); }
+                remove_job_clicked => { root.remove_merge_job(); }
+                job_clicked(idx) => { root.merge_job_clicked(idx); }
+                post_action_selected(a) => { root.merge_post_action_selected(a); }
+                start_queue_clicked => { root.start_merge_queue(); }
             }
 
             if root.current_tab == 4 : TrayView {
@@ -253,6 +276,13 @@ export component MainWindow inherits Window {
                 tray_status: root.tray_status;
                 select_tray_files_clicked => { root.select_tray_files(); }
                 start_import_clicked => { root.start_tray_import(); }
+
+                tray_selected_count: root.tray_selected_count;
+                tray_item_clicked(idx) => { root.tray_item_clicked(idx); }
+                set_destination_selected => { root.set_tray_destination_selected(); }
+                set_destination_all => { root.set_tray_destination_all(); }
+                skip_selected_clicked => { root.skip_selected_tray(); }
+                clear_queue_clicked => { root.clear_tray_queue(); }
             }
 
             if root.current_tab == 5 : TranslationsView {

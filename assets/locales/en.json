@@ -394,5 +394,20 @@
   "🗑️ Excluir Definitivamente": "🗑️ Delete Permanently",
   "🚫 Mods Desativados": "🚫 Disabled Mods",
   "🚫 Ver Desativados": "🚫 View Disabled",
-  "🟢 Restaurar Selecionados": "🟢 Restore Selected"
+  "🟢 Restaurar Selecionados": "🟢 Restore Selected",
+  "CC vai para: ": "CC goes to: ",
+  "Fila de tarefas": "Task queue",
+  "Fila vazia. Escolha origem e destino e clique em Adicionar à Fila.": "Empty queue. Pick a source and a destination, then click Add to Queue.",
+  "Origem atual": "Current source",
+  "Originais após unificar:": "Originals after merging:",
+  "Remover": "Remove",
+  "⏭️ Pular / Restaurar": "⏭️ Skip / Restore",
+  "➕ Adicionar à Fila": "➕ Add to Queue",
+  "📂 Destino do CC (selecionados)": "📂 CC destination (selected)",
+  "📂 Destino do CC (todos)": "📂 CC destination (all)",
+  "🚀 Executar Fila": "🚀 Run Queue",
+  "Manter": "Keep",
+  "Desativar": "Disable",
+  "Backup em zip": "Zip backup",
+  "Excluir": "Delete"
 }

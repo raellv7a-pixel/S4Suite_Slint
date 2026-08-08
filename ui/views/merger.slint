@@ -8,8 +8,28 @@ export struct MergeQueueItem {
     size_str: string,
 }
 
+/// Uma tarefa da fila: um grupo de packages com destino e pós-ação próprios.
+export struct MergeJobItem {
+    name: string,
+    files_count: string,
+    output_label: string,
+    post_label: string,
+    status_label: string,
+    index: int,
+    selected: bool,
+}
+
 export component MergerView inherits Rectangle {
     in property <[MergeQueueItem]> items;
+    in property <[MergeJobItem]> jobs;
+    in property <int> jobs_selected_count: 0;
+    in property <string> post_action: "keep";
+
+    callback add_job_clicked();
+    callback remove_job_clicked();
+    callback job_clicked(int);
+    callback post_action_selected(string);
+    callback start_queue_clicked();
     in property <string> max_size_gb: "1.0";
     in property <bool> is_merging: false;
     in property <string> merge_status: "Aguardando seleção de arquivos...";
@@ -79,11 +99,45 @@ export component MergerView inherits Rectangle {
             }
             Rectangle { horizontal-stretch: 1; }
             PrimaryButton {
-                text: root.is_merging ? I18n.tr("⏳ Unificando...") : I18n.tr("🚀 Iniciar Unificação");
-                // Sem origem e destino definidos não há merge possível.
+                // Adicionar à fila em vez de unificar direto: o caso comum é ter
+                // vários grupos com destinos diferentes.
+                text: I18n.tr("➕ Adicionar à Fila");
                 enabled: !root.is_merging && root.items.length > 0 && root.output_dir != "";
+                btn_color: Theme.surface_header;
+                hover_color: Theme.surface_hover;
+                clicked => { root.add_job_clicked(); }
+            }
+            PrimaryButton {
+                text: root.is_merging ? I18n.tr("⏳ Unificando...") : I18n.tr("🚀 Executar Fila");
+                // Sem origem e destino definidos não há merge possível.
+                enabled: !root.is_merging && root.jobs.length > 0;
                 btn_color: Theme.accent_color;
-                clicked => { root.start_merge_clicked(); }
+                clicked => { root.start_queue_clicked(); }
+            }
+        }
+
+        // Destino dos originais depois que a unificação der certo. Manter os
+        // originais junto das partes duplica todo o conteúdo dentro do jogo.
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            Text {
+                text: I18n.tr("Originais após unificar:");
+                font-size: 12px;
+                color: Theme.text_secondary;
+                vertical-alignment: center;
+            }
+            for opcao in [
+                { chave: "keep", rotulo: "Manter" },
+                { chave: "disable", rotulo: "Desativar" },
+                { chave: "backup", rotulo: "Backup em zip" },
+                { chave: "delete", rotulo: "Excluir" },
+            ] : PrimaryButton {
+                text: I18n.tr(opcao.rotulo);
+                enabled: !root.is_merging;
+                btn_color: root.post_action == opcao.chave ? Theme.primary_color : Theme.surface_header;
+                hover_color: root.post_action == opcao.chave ? Theme.primary_hover : Theme.surface_hover;
+                clicked => { root.post_action_selected(opcao.chave); }
             }
         }
 
@@ -106,27 +160,125 @@ export component MergerView inherits Rectangle {
             }
         }
 
-        // File List
-        Card {
+        HorizontalLayout {
+            spacing: 16px;
             vertical-stretch: 1;
-            VerticalLayout {
-                padding: 12px;
 
-                if root.items.length == 0 : Text {
-                    text: I18n.tr("Nenhum arquivo .package selecionado para merge.");
-                    font-size: 13px;
-                    color: Theme.text_muted;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+            // Packages da origem atual, esperando virar uma tarefa.
+            Card {
+                horizontal-stretch: 1;
+                VerticalLayout {
+                    padding: 12px;
+                    alignment: start;
+
+                    Text {
+                        text: I18n.tr("Origem atual");
+                        font-size: 12px;
+                        font-weight: 700;
+                        color: Theme.text_secondary;
+                    }
+
+                    if root.items.length == 0 : Text {
+                        text: I18n.tr("Nenhum arquivo .package selecionado para merge.");
+                        font-size: 13px;
+                        color: Theme.text_muted;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    for item in root.items : HorizontalLayout {
+                        height: 32px;
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        alignment: center;
+                        Text { text: "📦 " + item.name; font-size: 12px; color: Theme.text_primary; horizontal-stretch: 1; vertical-alignment: center; overflow: elide; }
+                        Text { text: item.size_str; font-size: 11px; color: Theme.text_secondary; width: 90px; vertical-alignment: center; }
+                    }
                 }
+            }
 
-                for item in root.items : HorizontalLayout {
-                    height: 36px;
-                    padding-left: 12px;
-                    padding-right: 12px;
-                    alignment: center;
-                    Text { text: "📦 " + item.name; font-size: 13px; color: Theme.text_primary; horizontal-stretch: 1; vertical-alignment: center; }
-                    Text { text: item.size_str; font-size: 12px; color: Theme.text_secondary; width: 100px; vertical-alignment: center; }
+            // A fila propriamente dita.
+            Card {
+                horizontal-stretch: 1;
+                VerticalLayout {
+                    padding: 12px;
+                    alignment: start;
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: I18n.tr("Fila de tarefas");
+                            font-size: 12px;
+                            font-weight: 700;
+                            color: Theme.text_secondary;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                        }
+                        PrimaryButton {
+                            text: I18n.tr("Remover");
+                            enabled: root.jobs_selected_count > 0 && !root.is_merging;
+                            btn_color: Theme.danger;
+                            hover_color: Theme.danger.darker(0.2);
+                            clicked => { root.remove_job_clicked(); }
+                        }
+                    }
+
+                    if root.jobs.length == 0 : Text {
+                        text: I18n.tr("Fila vazia. Escolha origem e destino e clique em Adicionar à Fila.");
+                        font-size: 12px;
+                        color: Theme.text_muted;
+                        wrap: word-wrap;
+                    }
+
+                    for job in root.jobs : Rectangle {
+                        height: 52px;
+                        border-radius: 6px;
+                        background: job.selected
+                            ? Theme.primary_color.transparentize(0.7)
+                            : (job_touch.has-hover ? Theme.surface_header : transparent);
+
+                        job_touch := TouchArea {
+                            clicked => { root.job_clicked(job.index); }
+                        }
+
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            spacing: 8px;
+                            alignment: center;
+
+                            Text {
+                                text: job.selected ? "☑" : "☐";
+                                font-size: 13px;
+                                color: job.selected ? Theme.accent_color : Theme.text_muted;
+                                vertical-alignment: center;
+                            }
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                alignment: center;
+                                Text {
+                                    text: job.name + " (" + job.files_count + ")";
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: Theme.text_primary;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: "→ " + job.output_label + " · " + job.post_label;
+                                    font-size: 11px;
+                                    color: Theme.text_muted;
+                                    overflow: elide;
+                                }
+                            }
+                            Text {
+                                text: job.status_label;
+                                font-size: 11px;
+                                color: Theme.accent_color;
+                                width: 90px;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
                 }
             }
         }

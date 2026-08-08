@@ -3,7 +3,8 @@
 use s4suite::engine::dbpf::{DBPFReader, DBPFWriter, PackageResource, ResourceKey};
 use s4suite::engine::disabled::DisabledManager;
 use s4suite::engine::merger::{
-    apply_post_merge_action, common_ancestor, merge_sims4_packages, MergeTask, PostMergeAction,
+    apply_post_merge_action, common_ancestor, merge_sims4_packages, run_merge_queue, JobStatus,
+    MergeJob, MergeTask, PostMergeAction,
 };
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
@@ -255,4 +256,152 @@ fn pos_merge_backup_gera_zip_antes_de_remover_os_originais() {
     assert!(nomes.contains(&"b.package".to_string()));
 
     assert!(originais.iter().all(|p| !p.exists()));
+}
+
+// --- Fila de tarefas ---
+
+fn job(nome: &str, entradas: Vec<PathBuf>, saida: PathBuf, pos: PostMergeAction) -> MergeJob {
+    MergeJob {
+        name: nome.to_string(),
+        input_files: entradas,
+        output_dir: saida,
+        max_size_bytes: 1_000_000_000,
+        post_action: pos,
+    }
+}
+
+#[test]
+fn fila_executa_as_tarefas_em_ordem_e_reporta_cada_estado() {
+    let fx = Fixture::new();
+    let grupo_a = fx.input_dir.join("Cabelos/a.package");
+    let grupo_b = fx.input_dir.join("Roupas/b.package");
+    write_package(&grupo_a, &[1, 2], 64);
+    write_package(&grupo_b, &[3], 64);
+
+    let saida_a = fx.output_dir.join("Cabelos");
+    let saida_b = fx.output_dir.join("Roupas");
+    let jobs = vec![
+        job("Cabelos", vec![grupo_a], saida_a.clone(), PostMergeAction::Keep),
+        job("Roupas", vec![grupo_b], saida_b.clone(), PostMergeAction::Keep),
+    ];
+
+    let estados = std::sync::Mutex::new(Vec::new());
+    let outcomes = run_merge_queue(
+        &jobs,
+        &fx.manager(),
+        |idx, status| estados.lock().unwrap().push((idx, status)),
+        |_, _, _, _| {},
+    );
+
+    assert_eq!(outcomes.len(), 2);
+    assert!(outcomes.iter().all(|o| o.status == JobStatus::Done));
+
+    // Cada job passa por Running antes de terminar, e na ordem da fila.
+    let vistos = estados.lock().unwrap().clone();
+    assert_eq!(
+        vistos,
+        vec![
+            (0, JobStatus::Running),
+            (0, JobStatus::Done),
+            (1, JobStatus::Running),
+            (1, JobStatus::Done),
+        ]
+    );
+
+    // Cada tarefa tem seu próprio destino: nada é misturado.
+    assert!(saida_a.exists() && saida_b.exists());
+}
+
+#[test]
+fn cada_tarefa_da_fila_aplica_a_propria_acao_pos_merge() {
+    let fx = Fixture::new();
+    let manter = fx.input_dir.join("Manter/x.package");
+    let apagar = fx.input_dir.join("Apagar/y.package");
+    write_package(&manter, &[1], 64);
+    write_package(&apagar, &[2], 64);
+
+    let jobs = vec![
+        job("Manter", vec![manter.clone()], fx.output_dir.join("m"), PostMergeAction::Keep),
+        job("Apagar", vec![apagar.clone()], fx.output_dir.join("a"), PostMergeAction::Delete),
+    ];
+
+    let outcomes = run_merge_queue(&jobs, &fx.manager(), |_, _| {}, |_, _, _, _| {});
+
+    assert!(outcomes.iter().all(|o| o.status == JobStatus::Done));
+    assert!(manter.exists(), "o job com 'manter' não pode apagar nada");
+    assert!(!apagar.exists(), "o job com 'excluir' deveria ter removido o original");
+}
+
+/// Com um merge parcial, apagar ou desativar os originais perderia o conteúdo
+/// dos arquivos que não entraram na unificação.
+#[test]
+fn tarefa_parcial_nao_executa_a_acao_pos_merge() {
+    let fx = Fixture::new();
+    let bom = fx.input_dir.join("bom.package");
+    let corrompido = fx.input_dir.join("corrompido.package");
+    write_package(&bom, &[1], 64);
+    fs::write(&corrompido, b"isto nao e um DBPF valido").unwrap();
+
+    let jobs = vec![job(
+        "Misto",
+        vec![bom.clone(), corrompido.clone()],
+        fx.output_dir.clone(),
+        PostMergeAction::Delete,
+    )];
+
+    let outcomes = run_merge_queue(&jobs, &fx.manager(), |_, _| {}, |_, _, _, _| {});
+
+    assert_eq!(outcomes[0].status, JobStatus::Partial);
+    assert!(outcomes[0].post.is_none(), "a pós-ação não pode rodar num merge parcial");
+    assert!(bom.exists(), "nenhum original pode ser apagado aqui");
+    assert!(corrompido.exists());
+}
+
+/// Uma tarefa que falha não pode levar as seguintes junto: a fila é o único
+/// lugar onde o usuário deixa vários grupos rodando sem olhar.
+#[test]
+fn tarefa_que_falha_nao_interrompe_a_fila() {
+    let fx = Fixture::new();
+    let vazio = fx.input_dir.join("Vazio");
+    fs::create_dir_all(&vazio).unwrap();
+    let bom = fx.input_dir.join("Bom/ok.package");
+    write_package(&bom, &[1], 64);
+
+    let jobs = vec![
+        job("Vazio", Vec::new(), fx.output_dir.join("v"), PostMergeAction::Keep),
+        job("Bom", vec![bom], fx.output_dir.join("b"), PostMergeAction::Keep),
+    ];
+
+    let outcomes = run_merge_queue(&jobs, &fx.manager(), |_, _| {}, |_, _, _, _| {});
+
+    assert_eq!(outcomes.len(), 2);
+    assert_ne!(outcomes[0].status, JobStatus::Done);
+    assert_eq!(outcomes[1].status, JobStatus::Done, "a segunda tarefa tinha que rodar");
+}
+
+#[test]
+fn progresso_da_fila_identifica_a_tarefa_de_origem() {
+    let fx = Fixture::new();
+    let a = fx.input_dir.join("A/a.package");
+    let b = fx.input_dir.join("B/b.package");
+    write_package(&a, &[1], 64);
+    write_package(&b, &[2], 64);
+
+    let jobs = vec![
+        job("A", vec![a], fx.output_dir.join("a"), PostMergeAction::Keep),
+        job("B", vec![b], fx.output_dir.join("b"), PostMergeAction::Keep),
+    ];
+
+    let indices = std::sync::Mutex::new(Vec::new());
+    run_merge_queue(
+        &jobs,
+        &fx.manager(),
+        |_, _| {},
+        |idx, _, _, _| indices.lock().unwrap().push(idx),
+    );
+
+    let vistos = indices.lock().unwrap().clone();
+    // Sem o índice, a barra de progresso da UI não saberia de qual tarefa é o
+    // avanço que está recebendo.
+    assert!(vistos.contains(&0) && vistos.contains(&1));
 }

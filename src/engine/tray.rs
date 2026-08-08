@@ -248,11 +248,23 @@ pub const TRAY_WORK_DIR: &str = "tray_staging";
 pub struct TrayImportCandidate {
     pub source: PathBuf,
     pub analysis: TrayAnalysisResult,
+    /// Para onde vai o CC deste item. `None` usa [`default_cc_dir`].
+    pub cc_target: Option<PathBuf>,
+    /// Item marcado para não ser importado. Continua na fila à vista, para o
+    /// usuário poder voltar atrás antes de confirmar.
+    pub skipped: bool,
 }
 
 impl TrayImportCandidate {
     pub fn total_files(&self) -> usize {
         self.analysis.tray_files.len() + self.analysis.package_files.len()
+    }
+
+    /// Destino efetivo do CC, resolvendo o padrão quando nada foi escolhido.
+    pub fn cc_dir(&self, mods_dir: &Path) -> PathBuf {
+        self.cc_target
+            .clone()
+            .unwrap_or_else(|| default_cc_dir(mods_dir, &self.analysis.detected_name))
     }
 
     /// Rótulo do tipo de conteúdo, a partir do que foi realmente encontrado.
@@ -317,6 +329,8 @@ pub fn prepare_tray_candidates(
             Ok(analysis) => candidates.push(TrayImportCandidate {
                 source: source.clone(),
                 analysis,
+                cc_target: None,
+                skipped: false,
             }),
             Err(e) => {
                 let _ = fs::remove_dir_all(&dest);
@@ -353,14 +367,24 @@ pub fn clear_tray_work_dir(work_root: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Pasta padrão do CC que acompanha um Sim ou Lote importado.
+///
+/// O usuário pode trocá-la item a item na fila — um Sim que só traz cabelos
+/// costuma ir para a pasta de cabelos, não para uma pasta com o nome do Sim.
+pub fn default_cc_dir(mods_dir: &Path, detected_name: &str) -> PathBuf {
+    mods_dir.join("Imported_Sims").join(detected_name)
+}
+
+/// Importa um item para o jogo: os binários de Tray vão para a pasta `Tray`, e
+/// o CC para `cc_dir`.
 pub fn import_tray_item(
     analysis: &TrayAnalysisResult,
     tray_dir: &Path,
-    mods_dir: &Path,
+    cc_dir: &Path,
     allowed_roots: &[PathBuf],
 ) -> Result<(usize, usize, usize), Box<dyn std::error::Error + Send + Sync>> {
     fs::create_dir_all(tray_dir)?;
-    let dest_mods_folder = mods_dir.join("Imported_Sims").join(&analysis.detected_name);
+    let dest_mods_folder = cc_dir.to_path_buf();
     fs::create_dir_all(&dest_mods_folder)?;
 
     let mut moved_files: Vec<(PathBuf, PathBuf)> = Vec::new();

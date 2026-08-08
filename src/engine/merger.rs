@@ -177,6 +177,125 @@ where
 
 /// O que fazer com os arquivos originais depois de um merge bem-sucedido.
 ///
+/// Uma tarefa da fila: um conjunto de packages, um destino e o que fazer com os
+/// originais depois.
+///
+/// A fila existe porque unificar a pasta inteira de mods de uma vez é o caso
+/// raro; o normal é ter grupos com destinos diferentes — CC de cabelo numa
+/// parte, roupas em outra — e o app PyQt já trabalhava assim
+/// (`merger_tab.py:80`, `MergeQueueWorker`).
+pub struct MergeJob {
+    pub name: String,
+    pub input_files: Vec<PathBuf>,
+    pub output_dir: PathBuf,
+    pub max_size_bytes: u64,
+    pub post_action: PostMergeAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobStatus {
+    Pending,
+    Running,
+    Done,
+    /// Terminou, mas parte dos arquivos falhou — a pós-ação não roda.
+    Partial,
+    Failed,
+}
+
+impl JobStatus {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Pending => "Aguardando",
+            Self::Running => "Unificando...",
+            Self::Done => "Concluído",
+            Self::Partial => "Parcial",
+            Self::Failed => "Falhou",
+        }
+    }
+}
+
+/// Resultado de um job depois que a fila passou por ele.
+pub struct JobOutcome {
+    pub name: String,
+    pub status: JobStatus,
+    pub report: Option<MergeReport>,
+    pub post: Option<PostMergeOutcome>,
+    pub error: Option<String>,
+}
+
+/// Executa a fila em ordem, um job por vez.
+///
+/// `on_job` é chamado a cada mudança de estado para a UI acompanhar, e
+/// `on_progress` repassa o progresso de dentro do merge em andamento.
+///
+/// A pós-ação só roda quando o merge do job foi **completo**: com um merge
+/// parcial, apagar ou desativar os originais perderia o conteúdo dos arquivos
+/// que não entraram.
+pub fn run_merge_queue<J, P>(
+    jobs: &[MergeJob],
+    disabled_mgr: &DisabledManager,
+    on_job: J,
+    on_progress: P,
+) -> Vec<JobOutcome>
+where
+    J: Fn(usize, JobStatus) + Send + Sync,
+    P: Fn(usize, usize, usize, &str) + Send + Sync,
+{
+    let mut outcomes = Vec::new();
+
+    for (index, job) in jobs.iter().enumerate() {
+        on_job(index, JobStatus::Running);
+
+        let task = MergeTask {
+            input_files: job.input_files.clone(),
+            output_dir: job.output_dir.clone(),
+            max_size_bytes: job.max_size_bytes,
+        };
+
+        let result = merge_sims4_packages(&task, |current, total, text| {
+            on_progress(index, current, total, text)
+        });
+
+        let outcome = match result {
+            Ok(report) if report.success => {
+                let post = common_ancestor(&job.input_files).map(|root| {
+                    apply_post_merge_action(job.post_action, &job.input_files, &root, disabled_mgr)
+                });
+                let status = match &post {
+                    Some(p) if p.failed > 0 => JobStatus::Partial,
+                    _ => JobStatus::Done,
+                };
+                JobOutcome {
+                    name: job.name.clone(),
+                    status,
+                    report: Some(report),
+                    post,
+                    error: None,
+                }
+            }
+            Ok(report) => JobOutcome {
+                name: job.name.clone(),
+                status: if report.partial { JobStatus::Partial } else { JobStatus::Failed },
+                report: Some(report),
+                post: None,
+                error: None,
+            },
+            Err(e) => JobOutcome {
+                name: job.name.clone(),
+                status: JobStatus::Failed,
+                report: None,
+                post: None,
+                error: Some(e.to_string()),
+            },
+        };
+
+        on_job(index, outcome.status);
+        outcomes.push(outcome);
+    }
+
+    outcomes
+}
+
 /// Manter os originais junto das partes unificadas duplica todo o conteúdo
 /// dentro do jogo, então esta escolha não é cosmética.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

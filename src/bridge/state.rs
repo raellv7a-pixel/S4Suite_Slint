@@ -1,5 +1,6 @@
 use crate::engine::disabled::DisabledManager;
 use crate::engine::installer::ConflictReport;
+use crate::engine::merger::{JobStatus, PostMergeAction};
 use crate::engine::organizer::{DuplicateGroup, TransferMode};
 use crate::engine::tray::{TrayImportCandidate, TRAY_WORK_DIR};
 use parking_lot::Mutex;
@@ -34,6 +35,20 @@ pub struct PendingTransfer {
     pub mode: TransferMode,
 }
 
+/// Uma tarefa montada na fila do merger, ainda não executada.
+///
+/// Guarda a lista de arquivos, e não a pasta de origem: entre montar a fila e
+/// executá-la o usuário pode trocar a seleção, e a tarefa precisa unificar
+/// exatamente o que estava à vista quando foi adicionada.
+#[derive(Clone)]
+pub struct QueuedJob {
+    pub name: String,
+    pub input_files: Vec<PathBuf>,
+    pub output_dir: PathBuf,
+    pub post_action: PostMergeAction,
+    pub status: JobStatus,
+}
+
 /// Estado que precisa sobreviver entre callbacks da UI.
 ///
 /// Os callbacks Slint são closures independentes: o que um seleciona, o outro
@@ -64,11 +79,19 @@ pub struct AppState {
     merger_inputs: Mutex<Vec<PathBuf>>,
     /// Destino escolhido para as partes unificadas.
     merger_output: Mutex<Option<PathBuf>>,
+    /// Fila de tarefas montada pelo usuário.
+    merge_jobs: Mutex<Vec<QueuedJob>>,
+    /// Índices marcados na fila, para remoção.
+    selected_jobs: Mutex<Vec<usize>>,
+    /// Destino dos originais depois de unificar.
+    merge_post_action: Mutex<PostMergeAction>,
 
     /// Zips e arquivos de tray escolhidos para importar.
     tray_sources: Mutex<Vec<PathBuf>>,
     /// Fontes já extraídas e analisadas, aguardando a importação.
     tray_candidates: Mutex<Vec<TrayImportCandidate>>,
+    /// Índices marcados na fila do tray.
+    selected_tray: Mutex<Vec<usize>>,
 
     disabled_mgr: DisabledManager,
     /// Onde as fontes do tray são extraídas antes de irem para o jogo.
@@ -88,8 +111,12 @@ impl AppState {
             selected_disabled: Mutex::new(Vec::new()),
             merger_inputs: Mutex::new(Vec::new()),
             merger_output: Mutex::new(None),
+            merge_jobs: Mutex::new(Vec::new()),
+            selected_jobs: Mutex::new(Vec::new()),
+            merge_post_action: Mutex::new(PostMergeAction::Keep),
             tray_sources: Mutex::new(Vec::new()),
             tray_candidates: Mutex::new(Vec::new()),
+            selected_tray: Mutex::new(Vec::new()),
             disabled_mgr: DisabledManager::new(config_dir),
             tray_work_dir: config_dir.join(TRAY_WORK_DIR),
         }
@@ -234,6 +261,67 @@ impl AppState {
         *self.merger_output.lock() = None;
     }
 
+    // --- Fila do merger ---
+
+    pub fn push_merge_job(&self, job: QueuedJob) {
+        self.merge_jobs.lock().push(job);
+    }
+
+    pub fn merge_jobs(&self) -> Vec<QueuedJob> {
+        self.merge_jobs.lock().clone()
+    }
+
+    pub fn set_job_status(&self, index: usize, status: JobStatus) {
+        if let Some(job) = self.merge_jobs.lock().get_mut(index) {
+            job.status = status;
+        }
+    }
+
+    pub fn toggle_selected_job(&self, index: usize) {
+        let mut selected = self.selected_jobs.lock();
+        match selected.iter().position(|i| *i == index) {
+            Some(pos) => {
+                selected.remove(pos);
+            }
+            None => selected.push(index),
+        }
+    }
+
+    pub fn selected_jobs(&self) -> Vec<usize> {
+        self.selected_jobs.lock().clone()
+    }
+
+    /// Remove as tarefas marcadas. Descartamos de trás para frente porque cada
+    /// remoção desloca os índices seguintes.
+    pub fn remove_selected_jobs(&self) -> usize {
+        let mut selected = self.selected_jobs.lock();
+        selected.sort_unstable();
+        selected.dedup();
+
+        let mut jobs = self.merge_jobs.lock();
+        let mut removidos = 0;
+        for index in selected.iter().rev() {
+            if *index < jobs.len() {
+                jobs.remove(*index);
+                removidos += 1;
+            }
+        }
+        selected.clear();
+        removidos
+    }
+
+    pub fn clear_selected_jobs(&self) {
+        self.selected_jobs.lock().clear();
+    }
+
+    pub fn set_merge_post_action(&self, action: PostMergeAction) {
+        *self.merge_post_action.lock() = action;
+    }
+
+    pub fn merge_post_action(&self) -> PostMergeAction {
+        *self.merge_post_action.lock()
+    }
+
     // --- Tray ---
 
     pub fn tray_work_dir(&self) -> &Path {
@@ -250,6 +338,40 @@ impl AppState {
 
     pub fn set_tray_candidates(&self, candidates: Vec<TrayImportCandidate>) {
         *self.tray_candidates.lock() = candidates;
+        self.selected_tray.lock().clear();
+    }
+
+    /// Aplica uma mudança a cada candidato da fila, opcionalmente só aos
+    /// marcados. Usado por "destino do CC" e "pular".
+    pub fn update_tray_candidates<F>(&self, apenas_marcados: bool, mut f: F)
+    where
+        F: FnMut(&mut TrayImportCandidate),
+    {
+        let marcados = self.selected_tray.lock().clone();
+        for (index, candidate) in self.tray_candidates.lock().iter_mut().enumerate() {
+            if !apenas_marcados || marcados.contains(&index) {
+                f(candidate);
+            }
+        }
+    }
+
+    /// Lê a fila sem consumi-la, para redesenhar a tela.
+    pub fn with_tray_candidates<R>(&self, f: impl FnOnce(&[TrayImportCandidate]) -> R) -> R {
+        f(&self.tray_candidates.lock())
+    }
+
+    pub fn toggle_selected_tray(&self, index: usize) {
+        let mut selected = self.selected_tray.lock();
+        match selected.iter().position(|i| *i == index) {
+            Some(pos) => {
+                selected.remove(pos);
+            }
+            None => selected.push(index),
+        }
+    }
+
+    pub fn selected_tray(&self) -> Vec<usize> {
+        self.selected_tray.lock().clone()
     }
 
     /// Consome as fontes analisadas. Devolve vazio se a importação já rodou,
@@ -261,5 +383,6 @@ impl AppState {
     pub fn clear_tray(&self) {
         self.tray_sources.lock().clear();
         self.tray_candidates.lock().clear();
+        self.selected_tray.lock().clear();
     }
 }
