@@ -1,0 +1,62 @@
+// Escala tipográfica, de forma e de elevação do Material Design 3.
+//
+// Antes disto o app tinha 11 tamanhos de fonte codificados à mão (10, 11, 12, 13, 14, 16, 18, 20,
+// 26, 28, 36) sem regra de uso. Aqui viram papéis: escolhe-se pelo que o texto *é*, não pelo
+// tamanho que se quer.
+export global Type {
+    out property <length> display_s: 36px;
+    out property <int> display_s_w: 400;
+
+    out property <length> headline_s: 24px;
+    out property <int> headline_s_w: 600;
+
+    out property <length> title_l: 22px;
+    out property <int> title_l_w: 600;
+    out property <length> title_m: 16px;
+    out property <int> title_m_w: 600;
+    out property <length> title_s: 14px;
+    out property <int> title_s_w: 600;
+
+    out property <length> body_l: 16px;
+    out property <int> body_l_w: 400;
+    out property <length> body_m: 14px;
+    out property <int> body_m_w: 400;
+    out property <length> body_s: 12px;
+    out property <int> body_s_w: 400;
+
+    out property <length> label_l: 14px;
+    out property <int> label_l_w: 600;
+    out property <length> label_m: 12px;
+    out property <int> label_m_w: 600;
+    out property <length> label_s: 11px;
+    out property <int> label_s_w: 600;
+}
+
+export global Shape {
+    out property <length> none: 0px;
+    out property <length> xs: 4px;
+    out property <length> sm: 8px;
+    out property <length> md: 12px;
+    out property <length> lg: 16px;
+    out property <length> xl: 28px;
+}
+
+// Raio de blur do drop-shadow por nível MD3. O deslocamento vertical acompanha (ver Card).
+export global Elevation {
+    out property <length> l0: 0px;
+    out property <length> l1: 2px;
+    out property <length> l2: 6px;
+    out property <length> l3: 12px;
+    out property <length> l4: 16px;
+    out property <length> l5: 24px;
+}
+
+// Escala de espaçamento de 4px. Evita o desfile de 8/12/16/20/24 escolhidos a esmo.
+export global Space {
+    out property <length> xs: 4px;
+    out property <length> sm: 8px;
+    out property <length> md: 12px;
+    out property <length> lg: 16px;
+    out property <length> xl: 20px;
+    out property <length> xxl: 24px;
+}

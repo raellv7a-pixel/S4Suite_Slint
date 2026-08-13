@@ -1,0 +1,57 @@
+import { M3 } from "../theme/colors.slint";
+import { Motion } from "../theme/motion.slint";
+import { Type, Shape, Space } from "../theme/typography.slint";
+import { Icon, Ic } from "icon.slint";
+import { StatusRules } from "../theme/status.slint";
+
+/// Rodapé de status, único para as 8 vistas.
+///
+/// Cada view carregava o seu próprio `Card { Text { ... } }` — seis cópias do mesmo bloco, com
+/// alturas e cores levemente diferentes. Aqui a severidade também vira ícone e cor, em vez de um
+/// emoji no meio da frase que metade das fontes não desenha.
+export component StatusBar inherits Rectangle {
+    /// Mensagem crua do Rust, marcador incluso. A separação é feita por `StatusRules`.
+    in property <string> text;
+
+    property <string> kind: StatusRules.severity(root.text);
+    property <string> label: StatusRules.label(root.text);
+
+    property <color> accent:
+        root.kind == "ok" ? M3.tertiary
+        : root.kind == "warn" ? M3.warning
+        : root.kind == "error" ? M3.error
+        : root.kind == "busy" ? M3.primary
+        : M3.on_surface_variant;
+
+    height: 44px;
+    background: M3.surface_container_low;
+    border-radius: Shape.sm;
+    animate background { duration: Motion.medium2; easing: Motion.standard; }
+
+    HorizontalLayout {
+        padding-left: Space.lg;
+        padding-right: Space.lg;
+        spacing: Space.md;
+        alignment: start;
+
+        Icon {
+            glyph: root.kind == "ok" ? Ic.check_circle
+                : root.kind == "warn" ? Ic.warning
+                : root.kind == "error" ? Ic.alert
+                : root.kind == "busy" ? Ic.hourglass
+                : Ic.info;
+            font-size: 16px;
+            color: root.accent;
+        }
+
+        Text {
+            text: root.label;
+            font-size: Type.body_m;
+            color: root.accent;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+            animate color { duration: Motion.medium2; easing: Motion.standard; }
+        }
+    }
+}

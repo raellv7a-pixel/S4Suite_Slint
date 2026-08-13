@@ -1,7 +1,15 @@
+import { ListView } from "std-widgets.slint";
 import { I18n } from "../i18n.slint";
 import { Theme } from "../palette.slint";
 import { Card } from "../components/card.slint";
-import { PrimaryButton } from "../components/button.slint";
+import { Button, ButtonKind } from "../components/button.slint";
+import { FilterChip } from "../components/chip.slint";
+import { M3 } from "../theme/colors.slint";
+import { Type, Shape, Space } from "../theme/typography.slint";
+import { Dialog, DialogActions } from "../components/dialog.slint";
+import { Icon, Ic } from "../components/icon.slint";
+import { StatusBar } from "../components/status_bar.slint";
+import { ViewHeader } from "../components/view_header.slint";
 
 export struct MergeQueueItem {
     name: string,
@@ -50,68 +58,73 @@ export component MergerView inherits Rectangle {
     VerticalLayout {
         padding: 24px;
         spacing: 16px;
-        Text {
-            text: I18n.tr("🔗 Unificador de Packages (Merger V2)");
-            font-size: 22px;
-            font-weight: 800;
-            color: Theme.text_primary;
+        ViewHeader {
+            icon_str: Ic.link;
+            title: I18n.tr("Unificador de Packages (Merger V2)");
         }
 
-        // Info Banner
-        Card {
-            height: 80px;
-            HorizontalLayout {
-                padding: 16px;
-                spacing: 12px;
-                alignment: center;
-                Text { text: "⚡"; font-size: 28px; vertical-alignment: center; }
-                VerticalLayout {
-                    alignment: center;
-                    Text {
-                        text: I18n.tr("Merge de Alta Performance (DBPF Engine V2 em Rust)");
-                        font-size: 14px;
-                        font-weight: 700;
-                        color: Theme.text_primary;
-                    }
-                    Text {
-                        text: I18n.tr("Unifica centenas de .package em partes organizadas com ordenação TGI para acelerar o jogo.");
-                        font-size: 12px;
-                        color: Theme.text_secondary;
-                    }
-                }
+        // Origem, destino e fila. A unificação em si é sempre pela fila: o caso comum é ter
+        // vários grupos com destinos diferentes, e um botão "unificar agora" convidava a
+        // processar um grupo de cada vez.
+        HorizontalLayout {
+            spacing: Space.md;
+            Button {
+                text: I18n.tr("Selecionar Pasta de Origem");
+                icon_str: Ic.folder;
+                enabled: !root.is_merging;
+                clicked => { root.select_input_clicked(); }
+            }
+            Button {
+                text: I18n.tr("Selecionar Pasta de Destino");
+                icon_str: Ic.folder_open;
+                enabled: !root.is_merging;
+                clicked => { root.select_output_clicked(); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Button {
+                text: I18n.tr("Adicionar à Fila");
+                icon_str: Ic.plus;
+                enabled: !root.is_merging && root.items.length > 0 && root.output_dir != "";
+                clicked => { root.add_job_clicked(); }
+            }
+            Button {
+                text: root.is_merging ? I18n.tr("Unificando...") : I18n.tr("Executar Fila");
+                icon_str: root.is_merging ? Ic.hourglass : Ic.play;
+                kind: ButtonKind.filled;
+                enabled: !root.is_merging && root.jobs.length > 0;
+                clicked => { root.start_queue_clicked(); }
             }
         }
 
         // Actions Bar
         HorizontalLayout {
             spacing: 12px;
-            PrimaryButton {
-                text: I18n.tr("📁 Selecionar Pasta de Origem");
+            Button {
+                text: I18n.tr("Selecionar Pasta de Origem");
+                icon_str: Ic.folder;
                 enabled: !root.is_merging;
                 clicked => { root.select_input_clicked(); }
             }
-            PrimaryButton {
-                text: I18n.tr("📁 Selecionar Pasta de Destino");
+            Button {
+                text: I18n.tr("Selecionar Pasta de Destino");
+                icon_str: Ic.folder;
                 enabled: !root.is_merging;
-                btn_color: Theme.surface_header;
-                hover_color: Theme.surface_hover;
                 clicked => { root.select_output_clicked(); }
             }
             Rectangle { horizontal-stretch: 1; }
-            PrimaryButton {
+            Button {
                 // Adicionar à fila em vez de unificar direto: o caso comum é ter
                 // vários grupos com destinos diferentes.
-                text: I18n.tr("➕ Adicionar à Fila");
+                text: I18n.tr("Adicionar à Fila");
+                icon_str: Ic.plus;
                 enabled: !root.is_merging && root.items.length > 0 && root.output_dir != "";
-                btn_color: Theme.surface_header;
-                hover_color: Theme.surface_hover;
                 clicked => { root.add_job_clicked(); }
             }
-            PrimaryButton {
-                text: root.is_merging ? I18n.tr("⏳ Unificando...") : I18n.tr("🚀 Executar Fila");
+            Button {
+                kind: ButtonKind.filled;
+                text: root.is_merging ? I18n.tr("Unificando...") : I18n.tr("Executar Fila");
                 // Sem origem e destino definidos não há merge possível.
                 enabled: !root.is_merging && root.jobs.length > 0;
-                btn_color: Theme.accent_color;
                 clicked => { root.start_queue_clicked(); }
             }
         }
@@ -132,11 +145,11 @@ export component MergerView inherits Rectangle {
                 { chave: "disable", rotulo: "Desativar" },
                 { chave: "backup", rotulo: "Backup em zip" },
                 { chave: "delete", rotulo: "Excluir" },
-            ] : PrimaryButton {
+            ] : FilterChip {
+                // Escolha exclusiva: chip, não botão — o grupo precisa parecer um grupo.
                 text: I18n.tr(opcao.rotulo);
                 enabled: !root.is_merging;
-                btn_color: root.post_action == opcao.chave ? Theme.primary_color : Theme.surface_header;
-                hover_color: root.post_action == opcao.chave ? Theme.primary_hover : Theme.surface_hover;
+                selected: root.post_action == opcao.chave;
                 clicked => { root.post_action_selected(opcao.chave); }
             }
         }
@@ -169,7 +182,6 @@ export component MergerView inherits Rectangle {
                 horizontal-stretch: 1;
                 VerticalLayout {
                     padding: 12px;
-                    alignment: start;
 
                     Text {
                         text: I18n.tr("Origem atual");
@@ -184,15 +196,23 @@ export component MergerView inherits Rectangle {
                         color: Theme.text_muted;
                         horizontal-alignment: center;
                         vertical-alignment: center;
+                        vertical-stretch: 1;
                     }
 
-                    for item in root.items : HorizontalLayout {
-                        height: 32px;
-                        padding-left: 8px;
-                        padding-right: 8px;
-                        alignment: center;
-                        Text { text: "📦 " + item.name; font-size: 12px; color: Theme.text_primary; horizontal-stretch: 1; vertical-alignment: center; overflow: elide; }
-                        Text { text: item.size_str; font-size: 11px; color: Theme.text_secondary; width: 90px; vertical-alignment: center; }
+                    // Apontar a origem para a própria pasta Mods traz milhares de packages de uma
+                    // vez. Sem `ListView` todos viravam elementos reais na hora — a UI congelava —
+                    // e ainda por cima o que passasse da altura do Card ficava sem rolagem.
+                    if root.items.length > 0 : ListView {
+                        vertical-stretch: 1;
+                        for item in root.items : HorizontalLayout {
+                            height: 32px;
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            alignment: center;
+                            Icon { glyph: Ic.package; font-size: 14px; color: Theme.text_secondary; }
+                            Text { text: item.name; font-size: 12px; color: Theme.text_primary; horizontal-stretch: 1; vertical-alignment: center; overflow: elide; }
+                            Text { text: item.size_str; font-size: 11px; color: Theme.text_secondary; width: 90px; vertical-alignment: center; }
+                        }
                     }
                 }
             }
@@ -214,11 +234,10 @@ export component MergerView inherits Rectangle {
                             horizontal-stretch: 1;
                             vertical-alignment: center;
                         }
-                        PrimaryButton {
+                        Button {
+                            kind: ButtonKind.danger;
                             text: I18n.tr("Remover");
                             enabled: root.jobs_selected_count > 0 && !root.is_merging;
-                            btn_color: Theme.danger;
-                            hover_color: Theme.danger.darker(0.2);
                             clicked => { root.remove_job_clicked(); }
                         }
                     }
@@ -247,8 +266,8 @@ export component MergerView inherits Rectangle {
                             spacing: 8px;
                             alignment: center;
 
-                            Text {
-                                text: job.selected ? "☑" : "☐";
+                            Icon {
+                                glyph: job.selected ? Ic.checkbox_on : Ic.checkbox_off;
                                 font-size: 13px;
                                 color: job.selected ? Theme.accent_color : Theme.text_muted;
                                 vertical-alignment: center;
@@ -264,7 +283,7 @@ export component MergerView inherits Rectangle {
                                     overflow: elide;
                                 }
                                 Text {
-                                    text: "→ " + job.output_label + " · " + job.post_label;
+                                    text: job.output_label + " · " + job.post_label;
                                     font-size: 11px;
                                     color: Theme.text_muted;
                                     overflow: elide;
@@ -294,7 +313,7 @@ export component MergerView inherits Rectangle {
                 spacing: 6px;
                 alignment: center;
 
-                Text { text: root.merge_status; font-size: 13px; color: Theme.info; vertical-alignment: center; overflow: elide; }
+                StatusBar { text: root.merge_status; }
 
                 if root.is_merging : Rectangle {
                     height: 6px;
@@ -312,27 +331,55 @@ export component MergerView inherits Rectangle {
             }
         }
         
-        if root.show_post_merge_dialog : Rectangle {
-            width: 100%; height: 100%;
-            background: #000000.transparentize(0.4);
-            TouchArea {}
+    }
 
-            Card {
-                width: 500px;
-                VerticalLayout {
-                    padding: 24px; spacing: 16px;
-                    Text { text: I18n.tr("✅ Merge Concluído"); font-size: 18px; font-weight: 700; color: Theme.text_primary; }
-                    Text { text: root.post_merge_message; font-size: 14px; color: Theme.text_secondary; wrap: word-wrap; }
-                    Text { text: I18n.tr("O que deseja fazer com os arquivos originais?"); font-size: 14px; font-weight: 700; color: Theme.text_primary; }
-                    
-                    VerticalLayout {
-                        spacing: 8px;
-                        PrimaryButton { text: I18n.tr("Manter Originais (Recomendado para Testes)"); btn_color: Theme.surface_header; clicked => { root.post_merge_action("keep"); } }
-                        PrimaryButton { text: I18n.tr("Desativar (.disabled)"); btn_color: Theme.warning; clicked => { root.post_merge_action("disable"); } }
-                        PrimaryButton { text: I18n.tr("Mover para Backup (Zip)"); btn_color: Theme.info; clicked => { root.post_merge_action("backup"); } }
-                        PrimaryButton { text: I18n.tr("Excluir Definitivamente"); btn_color: Theme.danger; clicked => { root.post_merge_action("delete"); } }
-                    }
-                }
+    Dialog {
+        open: root.show_post_merge_dialog;
+        title: I18n.tr("Merge Concluído");
+        icon_str: Ic.check_circle;
+        title_color: M3.tertiary;
+        panel_width: 520px;
+        // Só há saída escolhendo uma das ações: fechar por engano deixaria os originais em
+        // estado indefinido depois do merge.
+        dismissed => { }
+
+        Text {
+            text: root.post_merge_message;
+            font-size: Type.body_m;
+            color: M3.on_surface_variant;
+            wrap: word-wrap;
+        }
+        Text {
+            text: I18n.tr("O que deseja fazer com os arquivos originais?");
+            font-size: Type.title_s;
+            font-weight: Type.title_s_w;
+            color: M3.on_surface;
+            wrap: word-wrap;
+        }
+
+        VerticalLayout {
+            spacing: Space.sm;
+            Button {
+                text: I18n.tr("Manter Originais (Recomendado para Testes)");
+                icon_str: Ic.shield_check;
+                kind: ButtonKind.filled;
+                clicked => { root.post_merge_action("keep"); }
+            }
+            Button {
+                text: I18n.tr("Desativar (.disabled)");
+                icon_str: Ic.eye_off;
+                clicked => { root.post_merge_action("disable"); }
+            }
+            Button {
+                text: I18n.tr("Mover para Backup (Zip)");
+                icon_str: Ic.archive;
+                clicked => { root.post_merge_action("backup"); }
+            }
+            Button {
+                text: I18n.tr("Excluir Definitivamente");
+                icon_str: Ic.trash;
+                kind: ButtonKind.danger;
+                clicked => { root.post_merge_action("delete"); }
             }
         }
     }

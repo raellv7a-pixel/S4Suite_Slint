@@ -56,9 +56,14 @@ fn declared_callbacks(src: &str) -> BTreeSet<String> {
     nomes
 }
 
+/// Só as vistas. Os componentes de `ui/components/` declaram callbacks próprios (`clicked`,
+/// `dismissed`) que quem liga são as vistas, não o `main.slint` — cobri-los aqui produzia
+/// aprovação por acaso: `clicked` "passava" porque a substring aparece dentro de
+/// `clear_cache_clicked =>`. A cobertura deles está em
+/// [`todo_callback_de_componente_e_usado_por_alguma_view`].
 fn view_files() -> Vec<PathBuf> {
     let mut arquivos = Vec::new();
-    let mut stack = vec![ui_dir()];
+    let mut stack = vec![ui_dir().join("views")];
     while let Some(dir) = stack.pop() {
         for entry in fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()) {
             let path = entry.path();
@@ -94,6 +99,82 @@ fn todo_callback_da_janela_tem_handler_no_adapter() {
         sem_handler.is_empty(),
         "callback(s) da MainWindow sem handler no adapter: {:?}",
         sem_handler
+    );
+}
+
+/// Todo callback que uma vista declara precisa ser acionado por algum controle dela.
+///
+/// Existe porque uma refatoração de layout apagou, sem ninguém notar, a barra de ferramentas
+/// inteira do Organizador: os callbacks continuavam declarados, o `main.slint` continuava
+/// ligando-os e o Rust continuava com os handlers — só que nenhum botão os chamava mais. Os
+/// outros testes de fiação passavam com a funcionalidade fora do ar.
+#[test]
+fn todo_callback_de_view_tem_quem_o_acione_na_propria_view() {
+    // Fiação morta que **já existia** antes da refatoração de UI (confirmado em `git show HEAD`):
+    // `start_merge_clicked` é declarado na view, ligado no `main.slint` e tem handler no Rust,
+    // mas nenhum botão o aciona — o merger passou a funcionar só pela fila e o caminho de
+    // "unificar agora" ficou para trás. Remover envolve mexer no adapter, então fica anotado
+    // aqui em vez de silenciado.
+    const LEGADO_CONHECIDO: &[&str] = &["merger.slint::start_merge_clicked"];
+
+    let mut soltos: Vec<String> = Vec::new();
+
+    for arquivo in view_files() {
+        let src = read(&arquivo);
+        let nome_view = arquivo.file_name().unwrap().to_string_lossy().to_string();
+        for callback in declared_callbacks(&src) {
+            // A vista aciona como `root.nome()` ou `root.nome(arg)`.
+            let id = format!("{}::{}", nome_view, callback);
+            if !src.contains(&format!("root.{}(", callback)) && !LEGADO_CONHECIDO.contains(&id.as_str()) {
+                soltos.push(id);
+            }
+        }
+    }
+
+    assert!(
+        soltos.is_empty(),
+        "callback(s) declarados numa view que nenhum controle dela aciona: {:?}",
+        soltos
+    );
+}
+
+/// Todo callback declarado em `ui/components/` precisa ser consumido por alguém.
+///
+/// Um componente que oferece um callback que nenhuma vista liga é código morto — ou, pior, uma
+/// ação que o usuário aciona e que não vai a lugar nenhum.
+#[test]
+fn todo_callback_de_componente_e_usado_por_alguma_view() {
+    let dir = ui_dir().join("components");
+    let consumidores: String = view_files()
+        .iter()
+        .map(|p| read(p))
+        .chain(std::iter::once(read(&ui_dir().join("main.slint"))))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut soltos: Vec<String> = Vec::new();
+    for entry in fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if path.extension().map(|e| e != "slint").unwrap_or(true) {
+            continue;
+        }
+        let nome = path.file_name().unwrap().to_string_lossy().to_string();
+        let src = read(&path);
+        for callback in declared_callbacks(&src) {
+            // Ligado como `nome => {` numa vista, ou invocado como `nome()` dentro do próprio
+            // componente por um irmão (caso do `Dialog` usado por outro componente).
+            let ligado = consumidores.contains(&format!("{} =>", callback))
+                || consumidores.contains(&format!("{}(", callback));
+            if !ligado {
+                soltos.push(format!("{}::{}", nome, callback));
+            }
+        }
+    }
+
+    assert!(
+        soltos.is_empty(),
+        "callback(s) de componente que nenhuma view usa: {:?}",
+        soltos
     );
 }
 
@@ -134,6 +215,8 @@ struct Harness {
     window_weak: slint::Weak<MainWindow>,
     state: Arc<AppState>,
     mods_dir: PathBuf,
+    config_dir: PathBuf,
+    config_mgr: Arc<ConfigManager>,
 }
 
 impl Harness {
@@ -166,6 +249,8 @@ impl Harness {
             _window: window,
             state,
             mods_dir,
+            config_dir,
+            config_mgr,
         }
     }
 
@@ -335,4 +420,60 @@ async fn trocar_idioma_pela_ui_muda_a_traducao_ativa() {
     let i18n = w.global::<s4suite::I18n>();
     assert_eq!(i18n.get_lang(), "en");
     assert_eq!(i18n.invoke_translate("en".into(), "Salvar".into()), "Save");
+}
+
+/// Um staging deixado por uma sessão que morreu no meio não pode sobreviver à
+/// abertura seguinte: ele mora dentro de `Mods`, e o jogo carregaria aqueles
+/// arquivos meio extraídos junto com os mods de verdade.
+#[tokio::test]
+async fn abertura_limpa_o_staging_de_uma_sessao_interrompida() {
+    let h = Harness::new();
+    let staging = h.mods_dir.join(".s4suite_staging");
+    write_file(&staging.join("mod_pela_metade/x.package"), b"lixo");
+
+    // Segunda abertura, mesmo config e mesma pasta.
+    let janela = MainWindow::new().unwrap();
+    setup_app_adapter(&janela, Arc::clone(&h.config_mgr), Arc::new(AppState::new(&h.config_dir)));
+
+    assert!(!staging.exists(), "o staging órfão continuou em Mods");
+}
+
+/// Escolher o tema tem que repintar a janela aberta, não só gravar no config.
+#[tokio::test]
+async fn trocar_o_tema_pela_ui_repinta_a_janela_na_hora() {
+    let h = Harness::new();
+    let w = h.window();
+    assert_eq!(w.global::<s4suite::Theme>().get_active_theme(), 0);
+
+    w.invoke_theme_selected(2);
+
+    assert_eq!(
+        w.global::<s4suite::Theme>().get_active_theme(),
+        2,
+        "a global do tema não mudou: as cores só apareceriam na próxima abertura"
+    );
+    assert_eq!(h.config_mgr.load().theme, "Cyber Purple");
+}
+
+/// Repetir a fila do merger refaria um merge cujos originais a pós-ação já
+/// consumiu. As tarefas concluídas ficam à vista, mas não voltam a rodar.
+#[tokio::test]
+async fn executar_a_fila_de_novo_nao_repete_as_tarefas_concluidas() {
+    let h = Harness::new();
+    let w = h.window();
+    let pacote = h.mods_dir.join("Grupo/a.package");
+    write_file(&pacote, b"x");
+    h.state.set_merger_inputs(vec![pacote]);
+    h.state.set_merger_output(Some(h.mods_dir.join("Unificados")));
+    w.invoke_add_merge_job();
+
+    h.state.set_job_status(0, s4suite::engine::merger::JobStatus::Done);
+    w.invoke_start_merge_queue();
+
+    assert!(
+        w.get_merge_status().contains("já foram processadas"),
+        "status inesperado: {}",
+        w.get_merge_status()
+    );
+    assert!(!w.get_is_merging(), "a fila não deveria ter começado a rodar");
 }

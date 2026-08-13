@@ -10,28 +10,56 @@ verdade, com centenas de mods e nomes acentuados.
 1. **Engine** — suíte de integração por motor, sem event loop (`tests/*_flow.rs`).
 2. **Bridge** — `tests/bridge_wiring.rs`: todo callback tem handler dos dois
    lados, e acioná-lo muda o disco.
-3. **Manual** — este documento, contra a pasta `Mods` real.
+3. **Sessão real** — `examples/simulacao_usuario.rs`: a janela de verdade,
+   dirigida contra uma cópia da pasta `Mods` do usuário. Roda com
+   `S4_SANDBOX=<dir> cargo run --example simulacao_usuario` e imprime um
+   relatório de 90 verificações. É o que o roteiro manual abaixo automatiza.
 
 ## Estado automatizado
 
-`cargo test` — **132 testes, todos verdes.**
+`cargo test` — **138 testes, todos verdes.**
+`simulacao_usuario` contra 287 packages e 95 scripts reais — **90 verificações,
+todas verdes.**
 
 | Motor | Arquivo | Testes | Camada 1 | Camada 2 |
 |---|---|---:|:---:|:---:|
-| Instalador | `installer_flow.rs` | 17 | ✅ | ✅ |
+| Instalador | `installer_flow.rs` | 18 | ✅ | ✅ |
 | Organizador | `organizer_flow.rs` | 28 | ✅ | ✅ |
-| Merger | `merger_flow.rs` | 15 | ✅ | ✅ |
+| Merger | `merger_flow.rs` | 17 | ✅ | ✅ |
 | Tray | `tray_flow.rs` | 12 | ✅ | ✅ |
 | Traduções | `translations_flow.rs` | 12 | ✅ | — |
 | DBPF | `dbpf_flow.rs` | 11 | ✅ | n/a |
 | Estatísticas | `stats_flow.rs` | 6 | ✅ | ✅ |
 | ReShade | `reshade_flow.rs` | 8 | ⚠️ parcial | — |
 | i18n | `i18n_coverage.rs` | 7 | ✅ | ✅ |
-| Bridge | `bridge_wiring.rs` | 11 | n/a | ✅ |
+| Bridge | `bridge_wiring.rs` | 14 | n/a | ✅ |
 | Unitários | `src/engine/*` | 5 | ✅ | n/a |
 
 Mods desativados (`engine/disabled.rs`) são cobertos dentro de
 `organizer_flow.rs`, que é onde o motor é usado.
+
+## O que a camada 3 pegou
+
+A sessão simulada encontrou sete problemas que nenhum teste de motor via, todos
+corrigidos:
+
+- **merger sobrescrevia o resultado de uma tarefa com o da seguinte** —
+  `Merged_Content_<segundos>_PartNNN` colidia entre tarefas que terminavam no
+  mesmo segundo, e a pós-ação já tinha consumido os originais. A saída agora
+  leva o nome do grupo e o prefixo é reservado antes da primeira parte.
+- **tema só mudava na abertura seguinte** — o handler gravava no config e não
+  tocava na global do Slint.
+- **staging de uma sessão interrompida sobrevivia dentro de `Mods`**, onde o
+  jogo tentaria carregá-lo. Limpo na montagem da janela.
+- **tradução avulsa virava `01_Traducoes/mod_x___tradu__o_pt_br/`** e a lista da
+  aba exibia esse nome no lugar do arquivo. Arquivo solto agora vai direto para
+  a pasta, e a identidade de instalação preserva acento e maiúscula.
+- **corrigir profundidade de script movia arquivos sem perguntar**, ao contrário
+  do resto do organizador. Passa pelo diálogo de confirmação com a lista.
+- **executar a fila de novo repetia tarefas concluídas** — só as pendentes rodam.
+- **o aviso de dependência nunca aparecia** — a busca por `Lot51` era feita nos
+  bytes crus, e os recursos DBPF vêm em zlib (0 acertos em 1569 packages reais).
+  Agora os recursos pequenos são descomprimidos antes da busca.
 
 ## Camada 3 — roteiro manual
 
@@ -127,4 +155,9 @@ propósito.
   implementação. `detect_installation` e o download em `spawn_blocking` estão
   prontos e testados, o resto não foi validado. Inclui decidir o que fazer com
   o `legacy/reshade.exe` versionado no repositório.
-- **Empacotamento** — o AppImage ainda é o do PyInstaller.
+- **Instalador de arquivo avulso** — um `.package` solto ganha uma pasta com o
+  nome dele dentro de `00_Triagem_Novos`. Diferente do caso das traduções, aqui
+  a pasta agrupa o mod e não atrapalha a leitura; fica como está até alguém
+  reclamar.
+- **Verificação no jogo** — que o `.package` unificado e a tradução instalada
+  aparecem dentro do The Sims 4 continua sendo teste de olho humano.

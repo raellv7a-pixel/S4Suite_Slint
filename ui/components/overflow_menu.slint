@@ -1,0 +1,116 @@
+import { M3 } from "../theme/colors.slint";
+import { Motion } from "../theme/motion.slint";
+import { Type, Shape, Elevation, Space } from "../theme/typography.slint";
+import { Icon, Ic } from "icon.slint";
+import { StateLayer } from "state_layer.slint";
+
+export struct MenuAction {
+    /// Identificador devolvido em `triggered`.
+    id: string,
+    label: string,
+    glyph: string,
+    enabled: bool,
+}
+
+/// Menu "⋮" para as ações que não merecem um botão fixo.
+///
+/// A barra do Organizador tinha 11 botões em duas fileiras. Numa janela de 934px todos elidiam
+/// (`Reca…`, `Checar S…`, `Dupl…`) — ou seja, onze controles e nenhum legível. O critério para
+/// tirar da barra é frequência de uso: quem abre o app pela primeira vez precisa achar o caminho
+/// principal sem tropeçar em manutenção que talvez nunca use.
+///
+/// As ações não somem: continuam a um clique, num lugar previsível.
+export component OverflowMenu inherits Rectangle {
+    in property <[MenuAction]> actions;
+    in property <string> tooltip;
+    callback triggered(string);
+
+    width: 40px;
+    height: 40px;
+
+    gatilho := Rectangle {
+        border-radius: self.height / 2;
+        background: transparent;
+        clip: true;
+
+        StateLayer {
+            tint: M3.on_surface;
+            hovered: touch.has-hover;
+            pressed: touch.pressed;
+        }
+
+        Icon {
+            glyph: Ic.dots_vertical;
+            font-size: 20px;
+            color: M3.on_surface_variant;
+        }
+
+        touch := TouchArea {
+            clicked => { menu.show(); }
+        }
+    }
+
+    menu := PopupWindow {
+        // Ancorado pela borda direita do gatilho: o menu abre para dentro da tela, não para fora.
+        x: -196px;
+        y: root.height + 4px;
+        width: 236px;
+        height: painel.preferred-height;
+
+        painel := Rectangle {
+            background: M3.surface_container_highest;
+            border-radius: Shape.md;
+            border-width: 1px;
+            border-color: M3.outline_variant;
+            drop-shadow-color: M3.shadow_soft;
+            drop-shadow-blur: Elevation.l3;
+            drop-shadow-offset-y: 4px;
+
+            VerticalLayout {
+                padding: Space.sm;
+                spacing: 2px;
+
+                for acao in root.actions: Rectangle {
+                    height: 40px;
+                    border-radius: Shape.sm;
+                    clip: true;
+
+                    StateLayer {
+                        tint: M3.on_surface;
+                        hovered: item_touch.has-hover && acao.enabled;
+                        pressed: item_touch.pressed && acao.enabled;
+                    }
+
+                    item_touch := TouchArea {
+                        enabled: acao.enabled;
+                        // `close-policy` padrão do PopupWindow já fecha no clique.
+                        clicked => { root.triggered(acao.id); }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: Space.md;
+                        padding-right: Space.md;
+                        spacing: Space.md;
+                        alignment: start;
+
+                        Icon {
+                            glyph: acao.glyph;
+                            font-size: 18px;
+                            color: acao.enabled ? M3.on_surface_variant : M3.on_surface.transparentize(0.62);
+                        }
+                        Text {
+                            text: acao.label;
+                            font-size: Type.label_l;
+                            font-weight: Type.label_l_w;
+                            color: acao.enabled ? M3.on_surface : M3.on_surface.transparentize(0.62);
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                            animate color { duration: Motion.medium2; easing: Motion.standard; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,27 @@
+// Escala de movimento do Material Design 3.
+//
+// Regra que mantém isto coerente: entrada é sempre mais lenta que saída. É o que separa
+// "fluido" de "lento".
+//
+//   state layer, hover, cor de botão .......... short2  + standard
+//   elevação de card, seleção ................. short4  + emphasized
+//   entrada de diálogo/painel ................. medium4 + emphasized_decelerate
+//   saída de diálogo/painel ................... short4  + emphasized_accelerate
+//   transição de aba .......................... medium2 + emphasized
+//   troca de tema (cores) ..................... medium2 + standard
+export global Motion {
+    out property <duration> short1: 50ms;
+    out property <duration> short2: 100ms;
+    out property <duration> short3: 150ms;
+    out property <duration> short4: 200ms;
+    out property <duration> medium1: 250ms;
+    out property <duration> medium2: 300ms;
+    out property <duration> medium4: 400ms;
+    out property <duration> long2: 500ms;
+
+    out property <easing> standard: cubic-bezier(0.2, 0.0, 0.0, 1.0);
+    out property <easing> emphasized: cubic-bezier(0.2, 0.0, 0.0, 1.0);
+    out property <easing> emphasized_decelerate: cubic-bezier(0.05, 0.7, 0.1, 1.0);
+    out property <easing> emphasized_accelerate: cubic-bezier(0.3, 0.0, 0.8, 0.15);
+    out property <easing> standard_decelerate: cubic-bezier(0.0, 0.0, 0.0, 1.0);
+}

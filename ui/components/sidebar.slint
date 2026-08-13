@@ -1,145 +1,180 @@
 import { I18n } from "../i18n.slint";
-import { Theme } from "../palette.slint";
+import { M3 } from "../theme/colors.slint";
+import { Motion } from "../theme/motion.slint";
+import { Type, Space } from "../theme/typography.slint";
+import { Icon, Ic } from "icon.slint";
+import { StateLayer } from "state_layer.slint";
 
-export component SidebarItem inherits Rectangle {
+struct NavEntry {
+    label: string,
+    glyph: string,
+}
+
+/// Item da navegação. Não desenha o próprio fundo de "ativo": esse é o indicador único do
+/// `Sidebar`, que desliza entre as posições — oito fundos independentes trocando de cor a seco
+/// era exatamente o que fazia a navegação parecer estática.
+component NavItem inherits Rectangle {
     in property <string> text;
     in property <string> icon_str;
     in property <bool> active: false;
+    in property <bool> collapsed: false;
     callback clicked();
 
-    height: 48px;
-    border-radius: 8px;
-    background: active ? Theme.primary_color : (touch.has-hover ? Theme.surface_hover : transparent);
+    border-radius: root.height / 2;
+    background: transparent;
+
+    Rectangle {
+        border-radius: parent.border-radius;
+        clip: true;
+        StateLayer {
+            tint: root.active ? M3.on_primary_container : M3.on_surface;
+            hovered: touch.has-hover;
+            pressed: touch.pressed;
+            focused: fs.has-focus;
+        }
+    }
+
+    fs := FocusScope {
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
 
     touch := TouchArea {
-        clicked => { root.clicked(); }
+        clicked => {
+            fs.focus();
+            root.clicked();
+        }
     }
 
     HorizontalLayout {
-        padding-left: 16px;
-        padding-right: 16px;
-        spacing: 12px;
-        alignment: center;
+        padding-left: root.collapsed ? 0px : 18px;
+        padding-right: root.collapsed ? 0px : 16px;
+        spacing: Space.md;
+        alignment: root.collapsed ? center : start;
 
-        Text {
-            text: root.icon_str;
-            font-size: 18px;
-            color: active ? #ffffff : Theme.text_secondary;
-            vertical-alignment: center;
+        Icon {
+            glyph: root.icon_str;
+            font-size: 20px;
+            color: root.active ? M3.on_primary_container : M3.on_surface_variant;
         }
 
-        Text {
+        if !root.collapsed: Text {
             text: root.text;
-            font-size: 14px;
-            font-weight: active ? 700 : 500;
-            color: active ? #ffffff : Theme.text_primary;
+            font-size: Type.label_l;
+            font-weight: root.active ? 700 : Type.label_l_w;
+            color: root.active ? M3.on_primary_container : M3.on_surface;
             vertical-alignment: center;
             horizontal-stretch: 1;
+            overflow: elide;
+            animate color { duration: Motion.medium2; easing: Motion.standard; }
         }
     }
 }
 
+/// Navigation rail do Material Design 3.
+///
+/// O indicador ativo é uma pílula única que **desliza** até o item escolhido, em vez de oito
+/// retângulos acendendo e apagando. Um `animate y` resolve, e é a mudança de maior retorno por
+/// linha de toda a refatoração: a navegação passa a ter continuidade em vez de piscar.
+///
+/// A posição é calculada, não empilhada por layout, porque o indicador precisa saber a coordenada
+/// exata de cada item para animar até ela — um `VerticalLayout` não expõe isso.
 export component Sidebar inherits Rectangle {
     in-out property <int> current_tab: 0;
+    /// Numa janela estreita a rail encolhe para só ícones (ver `main.slint`).
+    in property <bool> collapsed: false;
     callback tab_changed(int);
 
-    width: 240px;
-    background: Theme.surface;
-    border-color: Theme.border_color;
-    border-width: 1px;
+    property <length> item_h: 48px;
+    property <length> gap: 8px;
+    property <length> pitch: self.item_h + self.gap;
+    property <length> header_h: 92px;
 
-    VerticalLayout {
-        padding: 16px;
-        spacing: 8px;
+    property <[NavEntry]> entries: [
+        { label: I18n.tr("Início"), glyph: Ic.home },
+        { label: I18n.tr("Instalador"), glyph: Ic.package },
+        { label: I18n.tr("Organizador"), glyph: Ic.folder_open },
+        { label: I18n.tr("Merger"), glyph: Ic.link },
+        { label: I18n.tr("Tray Importer"), glyph: Ic.inbox },
+        { label: I18n.tr("Traduções"), glyph: Ic.language },
+        { label: I18n.tr("ReShade"), glyph: Ic.sparkles },
+        { label: I18n.tr("Configurações"), glyph: Ic.settings },
+    ];
 
-        // Header / Logo
-        Rectangle {
-            height: 60px;
-            HorizontalLayout {
-                spacing: 10px;
-                alignment: center;
+    width: root.collapsed ? 76px : 240px;
+    background: M3.surface_container_low;
+    animate width, background { duration: Motion.medium2; easing: Motion.emphasized; }
 
-                Text {
-                    text: "💎";
-                    font-size: 26px;
-                    vertical-alignment: center;
-                }
+    HorizontalLayout {
+        y: 16px;
+        height: 60px;
+        padding-left: root.collapsed ? 0px : 16px;
+        spacing: 10px;
+        alignment: root.collapsed ? center : start;
 
-                VerticalLayout {
-                    alignment: center;
-                    Text {
-                        text: I18n.tr("S4Suite");
-                        font-size: 20px;
-                        font-weight: 800;
-                        color: Theme.text_primary;
-                    }
-                    Text {
-                        text: I18n.tr("Linux Edition v2.0");
-                        font-size: 11px;
-                        color: Theme.accent_color;
-                    }
-                }
+        Icon {
+            glyph: Ic.diamond;
+            font-size: 26px;
+            color: M3.primary;
+        }
+
+        if !root.collapsed: VerticalLayout {
+            alignment: center;
+            Text {
+                text: "S4Suite";
+                font-size: Type.title_l;
+                font-weight: 800;
+                color: M3.on_surface;
+                animate color { duration: Motion.medium2; easing: Motion.standard; }
+            }
+            Text {
+                text: I18n.tr("Linux Edition v2.0");
+                font-size: Type.label_s;
+                color: M3.primary;
+                animate color { duration: Motion.medium2; easing: Motion.standard; }
             }
         }
+    }
 
-        Rectangle { height: 12px; }
+    // Pílula do item ativo — a peça que desliza.
+    Rectangle {
+        x: 12px;
+        y: root.header_h + root.current_tab * root.pitch;
+        width: root.width - 24px;
+        height: root.item_h;
+        border-radius: root.item_h / 2;
+        background: M3.primary_container;
 
-        SidebarItem {
-            text: I18n.tr("Início");
-            icon_str: "🏠";
-            active: current_tab == 0;
-            clicked => { current_tab = 0; root.tab_changed(0); }
-        }
-        SidebarItem {
-            text: I18n.tr("Instalador");
-            icon_str: "📦";
-            active: current_tab == 1;
-            clicked => { current_tab = 1; root.tab_changed(1); }
-        }
-        SidebarItem {
-            text: I18n.tr("Organizador");
-            icon_str: "📂";
-            active: current_tab == 2;
-            clicked => { current_tab = 2; root.tab_changed(2); }
-        }
-        SidebarItem {
-            text: I18n.tr("Merger");
-            icon_str: "🔗";
-            active: current_tab == 3;
-            clicked => { current_tab = 3; root.tab_changed(3); }
-        }
-        SidebarItem {
-            text: I18n.tr("Tray Importer");
-            icon_str: "🗂️";
-            active: current_tab == 4;
-            clicked => { current_tab = 4; root.tab_changed(4); }
-        }
-        SidebarItem {
-            text: I18n.tr("Traduções");
-            icon_str: "🌐";
-            active: current_tab == 5;
-            clicked => { current_tab = 5; root.tab_changed(5); }
-        }
-        SidebarItem {
-            text: I18n.tr("ReShade");
-            icon_str: "🔮";
-            active: current_tab == 6;
-            clicked => { current_tab = 6; root.tab_changed(6); }
-        }
-        SidebarItem {
-            text: I18n.tr("Configurações");
-            icon_str: "⚙️";
-            active: current_tab == 7;
-            clicked => { current_tab = 7; root.tab_changed(7); }
-        }
+        animate y { duration: Motion.medium2; easing: Motion.emphasized; }
+        animate background, width { duration: Motion.medium2; easing: Motion.standard; }
+    }
 
-        Rectangle { vertical-stretch: 1; }
-
-        Text {
-            text: I18n.tr("Rust + Slint Native");
-            font-size: 11px;
-            color: Theme.text_muted;
-            horizontal-alignment: center;
+    for entry[i] in root.entries: NavItem {
+        x: 12px;
+        y: root.header_h + i * root.pitch;
+        width: root.width - 24px;
+        height: root.item_h;
+        text: entry.label;
+        icon_str: entry.glyph;
+        active: root.current_tab == i;
+        collapsed: root.collapsed;
+        clicked => {
+            root.current_tab = i;
+            root.tab_changed(i);
         }
+    }
+
+    if !root.collapsed: Text {
+        y: root.height - 32px;
+        width: root.width;
+        text: I18n.tr("Rust + Slint Native");
+        font-size: Type.label_s;
+        color: M3.outline;
+        horizontal-alignment: center;
     }
 }

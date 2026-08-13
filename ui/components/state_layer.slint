@@ -1,0 +1,24 @@
+import { M3 } from "../theme/colors.slint";
+import { Motion } from "../theme/motion.slint";
+
+/// Camada de estado do Material Design 3.
+///
+/// É um retângulo da cor do conteúdo, sobreposto com opacidade baixa. Parece bobo isolado, mas é
+/// a peça que faz botão, card, item de lista e navegação reagirem de forma idêntica ao ponteiro —
+/// antes disto o app só trocava `background` a seco, sem nem distinguir hover de clique.
+export component StateLayer inherits Rectangle {
+    in property <color> tint: M3.on_surface;
+    in property <bool> hovered: false;
+    in property <bool> pressed: false;
+    in property <bool> focused: false;
+    in property <bool> selected: false;
+
+    background: root.tint;
+    opacity: root.pressed ? M3.layer_pressed
+        : root.focused ? M3.layer_focus
+        : root.hovered ? M3.layer_hover
+        : root.selected ? M3.layer_hover
+        : 0.0;
+
+    animate opacity { duration: Motion.short2; easing: Motion.standard; }
+}

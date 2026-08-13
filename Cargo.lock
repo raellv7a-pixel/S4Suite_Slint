@@ -5130,6 +5130,7 @@ dependencies = [
  "dirs",
  "dunce",
  "encoding_rs",
+ "flate2",
  "glob",
  "i-slint-backend-testing",
  "indexmap",

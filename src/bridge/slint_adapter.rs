@@ -3,6 +3,7 @@ use crate::bridge::state::{
 };
 use crate::core::config::{get_mods_dir, get_saves_dir, get_tray_dir, ConfigManager};
 use crate::core::i18n::t;
+use crate::core::theme;
 use crate::engine::installer::{
     calculate_conflicts, clear_staging, collect_dependencies, detect_mutually_exclusive,
     execute_installation, prepare_staging, ConflictType, MANAGED_BASE_DIR, STAGING_DIR_NAME,
@@ -41,6 +42,16 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let i18n = window.global::<crate::I18n>();
     i18n.on_translate(|lang, key| SharedString::from(t(key.as_str(), lang.as_str())));
     i18n.set_lang(SharedString::from(config_mgr.load().language.clone()));
+
+    // Severidade do status. Mesmo padrão do I18n: as mensagens continuam saindo daqui com o
+    // marcador ("✅ …", "⚠️ …"), e a UI o converte em ícone e cor sem nunca exibi-lo. Isso evita
+    // reescrever as 77 chamadas de `set_*_status` só para carregar a gravidade.
+    let status_rules = window.global::<crate::StatusRules>();
+    status_rules.on_severity(|msg| SharedString::from(crate::core::status::kind_of(&msg).as_str()));
+    status_rules.on_label(|msg| SharedString::from(crate::core::status::label_of(&msg)));
+
+    // Restos de uma sessão que morreu no meio de uma operação.
+    limpar_trabalho_orfao(&config_mgr, &state);
 
     // Initial stats load
     refresh_dashboard_stats(&weak_win, &config_mgr);
@@ -517,13 +528,26 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                     w.set_organizer_status(SharedString::from("✨ Todos os scripts estão no nível correto!"));
                 }
             } else {
-                let fixed = auto_fix_script_depth(&issues, &mods_dir).unwrap_or(0);
-                refresh_organizer_tree(&weak_clone, &cfg_clone, &state_clone);
+                // Corrigir é mover arquivos de mods do usuário para outra pasta.
+                // Fazer isso no clique, sem lista e sem volta, destoava do resto
+                // do organizador, onde apagar e limpar pedem confirmação.
+                let rotulos: Vec<String> = issues
+                    .iter()
+                    .map(|i| format!("{}  (nível {})", display_path(&i.file_path, &mods_dir), i.depth))
+                    .collect();
+                let total = issues.len();
+                state_clone.set_pending_organizer(PendingOrganizerAction::FixScriptDepth(issues));
+
                 if let Some(w) = weak_clone.upgrade() {
-                    w.set_organizer_status(SharedString::from(format!(
-                        "🔧 {} script(s) movidos para 00_Scripts_Corrigidos",
-                        fixed
+                    w.set_organizer_confirm_title(SharedString::from("Corrigir profundidade de scripts"));
+                    w.set_organizer_confirm_message(SharedString::from(format!(
+                        "O jogo só carrega .ts4script até um nível abaixo de Mods. \
+                         {} script(s) estão mais fundos e serão movidos para \
+                         00_Scripts_Corrigidos:",
+                        total
                     )));
+                    w.set_organizer_confirm_items(to_string_model(rotulos));
+                    w.set_show_organizer_confirm(true);
                 }
             }
         }
@@ -558,16 +582,19 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
 
         // O caminho selecionado deixou de existir de qualquer forma.
         state_clone.clear_selected_mods();
-        refresh_organizer_tree(&weak_clone, &cfg_clone, &state_clone);
-
         if let Some(w) = weak_clone.upgrade() {
             w.set_selected_mod_path(SharedString::default());
             w.set_selected_mod_is_disabled(false);
-            w.set_organizer_status(SharedString::from(match result {
+        }
+        refresh_organizer_tree_status(
+            &weak_clone,
+            &cfg_clone,
+            &state_clone,
+            Some(match result {
                 Ok(msg) => msg,
                 Err(e) => format!("❌ Não foi possível alternar o mod: {}", e),
-            }));
-        }
+            }),
+        );
     });
 
     // --- Explorador de arquivos do organizador ---
@@ -671,10 +698,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         if let Some(w) = weak_clone.upgrade() {
             w.set_show_organizer_input(false);
         }
-        refresh_organizer_tree(&weak_clone, &cfg_clone, &state_clone);
-        if let Some(w) = weak_clone.upgrade() {
-            w.set_organizer_status(SharedString::from(msg));
-        }
+        refresh_organizer_tree_status(&weak_clone, &cfg_clone, &state_clone, Some(msg));
     });
 
     // Callback: cancel_organizer_input
@@ -778,10 +802,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             w.set_show_folder_picker(false);
             w.set_selected_mod_path(SharedString::default());
         }
-        refresh_organizer_tree(&weak_clone, &cfg_clone, &state_clone);
-        if let Some(w) = weak_clone.upgrade() {
-            w.set_organizer_status(SharedString::from(msg));
-        }
+        refresh_organizer_tree_status(&weak_clone, &cfg_clone, &state_clone, Some(msg));
     });
 
     // Callback: cancel_folder_pick
@@ -886,10 +907,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         }
 
         refresh_disabled_panel(&weak_clone, &cfg_clone, &state_clone);
-        refresh_organizer_tree(&weak_clone, &cfg_clone, &state_clone);
-        if let Some(w) = weak_clone.upgrade() {
-            w.set_organizer_status(SharedString::from(msg));
-        }
+        refresh_organizer_tree_status(&weak_clone, &cfg_clone, &state_clone, Some(msg));
     });
 
     // Callback: delete_selected_disabled
@@ -1036,6 +1054,22 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         if let Some(w) = weak_clone.upgrade() {
             w.set_show_organizer_confirm(false);
             w.set_organizer_confirm_items(to_string_model(Vec::new()));
+        }
+
+        // A correção de profundidade move, não remove: sai antes do caminho
+        // compartilhado das exclusões.
+        if let PendingOrganizerAction::FixScriptDepth(issues) = pending {
+            let fixed = auto_fix_script_depth(&issues, &mods_dir).unwrap_or(0);
+            refresh_organizer_tree_status(
+                &weak_clone,
+                &cfg_clone,
+                &state_clone,
+                Some(format!("🔧 {} script(s) movidos para 00_Scripts_Corrigidos", fixed)),
+            );
+            return;
+        }
+
+        if let Some(w) = weak_clone.upgrade() {
             w.set_organizer_status(SharedString::from("🗑️ Removendo arquivos..."));
         }
 
@@ -1054,6 +1088,8 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             PendingOrganizerAction::DeleteDisabled(paths) => {
                 (paths, "mod(s) desativado(s)", false)
             }
+            // Tratada acima, antes deste match.
+            PendingOrganizerAction::FixScriptDepth(_) => unreachable!(),
         };
 
         state_clone.clear_selected_mods();
@@ -1079,11 +1115,8 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             }
 
             let _ = slint::invoke_from_event_loop(move || {
-                refresh_organizer_tree(&weak_async, &cfg_async, &state_async);
+                refresh_organizer_tree_status(&weak_async, &cfg_async, &state_async, Some(msg));
                 refresh_disabled_panel(&weak_async, &cfg_async, &state_async);
-                if let Some(w) = weak_async.upgrade() {
-                    w.set_organizer_status(SharedString::from(msg));
-                }
             });
         });
     });
@@ -1096,7 +1129,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         if let Some(w) = weak_clone.upgrade() {
             w.set_show_organizer_confirm(false);
             w.set_organizer_confirm_items(to_string_model(Vec::new()));
-            w.set_organizer_status(SharedString::from("Operação cancelada. Nada foi removido."));
+            w.set_organizer_status(SharedString::from("Operação cancelada. Nada foi alterado."));
         }
     });
 
@@ -1260,18 +1293,39 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             return;
         }
 
+        // Só o que ainda não rodou. A fila continua mostrando as tarefas
+        // concluídas — é o histórico do lote —, mas repetir uma delas refaria um
+        // merge cujos originais a pós-ação já apagou ou desativou.
+        let pendentes: Vec<usize> = jobs
+            .iter()
+            .enumerate()
+            .filter(|(_, j)| j.status == JobStatus::Pending)
+            .map(|(i, _)| i)
+            .collect();
+
+        if pendentes.is_empty() {
+            if let Some(w) = weak_clone.upgrade() {
+                w.set_merge_status(SharedString::from(
+                    "Nada a executar: todas as tarefas da fila já foram processadas. \
+                     Remova-as ou adicione novas.",
+                ));
+            }
+            return;
+        }
+
         let limite_bytes = (cfg_clone.load().merge_limit_gb * 1_073_741_824.0) as u64;
         if let Some(w) = weak_clone.upgrade() {
             w.set_is_merging(true);
             w.set_merge_progress(0.0);
             w.set_merge_status(SharedString::from(format!(
                 "🚀 Executando fila com {} tarefa(s)...",
-                jobs.len()
+                pendentes.len()
             )));
         }
 
-        let engine_jobs: Vec<MergeJob> = jobs
+        let engine_jobs: Vec<MergeJob> = pendentes
             .iter()
+            .map(|i| &jobs[*i])
             .map(|j| MergeJob {
                 name: j.name.clone(),
                 input_files: j.input_files.clone(),
@@ -1289,8 +1343,12 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             let on_job = {
                 let weak = weak_async.clone();
                 let state = Arc::clone(&state_async);
+                let mapa = pendentes.clone();
                 move |index: usize, status: JobStatus| {
-                    state.set_job_status(index, status);
+                    // O engine numera as tarefas que recebeu; a fila da tela
+                    // ainda tem as concluídas do lote anterior no meio.
+                    let na_fila = mapa.get(index).copied().unwrap_or(index);
+                    state.set_job_status(na_fila, status);
                     let weak_ui = weak.clone();
                     let state_ui = Arc::clone(&state);
                     let _ = slint::invoke_from_event_loop(move || {
@@ -1373,10 +1431,13 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         }
 
         let max_size_gb = cfg_clone.load().merge_limit_gb;
+        // Mesmo nome que a fila usaria: o da pasta de onde os packages vieram.
+        let nome = common_ancestor(&inputs).map(|root| file_label(&root));
         let task = MergeTask {
             input_files: inputs,
             output_dir,
             max_size_bytes: (max_size_gb * 1024.0 * 1024.0 * 1024.0) as u64,
+            name: nome,
         };
 
         if let Some(w) = weak_clone.upgrade() {
@@ -1995,14 +2056,30 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     });
 
     // Callback: theme_selected
+    //
+    // A thread que observa a Hydra Shell sobe uma única vez e fica parada até alguém escolher
+    // "Sistema"; `follow_system` é a chave que a arma e desarma.
+    let follow_system = theme::spawn_watcher(window);
+    window.set_system_theme_available(theme::system_available());
+
     let cfg_clone = Arc::clone(&config_mgr);
     let weak_clone = weak_win.clone();
+    let follow_clone = Arc::clone(&follow_system);
     window.on_theme_selected(move |idx| {
+        // Um índice fora da lista viraria um tema inexistente na global.
+        let idx = if (0..=theme::SYSTEM_INDEX).contains(&idx) { idx } else { 0 };
         let mut cfg = cfg_clone.load();
-        cfg.theme = theme_name_from_index(idx).to_string();
+        cfg.theme = theme::name_from_index(idx).to_string();
         let saved = cfg_clone.save(&cfg).is_ok();
 
+        follow_clone.store(idx == theme::SYSTEM_INDEX, std::sync::atomic::Ordering::Relaxed);
+
         if let Some(w) = weak_clone.upgrade() {
+            // Sem isto o tema só aparecia na abertura seguinte, quando
+            // `apply_config_to_ui` lia o config: escolher a cor não fazia nada
+            // visível na hora.
+            w.global::<crate::Theme>().set_active_theme(idx);
+            theme::apply(&w, &theme::roles_for_index(idx));
             if !saved {
                 w.set_config_status(SharedString::from(
                     "⚠️ Tema aplicado, mas não foi possível gravá-lo no arquivo de configuração.",
@@ -2044,26 +2121,53 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     });
 
     // Reflete na UI o que estava salvo no config.
-    apply_config_to_ui(&weak_win, &config_mgr);
+    apply_config_to_ui(&weak_win, &config_mgr, &follow_system);
 }
 
-const THEME_NAMES: [&str; 4] = ["Sims Green", "Deep Blue", "Cyber Purple", "Neon Pink"];
-
-fn theme_name_from_index(idx: i32) -> &'static str {
-    THEME_NAMES.get(idx as usize).copied().unwrap_or(THEME_NAMES[0])
+/// Apaga o que uma sessão interrompida deixou para trás.
+///
+/// O staging fica **dentro** de `Mods`: fechar o app no meio de uma instalação
+/// deixava lá os arquivos meio extraídos, e na abertura seguinte o jogo tentava
+/// carregá-los junto com os mods de verdade. O mesmo vale para a área de
+/// trabalho do tray, que só é limpa ao fim de uma importação bem-sucedida.
+///
+/// Roda uma vez, na montagem da janela — antes disso não existe nenhuma
+/// operação em andamento cujo staging pudesse ser confundido com lixo.
+fn limpar_trabalho_orfao(config_mgr: &ConfigManager, state: &AppState) {
+    if let Some(sims_path) = config_mgr.load().sims4_path {
+        let staging = get_mods_dir(&sims_path).join(STAGING_DIR_NAME);
+        if staging.exists() {
+            if let Err(e) = clear_staging(&staging) {
+                eprintln!("staging órfão não pôde ser removido: {}", e);
+            }
+        }
+    }
+    let _ = clear_tray_work_dir(state.tray_work_dir());
 }
 
-fn theme_index_from_name(name: &str) -> i32 {
-    THEME_NAMES.iter().position(|n| *n == name).unwrap_or(0) as i32
-}
+// Os nomes e a conversão índice↔nome moram em `core::theme`, junto com as cores que eles
+// designam — duplicá-los aqui era como o tema saía de sincronia com a paleta.
 
 /// Carrega idioma, tema e limite do merger do arquivo de configuração para a UI.
-fn apply_config_to_ui(weak_win: &slint::Weak<MainWindow>, config_mgr: &ConfigManager) {
+fn apply_config_to_ui(
+    weak_win: &slint::Weak<MainWindow>,
+    config_mgr: &ConfigManager,
+    follow_system: &Arc<std::sync::atomic::AtomicBool>,
+) {
     let cfg = config_mgr.load();
     if let Some(w) = weak_win.upgrade() {
         w.set_active_language(SharedString::from(cfg.language.clone()));
         w.global::<crate::I18n>().set_lang(SharedString::from(cfg.language));
-        w.global::<crate::Theme>().set_active_theme(theme_index_from_name(&cfg.theme));
+
+        // "Sistema" gravado no config mas shell removida da máquina: cai no tema embutido em vez
+        // de deixar o app com o chip aceso e nenhuma cor vinda de lugar nenhum.
+        let mut idx = theme::index_from_name(&cfg.theme);
+        if idx == theme::SYSTEM_INDEX && !theme::system_available() {
+            idx = 0;
+        }
+        follow_system.store(idx == theme::SYSTEM_INDEX, std::sync::atomic::Ordering::Relaxed);
+        w.global::<crate::Theme>().set_active_theme(idx);
+        theme::apply(&w, &theme::roles_for_index(idx));
         w.set_merge_max_size(SharedString::from(format!("{}", cfg.merge_limit_gb)));
     }
 }
@@ -2155,51 +2259,131 @@ fn refresh_dashboard_stats(weak_win: &slint::Weak<MainWindow>, config_mgr: &Conf
     }
 }
 
-fn refresh_organizer_tree(
-    weak_win: &slint::Weak<MainWindow>,
-    config_mgr: &ConfigManager,
+/// Uma linha da árvore já pronta para virar `ModTreeEntry`.
+///
+/// A varredura roda fora da thread da UI, e `SharedString`/`ModelRc` não atravessam threads —
+/// por isso o intermediário em tipos comuns.
+struct LinhaArvore {
+    name: String,
+    is_dir: bool,
+    size_str: String,
+    disabled: bool,
+    path: PathBuf,
+    depth: i32,
+}
+
+/// A parte cara: percorre a pasta Mods inteira e aplica a busca.
+fn escanear_arvore(mods_dir: &Path, query: &str) -> Vec<LinhaArvore> {
+    let nodes = scan_mods_tree(mods_dir);
+    filter_tree(&nodes, query)
+        .into_iter()
+        .map(|node| {
+            let depth = node
+                .path
+                .strip_prefix(mods_dir)
+                .map(|rel| rel.components().count().saturating_sub(1))
+                .unwrap_or(0);
+
+            LinhaArvore {
+                name: node.name,
+                is_dir: node.is_dir,
+                size_str: crate::bridge::slint_models::format_size_bytes(node.size),
+                disabled: node.disabled,
+                path: node.path,
+                depth: depth as i32,
+            }
+        })
+        .collect()
+}
+
+/// A parte barata: monta o modelo e o entrega à tela. Sempre na thread da UI.
+fn aplicar_arvore(
+    w: &MainWindow,
     state: &AppState,
+    linhas: Vec<LinhaArvore>,
+    query: &str,
+    status_final: Option<String>,
 ) {
-    let config = config_mgr.load();
-    let Some(w) = weak_win.upgrade() else { return };
-    let Some(sims_path) = &config.sims4_path else { return };
-
-    let mods_dir = get_mods_dir(sims_path);
-    // Mover e excluir invalidam caminhos que continuariam marcados.
-    state.prune_selected_mods();
     let selected = state.selected_mods();
-
-    let nodes = scan_mods_tree(&mods_dir);
-    let visible = filter_tree(&nodes, &state.organizer_search());
+    let total = linhas.len();
 
     let model = Rc::new(VecModel::default());
-    for node in &visible {
-        let depth = node
-            .path
-            .strip_prefix(&mods_dir)
-            .map(|rel| rel.components().count().saturating_sub(1))
-            .unwrap_or(0);
-
+    for linha in linhas {
         model.push(crate::ModTreeEntry {
-            name: SharedString::from(node.name.clone()),
-            is_dir: node.is_dir,
-            size_str: SharedString::from(crate::bridge::slint_models::format_size_bytes(node.size)),
-            disabled: node.disabled,
-            path_str: SharedString::from(node.path.display().to_string()),
-            selected: selected.contains(&node.path),
-            depth: depth as i32,
+            name: SharedString::from(linha.name),
+            is_dir: linha.is_dir,
+            size_str: SharedString::from(linha.size_str),
+            disabled: linha.disabled,
+            selected: selected.contains(&linha.path),
+            path_str: SharedString::from(linha.path.display().to_string()),
+            depth: linha.depth,
         });
     }
 
     w.set_mod_entries(ModelRc::from(model));
     w.set_organizer_selected_count(selected.len() as i32);
+    w.set_organizer_status(SharedString::from(match status_final {
+        Some(msg) => msg,
+        None if query.trim().is_empty() => format!("{} item(ns) na pasta Mods.", total),
+        None => format!("🔎 {} resultado(s) para \"{}\".", total, query),
+    }));
+}
+
+fn refresh_organizer_tree(
+    weak_win: &slint::Weak<MainWindow>,
+    config_mgr: &ConfigManager,
+    state: &Arc<AppState>,
+) {
+    refresh_organizer_tree_status(weak_win, config_mgr, state, None);
+}
+
+/// Redesenha a árvore do organizador, com a varredura fora da thread da UI.
+///
+/// `status_final` é a mensagem da operação que acabou de rodar ("3 item(ns) removidos", …).
+/// Antes cada chamador escrevia isso por conta própria logo depois do refresh; com a varredura
+/// assíncrona a árvore chega atrasada e apagaria a mensagem, então quem tem algo a dizer passa
+/// aqui e a contagem só aparece quando não há nada mais importante.
+fn refresh_organizer_tree_status(
+    weak_win: &slint::Weak<MainWindow>,
+    config_mgr: &ConfigManager,
+    state: &Arc<AppState>,
+    status_final: Option<String>,
+) {
+    let config = config_mgr.load();
+    let Some(w) = weak_win.upgrade() else { return };
+    let Some(sims_path) = config.sims4_path.clone() else { return };
+
+    let mods_dir = get_mods_dir(&sims_path);
+    // Mover e excluir invalidam caminhos que continuariam marcados. É barato, e a barra de ações
+    // contextual depende disso no mesmo quadro do clique — fica fora da parte assíncrona.
+    state.prune_selected_mods();
+    w.set_organizer_selected_count(state.selected_mods().len() as i32);
 
     let query = state.organizer_search();
-    w.set_organizer_status(SharedString::from(if query.trim().is_empty() {
-        format!("{} item(ns) na pasta Mods.", visible.len())
+
+    // Uma pasta Mods real tem 16 mil entradas; com o cache de disco frio a varredura leva
+    // segundos, e na thread da UI isso é a janela congelada — o mesmo sintoma que fazia o
+    // sistema avisar que "o app parou".
+    //
+    // A sonda separa o app dos testes de fiação: eles montam a janela com
+    // `init_no_event_loop()`, onde `invoke_from_event_loop` não tem para onde entregar o
+    // resultado (e leem o modelo na linha seguinte ao callback, sem loop para rodar).
+    if slint::invoke_from_event_loop(|| {}).is_ok() {
+        let weak_async = weak_win.clone();
+        let state_async = Arc::clone(state);
+        let query_async = query.clone();
+        tokio::task::spawn_blocking(move || {
+            let linhas = escanear_arvore(&mods_dir, &query_async);
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(w) = weak_async.upgrade() {
+                    aplicar_arvore(&w, &state_async, linhas, &query_async, status_final);
+                }
+            });
+        });
     } else {
-        format!("🔎 {} resultado(s) para \"{}\".", visible.len(), query)
-    }));
+        let linhas = escanear_arvore(&mods_dir, &query);
+        aplicar_arvore(&w, state, linhas, &query, status_final);
+    }
 }
 
 /// Redesenha a fila do tray a partir dos candidatos guardados no estado.

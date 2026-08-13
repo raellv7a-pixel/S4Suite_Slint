@@ -173,6 +173,58 @@ impl DBPFReader {
     }
 }
 
+/// Entrega o conteúdo de cada recurso do package, já descomprimido.
+///
+/// Um `.package` guarda seus recursos comprimidos em zlib, então procurar texto
+/// nos bytes crus do arquivo não acha nada: era por isso que a detecção de
+/// dependências nunca acusava Lot51 num `Mods` real, embora funcionasse nos
+/// testes, cujos fixtures são texto puro.
+///
+/// `limite_bytes` corta os recursos grandes — malha e textura não carregam
+/// metadado de dependência, e descomprimi-los custaria segundos por mod. Um
+/// recurso que não descomprime (RefPack, ou dado corrompido) é pulado sem
+/// derrubar a leitura dos demais.
+pub fn for_each_payload<F>(
+    path: &std::path::Path,
+    limite_bytes: u32,
+    mut visitar: F,
+) -> Result<(), DBPFError>
+where
+    F: FnMut(&[u8]),
+{
+    let file = std::fs::File::open(path)?;
+    let mut reader = io::BufReader::with_capacity(256 * 1024, file);
+    let (_header, index) = DBPFReader::read_index(&mut reader)?;
+
+    for entry in &index {
+        if entry.file_size == 0 || entry.file_size > limite_bytes {
+            continue;
+        }
+        let mut bruto = vec![0u8; entry.file_size as usize];
+        if reader.seek(SeekFrom::Start(entry.location_offset as u64)).is_err() {
+            continue;
+        }
+        if reader.read_exact(&mut bruto).is_err() {
+            continue;
+        }
+
+        if entry.compressed == 0 {
+            visitar(&bruto);
+            continue;
+        }
+
+        let mut inflado = Vec::with_capacity(entry.mem_size as usize);
+        if flate2::read::ZlibDecoder::new(&bruto[..])
+            .read_to_end(&mut inflado)
+            .is_ok()
+        {
+            visitar(&inflado);
+        }
+    }
+
+    Ok(())
+}
+
 pub struct DBPFWriter;
 
 impl DBPFWriter {

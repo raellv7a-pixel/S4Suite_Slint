@@ -1,42 +1,149 @@
-import { Theme } from "../palette.slint";
+import { M3 } from "../theme/colors.slint";
+import { Motion } from "../theme/motion.slint";
+import { Type, Shape, Elevation } from "../theme/typography.slint";
+import { Icon, Ic } from "icon.slint";
+import { StateLayer } from "state_layer.slint";
+import { Ripple } from "ripple.slint";
 
-export component PrimaryButton inherits Rectangle {
+export enum ButtonKind {
+    /// Ação principal da tela. Uma por vista, no máximo.
+    filled,
+    /// Ação secundária de peso — o padrão para barras de ferramentas.
+    tonal,
+    /// Ação secundária discreta, sem preenchimento.
+    outlined,
+    /// Ação terciária: "Fechar", "Cancelar".
+    text,
+    /// Ação destrutiva. Sempre `error`, nunca só um `filled` vermelho por acidente.
+    danger,
+}
+
+/// Botão Material Design 3.
+///
+/// Substitui o `PrimaryButton` anterior, que só trocava `background` no hover e desenhava
+/// `icon_str` **além** do texto — como os rótulos já traziam o mesmo emoji do `icon_str`, o
+/// ícone saía duplicado em todo botão. Aqui o ícone é um glifo Tabler separado e o rótulo não
+/// carrega ícone nenhum.
+export component Button inherits Rectangle {
     in property <string> text;
+    /// Glifo da fonte de ícones (ver `Ic`). Vazio = botão só de texto.
     in property <string> icon_str: "";
     in property <bool> enabled: true;
-    in property <color> btn_color: Theme.primary_color;
-    in property <color> hover_color: Theme.primary_hover;
+    in property <ButtonKind> kind: ButtonKind.tonal;
+    /// Estado ligado/desligado, para uso como chip de seleção.
+    in property <bool> selected: false;
 
     callback clicked();
 
+    // Cor do conteúdo. `enabled: false` em MD3 é o rótulo a 38% sobre o container a 12% — o
+    // cinza chapado de antes se confundia com um botão tonal habilitado (o "Iniciar Importação"
+    // desabilitado do Tray parecia clicável).
+    property <color> content_color:
+        !root.enabled ? M3.on_surface.transparentize(0.62)
+        : root.kind == ButtonKind.filled ? M3.on_primary
+        : root.kind == ButtonKind.danger ? M3.on_error
+        : root.kind == ButtonKind.tonal ? M3.on_surface
+        : M3.primary;
+
+    property <color> container_color:
+        !root.enabled ? M3.on_surface.transparentize(0.88)
+        : root.kind == ButtonKind.filled ? M3.primary
+        : root.kind == ButtonKind.danger ? M3.error
+        : root.kind == ButtonKind.tonal ? (root.selected ? M3.primary_container : M3.surface_container_high)
+        : transparent;
+
     height: 40px;
-    border-radius: 8px;
-    background: !enabled ? Theme.surface_header : (touch.has-hover ? hover_color : btn_color);
+    min-width: 64px;
+    border-radius: Shape.sm;
+    background: root.container_color;
+    border-width: root.kind == ButtonKind.outlined ? 1px : 0px;
+    border-color: root.enabled
+        ? (root.selected ? M3.primary : M3.outline)
+        : M3.on_surface.transparentize(0.88);
+
+    drop-shadow-color: M3.shadow_soft;
+    drop-shadow-offset-y: root.kind == ButtonKind.filled && touch.has-hover && root.enabled ? 2px : 0px;
+    drop-shadow-blur: root.kind == ButtonKind.filled && touch.has-hover && root.enabled ? Elevation.l2 : Elevation.l0;
+
+    animate background, border-color, drop-shadow-blur, drop-shadow-offset-y {
+        duration: Motion.short2;
+        easing: Motion.standard;
+    }
+
+    // O recorte do ripple mora num filho: `clip: true` aqui apagaria a sombra deste mesmo
+    // retângulo, e o botão preenchido perderia a elevação de hover.
+    Rectangle {
+        border-radius: parent.border-radius;
+        clip: true;
+
+        StateLayer {
+            tint: root.content_color;
+            hovered: touch.has-hover && root.enabled;
+            pressed: touch.pressed && root.enabled;
+            focused: fs.has-focus && root.enabled;
+        }
+
+        ondas := Ripple {
+            tint: root.content_color;
+        }
+    }
+
+    fs := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            // Espaço e Enter ativam o botão focado — antes disto o app inteiro dependia do mouse.
+            if (event.text == " " || event.text == "\n") {
+                ondas.burst(root.width / 2, root.height / 2);
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
 
     touch := TouchArea {
         enabled: root.enabled;
-        clicked => { root.clicked(); }
+        pointer-event(ev) => {
+            if (ev.button == PointerEventButton.left && ev.kind == PointerEventKind.down) {
+                ondas.burst(self.pressed-x, self.pressed-y);
+            }
+        }
+        clicked => {
+            fs.focus();
+            root.clicked();
+        }
     }
 
     HorizontalLayout {
-        padding-left: 16px;
-        padding-right: 16px;
+        padding-left: root.icon_str != "" ? 16px : 20px;
+        padding-right: 20px;
         spacing: 8px;
         alignment: center;
 
-        if icon_str != "": Text {
-            text: root.icon_str;
-            font-size: 14px;
-            color: #ffffff;
-            vertical-alignment: center;
+        if root.icon_str != "": Icon {
+            glyph: root.icon_str;
+            font-size: 18px;
+            color: root.content_color;
         }
 
         Text {
             text: root.text;
-            font-size: 14px;
-            font-weight: 600;
-            color: root.enabled ? #ffffff : Theme.text_muted;
+            font-size: Type.label_l;
+            font-weight: Type.label_l_w;
+            color: root.content_color;
             vertical-alignment: center;
+            overflow: elide;
+            animate color { duration: Motion.medium2; easing: Motion.standard; }
         }
     }
+}
+
+/// Ponte para as views ainda não migradas para `Button`.
+///
+/// Some quando a última `PrimaryButton` virar `Button` — existe só para a migração das 9 views
+/// acontecer uma de cada vez, em vez de num commit único impossível de revisar.
+export component PrimaryButton inherits Button {
+    in property <color> btn_color: M3.surface_container_high;
+    in property <color> hover_color: M3.surface_container_highest;
+    kind: ButtonKind.tonal;
 }

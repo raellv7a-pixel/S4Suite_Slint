@@ -1,0 +1,69 @@
+// Papéis de cor Material Design 3.
+//
+// Os valores abaixo são apenas o *fallback* compilado (tema "Sims Green" escuro). Quem resolve o
+// tema em runtime é `src/core/theme.rs`, tanto para os 4 temas embutidos quanto para as cores
+// vindas da Hydra Shell — por isso todo token é `in-out` e nenhum tem expressão condicional.
+//
+// Um token com binding (ex.: `scheme == 0 ? #a : #b`) seria descartado em definitivo assim que o
+// Rust escrevesse nele pela primeira vez, e o seletor de tema pararia de funcionar. Toda a lógica
+// de esquema mora no Rust justamente para os dois caminhos serem o mesmo código.
+//
+// Os nomes correspondem 1:1 aos papéis emitidos pela Hydra Shell
+// (Scripts/python/src/theming/lib/material.py). Não inventar nomes fora dessa lista.
+export global M3 {
+    // --- Primary ---
+    in-out property <color> primary: #4ade80;
+    in-out property <color> on_primary: #00391a;
+    in-out property <color> primary_container: #15803d;
+    in-out property <color> on_primary_container: #b9f6ca;
+
+    // --- Secondary / Tertiary ---
+    in-out property <color> secondary: #bccfc2;
+    in-out property <color> on_secondary: #26372c;
+    in-out property <color> tertiary: #10b981;
+    in-out property <color> on_tertiary: #00382d;
+
+    // --- Superfícies em níveis: é o que dá profundidade sem custar uma sombra ---
+    in-out property <color> surface_dim: #0b1020;
+    in-out property <color> surface: #0f172a;
+    in-out property <color> surface_bright: #2a3550;
+    in-out property <color> surface_container_lowest: #0a0f1c;
+    in-out property <color> surface_container_low: #141c30;
+    in-out property <color> surface_container: #1e293b;
+    in-out property <color> surface_container_high: #334155;
+    in-out property <color> surface_container_highest: #475569;
+
+    in-out property <color> on_surface: #f8fafc;
+    in-out property <color> on_surface_variant: #94a3b8;
+    in-out property <color> outline: #64748b;
+    in-out property <color> outline_variant: #334155;
+    in-out property <color> scrim: #000000;
+    in-out property <color> shadow: #000000;
+
+    // --- Semânticos ---
+    in-out property <color> error: #ef4444;
+    in-out property <color> on_error: #450a0a;
+    in-out property <color> error_container: #93000a;
+    in-out property <color> on_error_container: #ffdad6;
+    in-out property <color> success_container: #005143;
+    in-out property <color> on_success_container: #a7f1dc;
+
+    // A shell não emite "warning"/"info" — são papéis próprios do app, resolvidos no Rust a
+    // partir de `is_dark` para nunca ficarem ilegíveis num esquema claro.
+    in-out property <color> warning: #f59e0b;
+    in-out property <color> info: #06b6d4;
+
+    // --- Metadados do esquema ativo ---
+    in-out property <bool> is_dark: true;
+    in-out property <bool> from_system: false;
+
+    // --- Constantes de state layer (nunca vêm do Rust) ---
+    out property <float> layer_hover: 0.08;
+    out property <float> layer_focus: 0.10;
+    out property <float> layer_pressed: 0.10;
+    out property <float> layer_drag: 0.16;
+
+    // Sombra precisa ser muito mais discreta em tema claro, senão vira sujeira cinza.
+    out property <color> shadow_soft: is_dark ? shadow.transparentize(0.45) : shadow.transparentize(0.85);
+    out property <float> scrim_opacity: is_dark ? 0.45 : 0.32;
+}

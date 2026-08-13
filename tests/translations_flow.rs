@@ -65,7 +65,9 @@ fn package_avulso_vai_para_a_pasta_de_traducoes() {
     let report = install_translation(&source, &fx.mods_dir, &fx.roots()).unwrap();
 
     assert_eq!(report.installed, 1);
-    let instalada = fx.trans_dir().join("traducao_pt_br/Traducao PT-BR.package");
+    // Um arquivo solto é a tradução inteira: nada de pasta intermediária, que
+    // era o nome ilegível que a lista da aba acabava exibindo.
+    let instalada = fx.trans_dir().join("Traducao PT-BR.package");
     assert!(instalada.exists(), "tradução não chegou em {}", TRANSLATIONS_DIR);
 }
 
@@ -87,7 +89,7 @@ fn zip_e_extraido_em_vez_de_copiado_como_zip() {
     // O bug que este teste tranca: o `.zip` era copiado como `.zip` para dentro
     // de Mods, onde o jogo não lê nada.
     assert!(!fx.trans_dir().join("PackTraducoes.zip").exists());
-    let base = fx.trans_dir().join("packtraducoes");
+    let base = fx.trans_dir().join("PackTraducoes");
     assert!(base.join("interface_ptbr.package").exists());
     assert!(base.join("dialogos_ptbr.package").exists());
 }
@@ -151,7 +153,7 @@ fn versao_nova_atualiza_no_lugar_e_guarda_backup() {
     assert_eq!(report.updated, 1);
     assert_eq!(report.installed, 1);
 
-    let instalada = fx.trans_dir().join("traducao/Traducao.package");
+    let instalada = fx.trans_dir().join("Traducao.package");
     assert_eq!(fs::read(&instalada).unwrap(), b"versao-2-bem-maior-que-a-anterior");
 
     let backups = fx.mods_dir.join(".s4suite_backups");

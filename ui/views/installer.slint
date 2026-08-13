@@ -1,8 +1,14 @@
 import { I18n } from "../i18n.slint";
-import { ScrollView } from "std-widgets.slint";
+import { ScrollView, ListView } from "std-widgets.slint";
 import { Theme } from "../palette.slint";
-import { Card } from "../components/card.slint";
-import { PrimaryButton } from "../components/button.slint";
+import { Card, CardKind } from "../components/card.slint";
+import { Button, ButtonKind } from "../components/button.slint";
+import { M3 } from "../theme/colors.slint";
+import { Type, Shape, Space } from "../theme/typography.slint";
+import { Dialog, DialogActions } from "../components/dialog.slint";
+import { Icon, Ic } from "../components/icon.slint";
+import { StatusBar } from "../components/status_bar.slint";
+import { ViewHeader } from "../components/view_header.slint";
 
 export struct QueueItem {
     name: string,
@@ -35,42 +41,42 @@ export component InstallerView inherits Rectangle {
         spacing: 16px;
 
         // Title
-        Text {
-            text: I18n.tr("📦 Smart Mod Installer V4");
-            font-size: 22px;
-            font-weight: 800;
-            color: Theme.text_primary;
+        ViewHeader {
+            icon_str: Ic.package;
+            title: I18n.tr("Smart Mod Installer V4");
         }
 
-        // Drop Zone / Select Card
+        // Área de entrada. É o primeiro lugar onde o olho cai: a ação principal da tela mora
+        // aqui, e não numa barra de ferramentas no topo.
         Card {
-            height: 140px;
-            border-color: Theme.primary_color;
-
+            kind: CardKind.outlined;
             VerticalLayout {
-                padding: 20px;
-                spacing: 12px;
+                padding: Space.xl;
+                spacing: Space.md;
                 alignment: center;
 
                 Text {
-                    text: I18n.tr("📥 Arraste arquivos (.zip, .7z, .rar, .package, .ts4script) para esta área");
-                    font-size: 15px;
-                    font-weight: 600;
-                    color: Theme.text_primary;
+                    text: I18n.tr("Arraste arquivos (.zip, .7z, .rar, .package, .ts4script) para esta área");
+                    font-size: Type.title_m;
+                    font-weight: Type.title_m_w;
+                    color: M3.on_surface;
                     horizontal-alignment: center;
+                    wrap: word-wrap;
                 }
                 Text {
                     text: I18n.tr("O Smart Installer verifica segurança contra executáveis, resolve conflitos e cria backups de rollback.");
-                    font-size: 12px;
-                    color: Theme.text_secondary;
+                    font-size: Type.body_s;
+                    color: M3.on_surface_variant;
                     horizontal-alignment: center;
+                    wrap: word-wrap;
                 }
 
                 HorizontalLayout {
                     alignment: center;
-                    PrimaryButton {
-                        text: I18n.tr("📁 Selecionar Arquivos de Mods");
-                        icon_str: "📁";
+                    Button {
+                        text: I18n.tr("Selecionar Arquivos de Mods");
+                        icon_str: Ic.folder;
+                        kind: ButtonKind.filled;
                         clicked => { root.select_files_clicked(); }
                     }
                 }
@@ -88,14 +94,14 @@ export component InstallerView inherits Rectangle {
                 vertical-alignment: center;
                 horizontal-stretch: 1;
             }
-            PrimaryButton {
-                text: I18n.tr("🧹 Limpar Fila");
-                btn_color: Theme.surface_header;
-                hover_color: Theme.surface_hover;
+            Button {
+                text: I18n.tr("Limpar Fila");
+                icon_str: Ic.brush;
                 clicked => { root.clear_queue_clicked(); }
             }
-            PrimaryButton {
-                text: I18n.tr("⚡ Iniciar Instalação");
+            Button {
+                text: I18n.tr("Iniciar Instalação");
+                icon_str: Ic.bolt;
                 enabled: root.queue_items.length > 0 && !root.is_installing;
                 clicked => { root.start_install_clicked(); }
             }
@@ -113,120 +119,117 @@ export component InstallerView inherits Rectangle {
                     color: Theme.text_muted;
                     horizontal-alignment: center;
                     vertical-alignment: center;
+                    vertical-stretch: 1;
                 }
 
-                for item in root.queue_items : HorizontalLayout {
-                    height: 36px;
-                    padding-left: 12px;
-                    padding-right: 12px;
-                    alignment: center;
-                    Text { text: item.name; font-size: 13px; color: Theme.text_primary; horizontal-stretch: 1; vertical-alignment: center; }
-                    Text { text: item.size_str; font-size: 12px; color: Theme.text_secondary; width: 100px; vertical-alignment: center; }
-                    Text { text: item.status; font-size: 12px; color: Theme.accent_color; width: 140px; vertical-alignment: center; }
+                // `ListView` pelos mesmos dois motivos do Organizador: uma fila longa não pode
+                // custar um elemento por arquivo, e o que passa da altura do Card precisa rolar.
+                if root.queue_items.length > 0 : ListView {
+                    vertical-stretch: 1;
+                    for item in root.queue_items : HorizontalLayout {
+                        height: 36px;
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        alignment: center;
+                        Text { text: item.name; font-size: 13px; color: Theme.text_primary; horizontal-stretch: 1; vertical-alignment: center; }
+                        Text { text: item.size_str; font-size: 12px; color: Theme.text_secondary; width: 100px; vertical-alignment: center; }
+                        Text { text: item.status; font-size: 12px; color: Theme.accent_color; width: 140px; vertical-alignment: center; }
+                    }
                 }
             }
         }
 
         // Status text
-        Card {
-            height: 40px;
-            HorizontalLayout {
-                padding-left: 16px;
-                padding-right: 16px;
-                alignment: center;
-                Text {
-                    text: root.install_status_text;
-                    font-size: 13px;
-                    color: Theme.info;
-                    vertical-alignment: center;
-                }
-            }
-        }
+        StatusBar { text: root.install_status_text; }
         
-        if root.show_careful_scan_dialog : Rectangle {
-            width: 100%; height: 100%;
-            background: #000000.transparentize(0.4);
-            TouchArea {}
-            
-            Card {
-                width: 500px;
-                VerticalLayout {
-                    padding: 24px; spacing: 16px;
-                    Text { text: I18n.tr("⚠️ Scan Cuidadoso"); font-size: 18px; font-weight: 700; color: Theme.warning; }
-                    Text { text: root.careful_scan_message; font-size: 14px; color: Theme.text_primary; wrap: word-wrap; }
-                    
-                    HorizontalLayout {
-                        spacing: 12px;
-                        PrimaryButton { text: I18n.tr("❌ Cancelar Instalação"); btn_color: Theme.surface_header; clicked => { root.cancel_install_clicked(); } }
-                        PrimaryButton { text: I18n.tr("⚡ Prosseguir com Instalação"); btn_color: Theme.accent_color; clicked => { root.proceed_install_clicked(); } }
-                    }
-                }
-            }
+    }
+
+    Dialog {
+        open: root.show_careful_scan_dialog;
+        title: I18n.tr("Scan Cuidadoso");
+        icon_str: Ic.warning;
+        title_color: M3.warning;
+        panel_width: 520px;
+        // Um clique fora não cancela: a decisão aqui tem consequência em disco.
+        dismissed => { }
+
+        Text {
+            text: root.careful_scan_message;
+            font-size: Type.body_m;
+            color: M3.on_surface;
+            wrap: word-wrap;
         }
 
-        // Variantes do mesmo mod: o autor marcou a pasta como "escolha uma", e
-        // instalar todas costuma dar conflito dentro do jogo.
-        if root.show_exclusive_dialog : Rectangle {
-            width: 100%; height: 100%;
-            background: #000000.transparentize(0.4);
-            TouchArea {}
+        DialogActions {
+            Button {
+                text: I18n.tr("Cancelar Instalação");
+                kind: ButtonKind.text;
+                clicked => { root.cancel_install_clicked(); }
+            }
+            Button {
+                text: I18n.tr("Prosseguir com Instalação");
+                kind: ButtonKind.filled;
+                clicked => { root.proceed_install_clicked(); }
+            }
+        }
+    }
 
-            Card {
-                width: 560px;
+    // Variantes do mesmo mod: o autor marcou a pasta como "escolha uma", e instalar todas
+    // costuma dar conflito dentro do jogo.
+    Dialog {
+        open: root.show_exclusive_dialog;
+        title: I18n.tr("Escolha uma variante");
+        icon_str: Ic.git_merge;
+        panel_width: 560px;
+        dismissed => { root.cancel_exclusive(); }
+
+        Text {
+            text: I18n.tr("Este mod traz versões alternativas que não devem ser instaladas juntas. Escolha a que você quer:");
+            font-size: Type.body_s;
+            color: M3.on_surface_variant;
+            wrap: word-wrap;
+        }
+
+        Rectangle {
+            height: 240px;
+            background: M3.surface_container_lowest;
+            border-radius: Shape.sm;
+            ScrollView {
                 VerticalLayout {
-                    padding: 24px; spacing: 16px;
-                    Text {
-                        text: I18n.tr("🔀 Escolha uma variante");
-                        font-size: 18px;
-                        font-weight: 700;
-                        color: Theme.text_primary;
-                    }
-                    Text {
-                        text: I18n.tr("Este mod traz versões alternativas que não devem ser instaladas juntas. Escolha a que você quer:");
-                        font-size: 13px;
-                        color: Theme.text_secondary;
-                        wrap: word-wrap;
-                    }
-
-                    Rectangle {
-                        height: 240px;
-                        background: Theme.background;
-                        border-radius: 6px;
-                        ScrollView {
-                            VerticalLayout {
-                                padding: 8px;
-                                alignment: start;
-                                for opcao in root.exclusive_options : Rectangle {
-                                    height: 34px;
-                                    border-radius: 4px;
-                                    background: opt_touch.has-hover ? Theme.surface_hover : transparent;
-                                    opt_touch := TouchArea {
-                                        clicked => { root.exclusive_option_picked(opcao); }
-                                    }
-                                    HorizontalLayout {
-                                        padding-left: 8px;
-                                        alignment: center;
-                                        Text {
-                                            text: "📦 " + opcao;
-                                            font-size: 12px;
-                                            color: Theme.text_primary;
-                                            horizontal-stretch: 1;
-                                            vertical-alignment: center;
-                                            overflow: elide;
-                                        }
-                                    }
-                                }
+                    padding: Space.sm;
+                    alignment: start;
+                    for opcao in root.exclusive_options : Rectangle {
+                        height: 36px;
+                        border-radius: Shape.xs;
+                        background: opt_touch.has-hover ? M3.surface_container_high : transparent;
+                        opt_touch := TouchArea {
+                            clicked => { root.exclusive_option_picked(opcao); }
+                        }
+                        HorizontalLayout {
+                            padding-left: Space.sm;
+                            spacing: Space.sm;
+                            alignment: center;
+                            Icon { glyph: Ic.package; font-size: 14px; color: M3.on_surface_variant; }
+                            Text {
+                                text: opcao;
+                                font-size: Type.body_s;
+                                color: M3.on_surface;
+                                horizontal-stretch: 1;
+                                vertical-alignment: center;
+                                overflow: elide;
                             }
                         }
                     }
-
-                    PrimaryButton {
-                        text: I18n.tr("❌ Cancelar Instalação");
-                        btn_color: Theme.surface_header;
-                        hover_color: Theme.surface_hover;
-                        clicked => { root.cancel_exclusive(); }
-                    }
                 }
+            }
+        }
+
+        DialogActions {
+            Button {
+                text: I18n.tr("Cancelar Instalação");
+                icon_str: Ic.close;
+                kind: ButtonKind.text;
+                clicked => { root.cancel_exclusive(); }
             }
         }
     }

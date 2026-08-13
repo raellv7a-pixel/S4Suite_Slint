@@ -1,7 +1,13 @@
 import { I18n } from "../i18n.slint";
 import { Theme } from "../palette.slint";
 import { Card } from "../components/card.slint";
-import { PrimaryButton } from "../components/button.slint";
+import { Button, ButtonKind } from "../components/button.slint";
+import { M3 } from "../theme/colors.slint";
+import { Type, Space } from "../theme/typography.slint";
+import { OverflowMenu } from "../components/overflow_menu.slint";
+import { Icon, Ic } from "../components/icon.slint";
+import { StatusBar } from "../components/status_bar.slint";
+import { ViewHeader } from "../components/view_header.slint";
 
 export struct TrayItem {
     name: string,
@@ -32,26 +38,41 @@ export component TrayView inherits Rectangle {
         padding: 24px;
         spacing: 16px;
 
-        Text {
-            text: I18n.tr("🗂️ Importador de Sims e Lotes (Tray Importer V3)");
-            font-size: 22px;
-            font-weight: 800;
-            color: Theme.text_primary;
+        ViewHeader {
+            icon_str: Ic.inbox;
+            title: I18n.tr("Importador de Sims e Lotes (Tray Importer V3)");
         }
 
         HorizontalLayout {
-            spacing: 12px;
-            PrimaryButton {
-                text: I18n.tr("📁 Selecionar Zips / Arquivos Tray");
+            spacing: Space.md;
+            Button {
+                text: I18n.tr("Selecionar Zips / Arquivos Tray");
+                icon_str: Ic.folder;
                 enabled: !root.is_importing;
                 clicked => { root.select_tray_files_clicked(); }
             }
             Rectangle { horizontal-stretch: 1; }
-            PrimaryButton {
-                text: root.is_importing ? I18n.tr("⏳ Processando...") : I18n.tr("📥 Iniciar Importação em Lote");
+            // Ações por item da fila ficam no menu: cada Sim ou Lote pode ter seu próprio destino
+            // de CC, mas isso é ajuste fino — quem importa pela primeira vez só quer o botão azul.
+            OverflowMenu {
+                actions: [
+                    { id: "cc_sel", label: I18n.tr("Destino do CC (selecionados)"), glyph: Ic.folder_open, enabled: root.tray_selected_count > 0 && !root.is_importing },
+                    { id: "cc_all", label: I18n.tr("Destino do CC (todos)"), glyph: Ic.folder_open, enabled: root.tray_items.length > 0 && !root.is_importing },
+                    { id: "skip", label: I18n.tr("Pular / Restaurar"), glyph: Ic.skip_forward, enabled: root.tray_selected_count > 0 && !root.is_importing },
+                    { id: "clear", label: I18n.tr("Limpar Fila"), glyph: Ic.brush, enabled: root.tray_items.length > 0 && !root.is_importing },
+                ];
+                triggered(id) => {
+                    if (id == "cc_sel") { root.set_destination_selected(); }
+                    if (id == "cc_all") { root.set_destination_all(); }
+                    if (id == "skip") { root.skip_selected_clicked(); }
+                    if (id == "clear") { root.clear_queue_clicked(); }
+                }
+            }
+            Button {
+                text: root.is_importing ? I18n.tr("Processando...") : I18n.tr("Iniciar Importação em Lote");
+                icon_str: root.is_importing ? Ic.hourglass : Ic.download;
+                kind: ButtonKind.filled;
                 enabled: root.tray_items.length > 0 && !root.is_importing;
-                btn_color: Theme.primary_color;
-                hover_color: Theme.primary_hover;
                 clicked => { root.start_import_clicked(); }
             }
         }
@@ -60,33 +81,29 @@ export component TrayView inherits Rectangle {
         // de CC, e itens indesejados são pulados sem sair da lista.
         HorizontalLayout {
             spacing: 10px;
-            PrimaryButton {
-                text: I18n.tr("📂 Destino do CC (selecionados)");
+            Button {
+                text: I18n.tr("Destino do CC (selecionados)");
+                icon_str: Ic.folder_open;
                 enabled: root.tray_selected_count > 0 && !root.is_importing;
-                btn_color: Theme.surface_header;
-                hover_color: Theme.surface_hover;
                 clicked => { root.set_destination_selected(); }
             }
-            PrimaryButton {
-                text: I18n.tr("📂 Destino do CC (todos)");
+            Button {
+                text: I18n.tr("Destino do CC (todos)");
+                icon_str: Ic.folder_open;
                 enabled: root.tray_items.length > 0 && !root.is_importing;
-                btn_color: Theme.surface_header;
-                hover_color: Theme.surface_hover;
                 clicked => { root.set_destination_all(); }
             }
-            PrimaryButton {
-                text: I18n.tr("⏭️ Pular / Restaurar");
+            Button {
+                text: I18n.tr("Pular / Restaurar");
+                icon_str: Ic.skip_forward;
                 enabled: root.tray_selected_count > 0 && !root.is_importing;
-                btn_color: Theme.surface_header;
-                hover_color: Theme.surface_hover;
                 clicked => { root.skip_selected_clicked(); }
             }
             Rectangle { horizontal-stretch: 1; }
-            PrimaryButton {
-                text: I18n.tr("🧹 Limpar Fila");
+            Button {
+                text: I18n.tr("Limpar Fila");
+                icon_str: Ic.brush;
                 enabled: root.tray_items.length > 0 && !root.is_importing;
-                btn_color: Theme.surface_header;
-                hover_color: Theme.surface_hover;
                 clicked => { root.clear_queue_clicked(); }
             }
         }
@@ -122,8 +139,8 @@ export component TrayView inherits Rectangle {
                         spacing: 8px;
                         alignment: center;
 
-                        Text {
-                            text: item.selected ? "☑" : "☐";
+                        Icon {
+                            glyph: item.selected ? Ic.checkbox_on : Ic.checkbox_off;
                             font-size: 14px;
                             color: item.selected ? Theme.accent_color : Theme.text_muted;
                             vertical-alignment: center;
@@ -134,7 +151,7 @@ export component TrayView inherits Rectangle {
                             Text {
                                 // Um item pulado continua à vista para o usuário
                                 // poder voltar atrás antes de confirmar.
-                                text: item.skipped ? "⏭️ " + item.name : "👤 " + item.name;
+                                text: item.name;
                                 font-size: 13px;
                                 font-weight: 600;
                                 color: item.skipped ? Theme.text_muted : Theme.text_primary;
@@ -154,14 +171,6 @@ export component TrayView inherits Rectangle {
             }
         }
 
-        Card {
-            height: 40px;
-            HorizontalLayout {
-                padding-left: 16px;
-                padding-right: 16px;
-                alignment: center;
-                Text { text: root.tray_status; font-size: 13px; color: Theme.info; vertical-alignment: center; }
-            }
-        }
+        StatusBar { text: root.tray_status; }
     }
 }

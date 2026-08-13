@@ -1,8 +1,14 @@
 import { I18n } from "../i18n.slint";
 import { ScrollView } from "std-widgets.slint";
+import { M3 } from "../theme/colors.slint";
+import { Type, Shape, Space } from "../theme/typography.slint";
 import { Theme } from "../palette.slint";
-import { Card } from "../components/card.slint";
-import { PrimaryButton } from "../components/button.slint";
+import { Card, CardKind } from "../components/card.slint";
+import { StatCard } from "../components/stat_card.slint";
+import { Button, ButtonKind } from "../components/button.slint";
+import { Icon, Ic } from "../components/icon.slint";
+import { StatusBar } from "../components/status_bar.slint";
+import { Dialog, DialogActions } from "../components/dialog.slint";
 
 export component DashboardView inherits Rectangle {
     in property <string> game_path: "Não configurado";
@@ -36,10 +42,10 @@ export component DashboardView inherits Rectangle {
                 spacing: 16px;
                 alignment: center;
 
-                Text {
-                    text: "🎉";
-                    font-size: 36px;
-                    vertical-alignment: center;
+                Icon {
+                    glyph: Ic.confetti;
+                    font-size: 34px;
+                    color: Theme.accent_color;
                 }
 
                 VerticalLayout {
@@ -60,206 +66,178 @@ export component DashboardView inherits Rectangle {
             }
         }
 
-        // Stats Grid
+        // Métricas. `has_details` liga a affordance: só três dos quatro números têm lista por trás.
         HorizontalLayout {
-            spacing: 16px;
+            spacing: Space.lg;
+            vertical-stretch: 0;
 
-            Card {
-                horizontal-stretch: 1;
-                height: 110px;
-                VerticalLayout {
-                    padding: 16px;
-                    alignment: space-between;
-                    Text { text: I18n.tr("📦 Mods Instalados"); font-size: 13px; color: Theme.text_secondary; }
-                    Text { text: root.total_mods_count; font-size: 28px; font-weight: 800; color: Theme.accent_color; }
+            StatCard {
+                label: I18n.tr("Mods Instalados");
+                value: root.total_mods_count;
+                icon_str: Ic.package;
+                accent: M3.primary;
+            }
+            StatCard {
+                label: I18n.tr("Scripts (.ts4script)");
+                value: root.total_scripts_count;
+                icon_str: Ic.file_text;
+                accent: M3.info;
+                has_details: true;
+                hint: I18n.tr("clique para ver a lista");
+                clicked => {
+                    root.details_title = I18n.tr("Caminhos dos Scripts");
+                    root.open_details = "scripts";
                 }
             }
-            Card {
-                horizontal-stretch: 1;
-                height: 110px;
-                scripts_touch := TouchArea {
-                    clicked => {
-                        root.details_title = I18n.tr("📜 Caminhos dos Scripts");
-                        root.open_details = "scripts";
-                    }
-                }
-                VerticalLayout {
-                    padding: 16px;
-                    alignment: space-between;
-                    Text { text: I18n.tr("📜 Scripts (.ts4script)"); font-size: 13px; color: Theme.text_secondary; }
-                    Text { text: root.total_scripts_count; font-size: 28px; font-weight: 800; color: Theme.info; }
-                    Text {
-                        text: scripts_touch.has-hover ? I18n.tr("clique para ver a lista") : "";
-                        font-size: 10px;
-                        color: Theme.text_muted;
-                    }
+            StatCard {
+                label: I18n.tr("Tamanho Ocupado");
+                value: root.total_mods_size;
+                icon_str: Ic.stack;
+                accent: M3.warning;
+                has_details: true;
+                hint: I18n.tr("clique para ver a lista");
+                clicked => {
+                    root.details_title = I18n.tr("Tamanho Ocupado por Pasta");
+                    root.open_details = "folders";
                 }
             }
-            Card {
-                horizontal-stretch: 1;
-                height: 110px;
-                size_touch := TouchArea {
-                    clicked => {
-                        root.details_title = I18n.tr("💾 Tamanho Ocupado por Pasta");
-                        root.open_details = "folders";
-                    }
-                }
-                VerticalLayout {
-                    padding: 16px;
-                    alignment: space-between;
-                    Text { text: I18n.tr("💾 Tamanho Ocupado"); font-size: 13px; color: Theme.text_secondary; }
-                    Text { text: root.total_mods_size; font-size: 28px; font-weight: 800; color: Theme.warning; }
-                    Text {
-                        text: size_touch.has-hover ? I18n.tr("clique para ver a lista") : "";
-                        font-size: 10px;
-                        color: Theme.text_muted;
-                    }
-                }
-            }
-            Card {
-                horizontal-stretch: 1;
-                height: 110px;
-                tray_touch := TouchArea {
-                    clicked => {
-                        root.details_title = I18n.tr("🗂️ Arquivos do Tray");
-                        root.open_details = "tray";
-                    }
-                }
-                VerticalLayout {
-                    padding: 16px;
-                    alignment: space-between;
-                    Text { text: I18n.tr("🗂️ Arquivos Tray"); font-size: 13px; color: Theme.text_secondary; }
-                    Text { text: root.total_tray_count; font-size: 28px; font-weight: 800; color: Theme.success; }
-                    Text {
-                        text: tray_touch.has-hover ? I18n.tr("clique para ver a lista") : "";
-                        font-size: 10px;
-                        color: Theme.text_muted;
-                    }
+            StatCard {
+                label: I18n.tr("Arquivos Tray");
+                value: root.total_tray_count;
+                icon_str: Ic.inbox;
+                accent: M3.tertiary;
+                has_details: true;
+                hint: I18n.tr("clique para ver a lista");
+                clicked => {
+                    root.details_title = I18n.tr("Arquivos do Tray");
+                    root.open_details = "tray";
                 }
             }
         }
 
-        // Quick Actions
+        // Ações rápidas
         Card {
             VerticalLayout {
-                padding: 20px;
-                spacing: 16px;
+                padding: Space.xl;
+                spacing: Space.lg;
 
                 Text {
-                    text: I18n.tr("⚡ Ações Rápidas");
-                    font-size: 16px;
-                    font-weight: 700;
-                    color: Theme.text_primary;
+                    text: I18n.tr("Ações Rápidas");
+                    font-size: Type.title_m;
+                    font-weight: Type.title_m_w;
+                    color: M3.on_surface;
                 }
 
                 HorizontalLayout {
-                    spacing: 12px;
-                    PrimaryButton {
-                        text: I18n.tr("🧹 Limpar Cache do Jogo");
-                        icon_str: "🧹";
-                        btn_color: Theme.surface_header;
-                        hover_color: Theme.surface_hover;
+                    spacing: Space.md;
+                    Button {
+                        text: I18n.tr("Limpar Cache do Jogo");
+                        icon_str: Ic.brush;
                         clicked => { root.clear_cache_clicked(); }
                     }
-                    PrimaryButton {
-                        text: I18n.tr("🛡️ Backup de Saves");
-                        icon_str: "🛡️";
-                        btn_color: Theme.surface_header;
-                        hover_color: Theme.surface_hover;
+                    Button {
+                        text: I18n.tr("Backup de Saves");
+                        icon_str: Ic.shield;
                         clicked => { root.backup_saves_clicked(); }
                     }
-                    PrimaryButton {
-                        text: I18n.tr("🔄 Atualizar Estatísticas");
-                        icon_str: "🔄";
-                        btn_color: Theme.primary_color;
-                        hover_color: Theme.primary_hover;
+                    Button {
+                        text: I18n.tr("Atualizar Estatísticas");
+                        icon_str: Ic.refresh;
+                        kind: ButtonKind.filled;
                         clicked => { root.refresh_stats_clicked(); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+            }
+        }
+
+        // Caminho do jogo e status
+        Card {
+            kind: CardKind.outlined;
+            VerticalLayout {
+                padding: Space.lg;
+                spacing: Space.sm;
+
+                HorizontalLayout {
+                    spacing: Space.sm;
+                    Icon { glyph: Ic.pin; font-size: 15px; color: M3.on_surface_variant; }
+                    Text {
+                        text: I18n.tr("Caminho do Jogo:");
+                        font-size: Type.body_m;
+                        font-weight: 600;
+                        color: M3.on_surface_variant;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: root.game_path;
+                        font-size: Type.body_m;
+                        color: M3.on_surface;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
                     }
                 }
             }
         }
 
-        // Path & Status Banner
-        Card {
-            VerticalLayout {
-                padding: 16px;
-                spacing: 8px;
-
-                HorizontalLayout {
-                    Text { text: I18n.tr("📍 Caminho do Jogo: "); font-size: 13px; font-weight: 600; color: Theme.text_secondary; }
-                    Text { text: root.game_path; font-size: 13px; color: Theme.text_primary; }
-                }
-                HorizontalLayout {
-                    Text { text: I18n.tr("ℹ️ Status: "); font-size: 13px; font-weight: 600; color: Theme.text_secondary; }
-                    Text { text: root.status_message; font-size: 13px; color: Theme.accent_color; }
-                }
-            }
-        }
+        StatusBar { text: root.status_message; }
 
         Rectangle { vertical-stretch: 1; }
 
-        // Detalhe do card clicado. A lista já vem pronta do Rust: montá-la aqui
-        // percorreria milhares de caminhos dentro da thread da UI.
-        if root.open_details != "" : Rectangle {
-            width: 100%; height: 100%;
-            background: #000000.transparentize(0.4);
-            TouchArea {}
+    }
 
-            Card {
-                width: 620px;
+    // Detalhe do card clicado. As listas já vêm prontas do Rust: montá-las aqui percorreria
+    // milhares de caminhos dentro da thread da UI — por isso cada uma continua sob o seu `if`,
+    // como o `Dialog` exige de conteúdo pesado.
+    Dialog {
+        open: root.open_details != "";
+        title: root.details_title;
+        icon_str: Ic.list;
+        panel_width: 620px;
+        dismissed => { root.open_details = ""; }
+
+        Rectangle {
+            height: 340px;
+            background: M3.surface_container_lowest;
+            border-radius: Shape.sm;
+            ScrollView {
                 VerticalLayout {
-                    padding: 24px; spacing: 16px;
-                    Text {
-                        text: root.details_title;
-                        font-size: 18px;
-                        font-weight: 700;
-                        color: Theme.text_primary;
-                    }
+                    padding: Space.sm;
+                    alignment: start;
 
-                    Rectangle {
-                        height: 340px;
-                        background: Theme.background;
-                        border-radius: 6px;
-                        ScrollView {
-                            VerticalLayout {
-                                padding: 8px;
-                                alignment: start;
-
-                                if root.open_details == "folders" : VerticalLayout {
-                                    for linha in root.folder_size_details : Text {
-                                        text: linha;
-                                        font-size: 12px;
-                                        color: Theme.text_secondary;
-                                        overflow: elide;
-                                    }
-                                }
-                                if root.open_details == "scripts" : VerticalLayout {
-                                    for linha in root.scripts_details : Text {
-                                        text: "📜 " + linha;
-                                        font-size: 12px;
-                                        color: Theme.text_secondary;
-                                        overflow: elide;
-                                    }
-                                }
-                                if root.open_details == "tray" : VerticalLayout {
-                                    for linha in root.tray_details : Text {
-                                        text: "🗂️ " + linha;
-                                        font-size: 12px;
-                                        color: Theme.text_secondary;
-                                        overflow: elide;
-                                    }
-                                }
-                            }
+                    if root.open_details == "folders" : VerticalLayout {
+                        for linha in root.folder_size_details : Text {
+                            text: linha;
+                            font-size: Type.body_s;
+                            color: M3.on_surface_variant;
+                            overflow: elide;
                         }
                     }
-
-                    PrimaryButton {
-                        text: I18n.tr("Fechar");
-                        btn_color: Theme.surface_header;
-                        hover_color: Theme.surface_hover;
-                        clicked => { root.open_details = ""; }
+                    if root.open_details == "scripts" : VerticalLayout {
+                        for linha in root.scripts_details : Text {
+                            text: linha;
+                            font-size: Type.body_s;
+                            color: M3.on_surface_variant;
+                            overflow: elide;
+                        }
+                    }
+                    if root.open_details == "tray" : VerticalLayout {
+                        for linha in root.tray_details : Text {
+                            text: linha;
+                            font-size: Type.body_s;
+                            color: M3.on_surface_variant;
+                            overflow: elide;
+                        }
                     }
                 }
+            }
+        }
+
+        DialogActions {
+            Button {
+                text: I18n.tr("Fechar");
+                kind: ButtonKind.text;
+                clicked => { root.open_details = ""; }
             }
         }
     }

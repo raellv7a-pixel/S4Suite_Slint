@@ -26,18 +26,31 @@ pub enum InstallerError {
 }
 
 /// Normaliza o nome de um mod para servir de identidade de pasta.
-/// `"Meu Mod v2.1.zip"` -> `"meu_mod_v2_1"`.
+/// `"Meu Mod v2.1.zip"` -> `"Meu Mod v2.1"`.
+///
+/// Esta identidade vira nome de pasta dentro de `Mods`, e o usuário a lê na
+/// árvore do organizador e na lista de traduções. Trocar tudo que não fosse
+/// ASCII por `_` transformava `"Mod X — Tradução PT-BR"` em
+/// `"mod_x___tradu__o_pt_br"`: o mod continuava funcionando, mas ninguém
+/// reconhecia o que era. Saem só os caracteres que não podem estar num nome de
+/// arquivo.
 pub fn install_identity_name(path: &Path) -> String {
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("mod");
     let sanitized: String = stem
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .map(|c| {
+            if crate::engine::organizer::FORBIDDEN_NAME_CHARS.contains(&c) || c.is_control() {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
-    let trimmed = sanitized.trim_matches('_').to_lowercase();
+    let trimmed = sanitized.trim().trim_matches('_').trim().trim_matches('.').trim();
     if trimmed.is_empty() {
         "mod".to_string()
     } else {
-        trimmed
+        trimmed.to_string()
     }
 }
 
@@ -419,21 +432,56 @@ pub fn detect_mutually_exclusive(staged: &[StagedFile]) -> Vec<StagedFile> {
     }
 }
 
-/// Bibliotecas que os packages da fila exigem para funcionar.
+/// Maior recurso que vale a pena descomprimir à procura de uma marca.
 ///
-/// Só lê o início de cada arquivo: as marcas ficam nos metadados, e varrer
-/// centenas de packages inteiros custaria minutos por instalação.
+/// A declaração de dependência mora na tuning, que tem alguns KB. O teto existe
+/// para não gastar tempo inflando malha e textura.
+const LIMITE_RECURSO_BYTES: u32 = 256 * 1024;
+
+/// Bibliotecas que um package exige, lidas de dentro dos recursos dele.
+///
+/// A busca precisa acontecer **depois** de descomprimir: nos bytes crus de um
+/// `.package` real a marca não aparece, porque o conteúdo vem em zlib.
+///
+/// Quando o arquivo não é um DBPF legível, cai para a varredura crua do começo
+/// dele — é o que sobra para um package malformado, e é o que os testes de
+/// unidade exercitam.
+pub fn detect_dependencies_in_package(path: &Path) -> Vec<String> {
+    let mut encontradas: Vec<String> = Vec::new();
+
+    let leitura = crate::engine::dbpf::for_each_payload(path, LIMITE_RECURSO_BYTES, |dados| {
+        for dep in detect_dependencies(dados) {
+            if !encontradas.contains(&dep) {
+                encontradas.push(dep);
+            }
+        }
+    });
+
+    if leitura.is_err() {
+        const LIMITE_LEITURA: usize = 500_000;
+        if let Ok(handle) = File::open(path) {
+            use std::io::Read as _;
+            let mut buffer = Vec::with_capacity(LIMITE_LEITURA);
+            if handle.take(LIMITE_LEITURA as u64).read_to_end(&mut buffer).is_ok() {
+                for dep in detect_dependencies(&buffer) {
+                    if !encontradas.contains(&dep) {
+                        encontradas.push(dep);
+                    }
+                }
+            }
+        }
+    }
+
+    encontradas.sort();
+    encontradas
+}
+
+/// Bibliotecas que os packages da fila exigem para funcionar.
 pub fn collect_dependencies(staged: &[StagedFile]) -> Vec<String> {
-    const LIMITE_LEITURA: usize = 500_000;
     let mut encontradas: Vec<String> = Vec::new();
 
     for file in staged.iter().filter(|f| !f.is_script()) {
-        let Ok(mut handle) = File::open(&file.src_path) else { continue };
-        let mut buffer = vec![0u8; LIMITE_LEITURA.min(file.size as usize)];
-        if std::io::Read::read_exact(&mut handle, &mut buffer).is_err() {
-            continue;
-        }
-        for dep in detect_dependencies(&buffer) {
+        for dep in detect_dependencies_in_package(&file.src_path) {
             if !encontradas.contains(&dep) {
                 encontradas.push(dep);
             }

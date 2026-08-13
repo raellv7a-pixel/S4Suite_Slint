@@ -10,8 +10,8 @@
 
 use crate::core::safety::{safe_remove_dir_all, safe_remove_file, SafetyError};
 use crate::engine::installer::{
-    calculate_conflicts, clear_staging, prepare_staging, ConflictType, InstallerError,
-    STAGING_DIR_NAME,
+    calculate_conflicts, clear_staging, prepare_staging, ConflictReport, ConflictType,
+    InstallerError, STAGING_DIR_NAME,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -69,7 +69,8 @@ fn install_into_staging(
     fs::create_dir_all(translations_dir(mods_dir))?;
 
     prepare_staging(std::slice::from_ref(&source.to_path_buf()), staging_dir)?;
-    let report = calculate_conflicts(staging_dir, mods_dir)?;
+    let mut report = calculate_conflicts(staging_dir, mods_dir)?;
+    achatar_traducao_avulsa(&mut report, source);
 
     let updated = report
         .staged_files
@@ -89,6 +90,25 @@ fn install_into_staging(
         skipped,
         updated,
     })
+}
+
+/// Um `.package` avulso é a tradução inteira, e não precisa de pasta.
+///
+/// O staging agrupa cada fonte sob a identidade dela para preservar a estrutura
+/// interna de um `.zip`. Num arquivo solto não há estrutura a preservar: a pasta
+/// só acrescentava um nível que a lista da aba exibia no lugar do nome do
+/// arquivo, e era nela que o botão de excluir batia.
+fn achatar_traducao_avulsa(report: &mut ConflictReport, source: &Path) {
+    let avulso = source
+        .file_name()
+        .map(|n| crate::engine::installer::is_valid_mod_file(&n.to_string_lossy()))
+        .unwrap_or(false);
+    if !avulso {
+        return;
+    }
+    for file in &mut report.staged_files {
+        file.rel_path = PathBuf::from(&file.filename);
+    }
 }
 
 /// Lista o que está em `01_Traducoes`, em ordem alfabética.

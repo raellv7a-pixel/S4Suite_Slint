@@ -1,0 +1,33 @@
+import { M3 } from "../theme/colors.slint";
+import { Motion } from "../theme/motion.slint";
+import { Type, Space } from "../theme/typography.slint";
+import { Icon } from "icon.slint";
+
+/// Título de uma vista: ícone + nome, com a mesma métrica em todas as 8 telas.
+///
+/// Antes cada view escrevia o seu próprio `Text` com o emoji embutido no rótulo traduzido, o que
+/// significava oito tamanhos de fonte parecidos mas não iguais, e um ícone que a tradução podia
+/// perder pelo caminho.
+export component ViewHeader inherits HorizontalLayout {
+    in property <string> icon_str;
+    in property <string> title;
+
+    spacing: Space.md;
+    alignment: start;
+
+    Icon {
+        glyph: root.icon_str;
+        font-size: 24px;
+        color: M3.primary;
+    }
+
+    Text {
+        text: root.title;
+        font-size: Type.headline_s;
+        font-weight: Type.headline_s_w;
+        color: M3.on_surface;
+        vertical-alignment: center;
+        overflow: elide;
+        animate color { duration: Motion.medium2; easing: Motion.standard; }
+    }
+}

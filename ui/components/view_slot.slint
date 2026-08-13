@@ -1,0 +1,28 @@
+import { Motion } from "../theme/motion.slint";
+
+/// Envelope de uma vista, para a troca de aba ter continuidade.
+///
+/// Antes disto o `main.slint` usava `if current_tab == N : View`, que **destrói e reconstrói** a
+/// vista a cada clique: sem transição possível, e a posição de rolagem perdida na ida e na volta.
+///
+/// A vista que sai continua instanciada até a troca seguinte, o que dá ao crossfade algo para
+/// desaparecer. Só duas ficam vivas ao mesmo tempo — manter as oito custaria construir as listas
+/// do Organizador (milhares de linhas) mesmo com a aba fechada.
+export component ViewSlot inherits Rectangle {
+    in property <bool> active: false;
+
+    opacity: root.active ? 1.0 : 0.0;
+    // O deslocamento é pequeno de propósito: o suficiente para dar direção ao movimento, não
+    // tanto que a tela pareça deslizar de fora.
+    y: root.active ? 0px : 10px;
+    visible: root.opacity > 0.01;
+
+    animate opacity {
+        duration: root.active ? Motion.medium2 : Motion.short4;
+        easing: root.active ? Motion.emphasized_decelerate : Motion.emphasized_accelerate;
+    }
+    animate y {
+        duration: Motion.medium2;
+        easing: Motion.emphasized_decelerate;
+    }
+}

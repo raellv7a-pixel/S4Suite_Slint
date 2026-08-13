@@ -1,0 +1,88 @@
+import "../../assets/fonts/tabler/noctalia-tabler-icons.ttf";
+
+// Ícones do app, em Tabler Icons.
+//
+// Emoji foi abandonado por dois motivos que apareciam lado a lado na mesma tela: metade deles
+// virava tofu (`□`) porque o fallback de fonte do Slint não cobre sequências com variation
+// selector (🗂️, ⚙️, 🛡️), e nenhum aceitava ser tingido — um emoji ignora `color`, então o ícone
+// nunca acompanhava o tema.
+//
+// A fonte é a mesma que a Hydra Shell usa nos seus próprios widgets
+// (`Assets/Fonts/tabler/noctalia-tabler-icons.ttf`), então o app usa o vocabulário visual do
+// desktop em que roda. Ela é registrada em `main.rs` antes da janela existir.
+export global Ic {
+    out property <string> font: "noctalia-tabler-icons";
+
+    // Navegação
+    out property <string> home: "\u{eac1}";
+    out property <string> package: "\u{eaff}";
+    out property <string> folder: "\u{eaad}";
+    out property <string> folder_open: "\u{faf7}";
+    out property <string> folder_plus: "\u{eaab}";
+    out property <string> link: "\u{eade}";
+    out property <string> inbox: "\u{eac4}";
+    out property <string> language: "\u{ebbe}";
+    out property <string> sparkles: "\u{f6d7}";
+    out property <string> settings: "\u{eb20}";
+    out property <string> diamond: "\u{eb65}";
+
+    // Ações
+    out property <string> refresh: "\u{eb13}";
+    out property <string> save: "\u{eb62}";
+    out property <string> search: "\u{eb1c}";
+    out property <string> plus: "\u{eb0b}";
+    out property <string> trash: "\u{eb41}";
+    out property <string> copy: "\u{ea7a}";
+    out property <string> edit: "\u{ea98}";
+    out property <string> download: "\u{ea96}";
+    out property <string> play: "\u{ed46}";
+    out property <string> filter: "\u{eaa5}";
+    out property <string> shuffle: "\u{f000}";
+    out property <string> wand: "\u{ebcb}";
+    out property <string> archive: "\u{ea0b}";
+    out property <string> clipboard: "\u{ea6f}";
+    out property <string> eye_off: "\u{ecf0}";
+    out property <string> arrow_right: "\u{ea1f}";
+
+    // Estado e semântica
+    out property <string> check: "\u{ea5e}";
+    out property <string> check_circle: "\u{ea67}";
+    out property <string> close: "\u{eb55}";
+    out property <string> warning: "\u{ea06}";
+    out property <string> alert: "\u{ea05}";
+    out property <string> info: "\u{eac5}";
+    out property <string> ban: "\u{ea2e}";
+    out property <string> bolt: "\u{ea38}";
+    out property <string> shield: "\u{eb24}";
+    out property <string> shield_check: "\u{eb22}";
+    out property <string> pin: "\u{eae8}";
+    out property <string> file_text: "\u{eaa2}";
+    out property <string> user: "\u{eb4d}";
+    out property <string> photo: "\u{eb0a}";
+    out property <string> list: "\u{eb6b}";
+    out property <string> grid: "\u{edba}";
+    out property <string> palette: "\u{eb01}";
+    out property <string> confetti: "\u{ee46}";
+    out property <string> rocket: "\u{ec45}";
+    out property <string> world: "\u{eb54}";
+    out property <string> checkbox_on: "\u{eb28}";
+    out property <string> checkbox_off: "\u{eb2c}";
+    out property <string> dot: "\u{f671}";
+    out property <string> linux: "\u{edd0}";
+
+    out property <string> brush: "\u{ebb8}";
+    out property <string> eraser: "\u{eb8b}";
+    out property <string> file_zip: "\u{ed4e}";
+    out property <string> git_merge: "\u{eab5}";
+    out property <string> skip_forward: "\u{ed49}";
+    out property <string> hourglass: "\u{ef93}";
+    out property <string> chevron_right: "\u{ea61}";
+    out property <string> color_swatch: "\u{eb61}";
+    out property <string> target: "\u{eb35}";
+    out property <string> transfer_in: "\u{ef2f}";
+    out property <string> circle_dot: "\u{efb1}";
+    out property <string> desktop: "\u{ea89}";
+    out property <string> dots_vertical: "\u{ea94}";
+    out property <string> adjustments: "\u{ea03}";
+    out property <string> stack: "\u{eb2d}";
+}

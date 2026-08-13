@@ -1,0 +1,51 @@
+import { Motion } from "../theme/motion.slint";
+
+/// Onda que nasce no ponto tocado e se dissolve.
+///
+/// `TouchArea` entrega `pressed-x`/`pressed-y`, e um `Timer` devolve o círculo ao repouso quando
+/// a animação termina — sem ele, um segundo clique no mesmo lugar não teria o que animar e o
+/// feedback sumiria justamente em cliques repetidos.
+///
+/// Atenção ao empilhar com elevação: `clip: true` recorta o `drop-shadow` do **mesmo** elemento.
+/// Onde houver sombra e ripple, a sombra fica no retângulo de fora e o ripple no de dentro.
+export component Ripple inherits Rectangle {
+    in property <color> tint: #ffffff;
+
+    property <length> origin_x: root.width / 2;
+    property <length> origin_y: root.height / 2;
+    property <bool> expanded: false;
+    property <length> max_r: max(root.width, root.height) * 2.2;
+
+    public function burst(px: length, py: length) {
+        root.origin_x = px;
+        root.origin_y = py;
+        root.expanded = false;
+        root.expanded = true;
+        reset.running = true;
+    }
+
+    clip: true;
+    background: transparent;
+
+    circle := Rectangle {
+        x: root.origin_x - self.width / 2;
+        y: root.origin_y - self.height / 2;
+        width: root.expanded ? root.max_r : 0px;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: root.tint;
+        opacity: root.expanded ? 0.0 : 0.22;
+
+        animate width { duration: Motion.medium4; easing: Motion.emphasized_decelerate; }
+        animate opacity { duration: Motion.medium4; easing: Motion.standard; }
+    }
+
+    reset := Timer {
+        interval: Motion.medium4;
+        running: false;
+        triggered => {
+            root.expanded = false;
+            self.running = false;
+        }
+    }
+}

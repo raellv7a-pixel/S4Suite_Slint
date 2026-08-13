@@ -1,6 +1,9 @@
-import { Theme } from "palette.slint";
+import { Theme, M3 } from "palette.slint";
 import { I18n } from "i18n.slint";
+import { StatusRules } from "theme/status.slint";
 import { Sidebar } from "components/sidebar.slint";
+import { Icon, Ic } from "components/icon.slint";
+import { ViewSlot } from "components/view_slot.slint";
 import { DashboardView } from "views/dashboard.slint";
 import { InstallerView, QueueItem } from "views/installer.slint";
 import { OrganizerView, ModTreeEntry, FolderChoice, DisabledEntry } from "views/organizer.slint";
@@ -10,15 +13,21 @@ import { TranslationsView, TranslationItem } from "views/translations.slint";
 import { ReshadeView } from "views/reshade.slint";
 import { ConfigView } from "views/config.slint";
 
-export { I18n, Theme }
+export { I18n, Theme, M3, StatusRules }
 
 export component MainWindow inherits Window {
     title: "S4Suite v2.0 - Mod & Content Manager for The Sims 4 (Linux)";
     preferred-width: 1150px;
     preferred-height: 800px;
+    // Abaixo disto as barras de ferramentas do Organizador e do Tray deixam de caber mesmo com
+    // overflow, e o layout entra em território não testado.
+    min-width: 880px;
+    min-height: 620px;
     background: Theme.background;
 
     in-out property <int> current_tab: 0;
+    /// Aba anterior: mantém a vista que sai instanciada durante o crossfade (ver `ViewSlot`).
+    property <int> prev_tab: 0;
 
     // View Properties
     in property <string> game_path: "Não configurado";
@@ -135,6 +144,9 @@ export component MainWindow inherits Window {
 
     in property <string> config_status: "Pronto";
     in property <string> active_language: "pt";
+    /// Há tema da Hydra Shell nesta máquina? Sem isso o chip "Sistema" ficaria oferecendo
+    /// uma fonte de cor que não existe.
+    in property <bool> system_theme_available: false;
 
     // Callbacks
     callback select_tab(int);
@@ -167,174 +179,212 @@ export component MainWindow inherits Window {
     callback theme_selected(int);
     callback merge_limit_selected(string);
 
-    HorizontalLayout {
-        Sidebar {
-            current_tab: root.current_tab;
-            tab_changed(idx) => {
-                root.current_tab = idx;
-                root.select_tab(idx);
-            }
-        }
-
-        Rectangle {
-            horizontal-stretch: 1;
-
-            if root.current_tab == 0 : DashboardView {
-                game_path: root.game_path;
-                total_mods_count: root.total_mods_count;
-                total_scripts_count: root.total_scripts_count;
-                total_mods_size: root.total_mods_size;
-                total_tray_count: root.total_tray_count;
-                status_message: root.dashboard_status;
-                clear_cache_clicked => { root.clear_cache(); }
-                backup_saves_clicked => { root.backup_saves(); }
-                refresh_stats_clicked => { root.refresh_stats(); }
-                folder_size_details: root.folder_size_details;
-                scripts_details: root.scripts_details;
-                tray_details: root.tray_details;
-            }
-
-            if root.current_tab == 1 : InstallerView {
-                queue_items: root.installer_queue;
-                is_installing: root.is_installing;
-                install_status_text: root.installer_status;
-                select_files_clicked => { root.select_installer_files(); }
-                start_install_clicked => { root.start_install(); }
-                clear_queue_clicked => { root.clear_installer_queue(); }
-                show_careful_scan_dialog: root.show_careful_scan_dialog;
-                careful_scan_message: root.careful_scan_message;
-                cancel_install_clicked => { root.cancel_install_clicked(); }
-                show_exclusive_dialog: root.show_exclusive_dialog;
-                exclusive_options: root.exclusive_options;
-                exclusive_option_picked(o) => { root.exclusive_option_picked(o); }
-                cancel_exclusive => { root.cancel_exclusive(); }
-                proceed_install_clicked => { root.proceed_install_clicked(); }
-            }
-            if root.current_tab == 2 : OrganizerView {
-                mod_entries: root.mod_entries;
-                organizer_status: root.organizer_status;
-                selected_path: root.selected_mod_path;
-                selected_is_disabled: root.selected_mod_is_disabled;
-                refresh_tree_clicked => { root.refresh_mod_tree(); }
-                check_scripts_clicked => { root.check_scripts(); }
-                show_confirm_dialog: root.show_organizer_confirm;
-                confirm_title: root.organizer_confirm_title;
-                confirm_message: root.organizer_confirm_message;
-                confirm_items: root.organizer_confirm_items;
-                confirm_action => { root.confirm_organizer_action(); }
-                cancel_action => { root.cancel_organizer_action(); }
-                find_duplicates_clicked => { root.find_duplicates(); }
-                clean_junk_clicked => { root.clean_junk(); }
-                entry_clicked(path) => { root.select_mod_entry(path); }
-                toggle_disabled_clicked(path) => { root.toggle_disabled_mod(path); }
-
-                search_query: root.organizer_search;
-                search_changed(q) => { root.organizer_search_changed(q); }
-                selected_count: root.organizer_selected_count;
-                create_folder_clicked => { root.create_mod_folder(); }
-                move_items_clicked => { root.move_selected_mods(); }
-                copy_items_clicked => { root.copy_selected_mods(); }
-                rename_item_clicked => { root.rename_selected_mod(); }
-                delete_items_clicked => { root.delete_selected_mods(); }
-                clear_selection_clicked => { root.clear_mod_selection(); }
-
-                show_input_dialog: root.show_organizer_input;
-                input_title: root.organizer_input_title;
-                input_placeholder: root.organizer_input_placeholder;
-                input_initial: root.organizer_input_initial;
-                confirm_input(name) => { root.confirm_organizer_input(name); }
-                cancel_input => { root.cancel_organizer_input(); }
-
-                show_folder_picker: root.show_folder_picker;
-                folder_picker_title: root.folder_picker_title;
-                folder_choices: root.folder_choices;
-                folder_picked(path) => { root.folder_destination_picked(path); }
-                cancel_folder_pick => { root.cancel_folder_pick(); }
-
-                show_disabled_panel: root.show_disabled_panel;
-                disabled_entries: root.disabled_entries;
-                disabled_selected_count: root.disabled_selected_count;
-                show_disabled_clicked => { root.open_disabled_panel(); }
-                close_disabled_panel => { root.close_disabled_panel(); }
-                toggle_disabled_selection(path) => { root.toggle_disabled_selection(path); }
-                restore_selected_disabled => { root.restore_selected_disabled(); }
-                delete_selected_disabled => { root.delete_selected_disabled(); }
-            }
-
-            if root.current_tab == 3 : MergerView {
-                items: root.merge_items;
-                max_size_gb: root.merge_max_size;
-                is_merging: root.is_merging;
-                merge_status: root.merge_status;
-                input_dir: root.merge_input_dir;
-                output_dir: root.merge_output_dir;
-                merge_progress: root.merge_progress;
-                show_post_merge_dialog: root.show_post_merge_dialog;
-                post_merge_message: root.post_merge_message;
-                post_merge_action(action) => { root.post_merge_action(action); }
-                select_input_clicked => { root.select_merger_input(); }
-                select_output_clicked => { root.select_merger_output(); }
-                start_merge_clicked => { root.start_merge(); }
-
-                jobs: root.merge_jobs;
-                jobs_selected_count: root.merge_jobs_selected_count;
-                post_action: root.merge_post_action;
-                add_job_clicked => { root.add_merge_job(); }
-                remove_job_clicked => { root.remove_merge_job(); }
-                job_clicked(idx) => { root.merge_job_clicked(idx); }
-                post_action_selected(a) => { root.merge_post_action_selected(a); }
-                start_queue_clicked => { root.start_merge_queue(); }
-            }
-
-            if root.current_tab == 4 : TrayView {
-                tray_items: root.tray_items;
-                is_importing: root.is_importing_tray;
-                tray_status: root.tray_status;
-                select_tray_files_clicked => { root.select_tray_files(); }
-                start_import_clicked => { root.start_tray_import(); }
-
-                tray_selected_count: root.tray_selected_count;
-                tray_item_clicked(idx) => { root.tray_item_clicked(idx); }
-                set_destination_selected => { root.set_tray_destination_selected(); }
-                set_destination_all => { root.set_tray_destination_all(); }
-                skip_selected_clicked => { root.skip_selected_tray(); }
-                clear_queue_clicked => { root.clear_tray_queue(); }
-            }
-
-            if root.current_tab == 5 : TranslationsView {
-                installed_translations: root.installed_translations;
-                status_text: root.translations_status;
-                select_translation_clicked => { root.select_translation_file(); }
-                delete_translation_clicked(name) => { root.delete_translation(name); }
-            }
-
-            if root.current_tab == 6 : ReshadeView {
-                env_type: root.reshade_env_type;
-                env_command: root.reshade_env_command;
-                is_installed: root.is_reshade_installed;
-                injected_dll: root.reshade_injected_dll;
-                presets_count: root.reshade_presets_count;
-                is_busy: root.is_reshade_busy;
-                reshade_status: root.reshade_status;
-                install_reshade_clicked => { root.install_reshade(); }
-                uninstall_reshade_clicked => { root.uninstall_reshade(); }
-                install_preset_clicked => { root.install_preset(); }
-                copy_command_clicked => { root.copy_reshade_command(); }
-            }
-
-            if root.current_tab == 7 : ConfigView {
-                game_path: root.game_path;
-                merge_limit_gb: root.merge_max_size;
-                active_language: root.active_language;
-                active_theme_idx: Theme.active_theme;
-                config_status: root.config_status;
-                select_game_path_clicked => { root.select_config_game_path(); }
-                autodetect_game_path_clicked => { root.autodetect_game_path(); }
-                save_config_clicked => { root.save_config(); }
-                language_selected(lang) => { root.language_selected(lang); }
-                theme_selected(idx) => { root.theme_selected(idx); }
-                merge_limit_selected(gb) => { root.merge_limit_selected(gb); }
-            }
+    // A rail e o conteúdo são posicionados à mão em vez de por `HorizontalLayout`.
+    //
+    // Com layout, `collapsed: root.width < …` fecha um ciclo — a largura da janela alimenta o
+    // layoutinfo, que depende da largura da rail, que depende de `collapsed`, que lê a largura da
+    // janela. O compilador do Slint acusa e avisa que pode dar panic em runtime. Fora do layout
+    // não há esse laço, e o breakpoint funciona.
+    rail := Sidebar {
+        x: 0;
+        y: 0;
+        height: root.height;
+        current_tab: root.current_tab;
+        // Janela estreita: a rail vira só ícones e devolve 164px ao conteúdo.
+        collapsed: root.width < 1000px;
+        tab_changed(idx) => {
+            root.prev_tab = root.current_tab;
+            root.current_tab = idx;
+            root.select_tab(idx);
         }
     }
+
+    Rectangle {
+        x: rail.width;
+        y: 0;
+        width: root.width - rail.width;
+        height: root.height;
+
+            if root.current_tab == 0 || root.prev_tab == 0 : ViewSlot {
+                active: root.current_tab == 0;
+                DashboardView {
+                    game_path: root.game_path;
+                    total_mods_count: root.total_mods_count;
+                    total_scripts_count: root.total_scripts_count;
+                    total_mods_size: root.total_mods_size;
+                    total_tray_count: root.total_tray_count;
+                    status_message: root.dashboard_status;
+                    clear_cache_clicked => { root.clear_cache(); }
+                    backup_saves_clicked => { root.backup_saves(); }
+                    refresh_stats_clicked => { root.refresh_stats(); }
+                    folder_size_details: root.folder_size_details;
+                    scripts_details: root.scripts_details;
+                    tray_details: root.tray_details;
+                }
+            }
+
+            if root.current_tab == 1 || root.prev_tab == 1 : ViewSlot {
+                active: root.current_tab == 1;
+                InstallerView {
+                    queue_items: root.installer_queue;
+                    is_installing: root.is_installing;
+                    install_status_text: root.installer_status;
+                    select_files_clicked => { root.select_installer_files(); }
+                    start_install_clicked => { root.start_install(); }
+                    clear_queue_clicked => { root.clear_installer_queue(); }
+                    show_careful_scan_dialog: root.show_careful_scan_dialog;
+                    careful_scan_message: root.careful_scan_message;
+                    cancel_install_clicked => { root.cancel_install_clicked(); }
+                    show_exclusive_dialog: root.show_exclusive_dialog;
+                    exclusive_options: root.exclusive_options;
+                    exclusive_option_picked(o) => { root.exclusive_option_picked(o); }
+                    cancel_exclusive => { root.cancel_exclusive(); }
+                    proceed_install_clicked => { root.proceed_install_clicked(); }
+                }
+            }
+            if root.current_tab == 2 || root.prev_tab == 2 : ViewSlot {
+                active: root.current_tab == 2;
+                OrganizerView {
+                    mod_entries: root.mod_entries;
+                    organizer_status: root.organizer_status;
+                    selected_path: root.selected_mod_path;
+                    selected_is_disabled: root.selected_mod_is_disabled;
+                    refresh_tree_clicked => { root.refresh_mod_tree(); }
+                    check_scripts_clicked => { root.check_scripts(); }
+                    show_confirm_dialog: root.show_organizer_confirm;
+                    confirm_title: root.organizer_confirm_title;
+                    confirm_message: root.organizer_confirm_message;
+                    confirm_items: root.organizer_confirm_items;
+                    confirm_action => { root.confirm_organizer_action(); }
+                    cancel_action => { root.cancel_organizer_action(); }
+                    find_duplicates_clicked => { root.find_duplicates(); }
+                    clean_junk_clicked => { root.clean_junk(); }
+                    entry_clicked(path) => { root.select_mod_entry(path); }
+                    toggle_disabled_clicked(path) => { root.toggle_disabled_mod(path); }
+
+                    search_query: root.organizer_search;
+                    search_changed(q) => { root.organizer_search_changed(q); }
+                    selected_count: root.organizer_selected_count;
+                    create_folder_clicked => { root.create_mod_folder(); }
+                    move_items_clicked => { root.move_selected_mods(); }
+                    copy_items_clicked => { root.copy_selected_mods(); }
+                    rename_item_clicked => { root.rename_selected_mod(); }
+                    delete_items_clicked => { root.delete_selected_mods(); }
+                    clear_selection_clicked => { root.clear_mod_selection(); }
+
+                    show_input_dialog: root.show_organizer_input;
+                    input_title: root.organizer_input_title;
+                    input_placeholder: root.organizer_input_placeholder;
+                    input_initial: root.organizer_input_initial;
+                    confirm_input(name) => { root.confirm_organizer_input(name); }
+                    cancel_input => { root.cancel_organizer_input(); }
+
+                    show_folder_picker: root.show_folder_picker;
+                    folder_picker_title: root.folder_picker_title;
+                    folder_choices: root.folder_choices;
+                    folder_picked(path) => { root.folder_destination_picked(path); }
+                    cancel_folder_pick => { root.cancel_folder_pick(); }
+
+                    show_disabled_panel: root.show_disabled_panel;
+                    disabled_entries: root.disabled_entries;
+                    disabled_selected_count: root.disabled_selected_count;
+                    show_disabled_clicked => { root.open_disabled_panel(); }
+                    close_disabled_panel => { root.close_disabled_panel(); }
+                    toggle_disabled_selection(path) => { root.toggle_disabled_selection(path); }
+                    restore_selected_disabled => { root.restore_selected_disabled(); }
+                    delete_selected_disabled => { root.delete_selected_disabled(); }
+                }
+            }
+
+            if root.current_tab == 3 || root.prev_tab == 3 : ViewSlot {
+                active: root.current_tab == 3;
+                MergerView {
+                    items: root.merge_items;
+                    max_size_gb: root.merge_max_size;
+                    is_merging: root.is_merging;
+                    merge_status: root.merge_status;
+                    input_dir: root.merge_input_dir;
+                    output_dir: root.merge_output_dir;
+                    merge_progress: root.merge_progress;
+                    show_post_merge_dialog: root.show_post_merge_dialog;
+                    post_merge_message: root.post_merge_message;
+                    post_merge_action(action) => { root.post_merge_action(action); }
+                    select_input_clicked => { root.select_merger_input(); }
+                    select_output_clicked => { root.select_merger_output(); }
+                    start_merge_clicked => { root.start_merge(); }
+
+                    jobs: root.merge_jobs;
+                    jobs_selected_count: root.merge_jobs_selected_count;
+                    post_action: root.merge_post_action;
+                    add_job_clicked => { root.add_merge_job(); }
+                    remove_job_clicked => { root.remove_merge_job(); }
+                    job_clicked(idx) => { root.merge_job_clicked(idx); }
+                    post_action_selected(a) => { root.merge_post_action_selected(a); }
+                    start_queue_clicked => { root.start_merge_queue(); }
+                }
+            }
+
+            if root.current_tab == 4 || root.prev_tab == 4 : ViewSlot {
+                active: root.current_tab == 4;
+                TrayView {
+                    tray_items: root.tray_items;
+                    is_importing: root.is_importing_tray;
+                    tray_status: root.tray_status;
+                    select_tray_files_clicked => { root.select_tray_files(); }
+                    start_import_clicked => { root.start_tray_import(); }
+
+                    tray_selected_count: root.tray_selected_count;
+                    tray_item_clicked(idx) => { root.tray_item_clicked(idx); }
+                    set_destination_selected => { root.set_tray_destination_selected(); }
+                    set_destination_all => { root.set_tray_destination_all(); }
+                    skip_selected_clicked => { root.skip_selected_tray(); }
+                    clear_queue_clicked => { root.clear_tray_queue(); }
+                }
+            }
+
+            if root.current_tab == 5 || root.prev_tab == 5 : ViewSlot {
+                active: root.current_tab == 5;
+                TranslationsView {
+                    installed_translations: root.installed_translations;
+                    status_text: root.translations_status;
+                    select_translation_clicked => { root.select_translation_file(); }
+                    delete_translation_clicked(name) => { root.delete_translation(name); }
+                }
+            }
+
+            if root.current_tab == 6 || root.prev_tab == 6 : ViewSlot {
+                active: root.current_tab == 6;
+                ReshadeView {
+                    env_type: root.reshade_env_type;
+                    env_command: root.reshade_env_command;
+                    is_installed: root.is_reshade_installed;
+                    injected_dll: root.reshade_injected_dll;
+                    presets_count: root.reshade_presets_count;
+                    is_busy: root.is_reshade_busy;
+                    reshade_status: root.reshade_status;
+                    install_reshade_clicked => { root.install_reshade(); }
+                    uninstall_reshade_clicked => { root.uninstall_reshade(); }
+                    install_preset_clicked => { root.install_preset(); }
+                    copy_command_clicked => { root.copy_reshade_command(); }
+                }
+            }
+
+            if root.current_tab == 7 || root.prev_tab == 7 : ViewSlot {
+                active: root.current_tab == 7;
+                ConfigView {
+                    game_path: root.game_path;
+                    merge_limit_gb: root.merge_max_size;
+                    active_language: root.active_language;
+                    active_theme_idx: Theme.active_theme;
+                    system_theme_available: root.system_theme_available;
+                    config_status: root.config_status;
+                    select_game_path_clicked => { root.select_config_game_path(); }
+                    autodetect_game_path_clicked => { root.autodetect_game_path(); }
+                    save_config_clicked => { root.save_config(); }
+                    language_selected(lang) => { root.language_selected(lang); }
+                    theme_selected(idx) => { root.theme_selected(idx); }
+                    merge_limit_selected(gb) => { root.merge_limit_selected(gb); }
+                }
+            }
+        }
 }

@@ -1,8 +1,15 @@
 import { I18n } from "../i18n.slint";
-import { ScrollView, LineEdit } from "std-widgets.slint";
+import { ScrollView, ListView, LineEdit } from "std-widgets.slint";
 import { Theme } from "../palette.slint";
 import { Card } from "../components/card.slint";
-import { PrimaryButton } from "../components/button.slint";
+import { Button, ButtonKind } from "../components/button.slint";
+import { M3 } from "../theme/colors.slint";
+import { Type, Shape, Space } from "../theme/typography.slint";
+import { Dialog, DialogActions } from "../components/dialog.slint";
+import { OverflowMenu } from "../components/overflow_menu.slint";
+import { Icon, Ic } from "../components/icon.slint";
+import { StatusBar } from "../components/status_bar.slint";
+import { ViewHeader } from "../components/view_header.slint";
 
 export struct ModTreeEntry {
     name: string,
@@ -87,107 +94,79 @@ export component OrganizerView inherits Rectangle {
         padding: 24px;
         spacing: 16px;
 
-        Text {
-            text: I18n.tr("📂 Organizador Global de Mods");
-            font-size: 22px;
-            font-weight: 800;
-            color: Theme.text_primary;
+        ViewHeader {
+            icon_str: Ic.folder_open;
+            title: I18n.tr("Organizador Global de Mods");
         }
 
-        // Toolbar Actions
+        // Barra de ações contextual.
+        //
+        // Antes eram 11 botões fixos em duas fileiras: numa janela de 934px todos elidiam, e dez
+        // deles ficavam desabilitados enquanto nada estivesse marcado. Aqui a barra mostra só o
+        // que faz sentido agora — com a árvore sem seleção, o usuário vê duas ações e não uma
+        // parede cinza. As de manutenção (recarregar, duplicatas, lixo, desativados) moram no
+        // menu "⋮", sempre no mesmo canto.
         HorizontalLayout {
-            spacing: 10px;
+            spacing: Space.sm;
 
-            PrimaryButton {
-                text: I18n.tr("🔄 Recarregar");
-                btn_color: Theme.surface_header;
-                hover_color: Theme.surface_hover;
-                clicked => { root.refresh_tree_clicked(); }
-            }
-            PrimaryButton {
-                text: I18n.tr("⚠️ Checar Scripts");
-                btn_color: Theme.surface_header;
-                hover_color: Theme.surface_hover;
-                clicked => { root.check_scripts_clicked(); }
-            }
-            PrimaryButton {
-                text: I18n.tr("🔍 Duplicatas");
-                btn_color: Theme.surface_header;
-                hover_color: Theme.surface_hover;
-                clicked => { root.find_duplicates_clicked(); }
-            }
-            PrimaryButton {
-                text: I18n.tr("🧹 Limpar Lixo");
-                btn_color: Theme.surface_header;
-                hover_color: Theme.surface_hover;
-                clicked => { root.clean_junk_clicked(); }
-            }
-            PrimaryButton {
-                text: I18n.tr("🚫 Ver Desativados");
-                btn_color: Theme.surface_header;
-                hover_color: Theme.surface_hover;
-                clicked => { root.show_disabled_clicked(); }
-            }
-            PrimaryButton {
-                // Sem um mod selecionado não há o que alternar.
-                text: root.selected_path == ""
-                    ? I18n.tr("🔴 Selecione um mod")
-                    : (root.selected_is_disabled ? I18n.tr("🟢 Reativar Mod") : I18n.tr("🔴 Desativar Mod"));
-                enabled: root.selected_path != "";
-                btn_color: Theme.primary_color;
-                hover_color: Theme.primary_hover;
-                clicked => { root.toggle_disabled_clicked(root.selected_path); }
-            }
-        }
-
-        // Explorador: as ações agem sobre tudo o que estiver marcado na árvore.
-        HorizontalLayout {
-            spacing: 10px;
-
-            PrimaryButton {
-                text: I18n.tr("➕ Nova Pasta");
-                btn_color: Theme.surface_header;
-                hover_color: Theme.surface_hover;
+            Button {
+                text: I18n.tr("Nova Pasta");
+                icon_str: Ic.folder_plus;
                 clicked => { root.create_folder_clicked(); }
             }
-            PrimaryButton {
+
+            if root.selected_count > 0: Button {
                 text: I18n.tr("Mover Para...");
-                enabled: root.selected_count > 0;
-                btn_color: Theme.surface_header;
-                hover_color: Theme.surface_hover;
+                icon_str: Ic.transfer_in;
                 clicked => { root.move_items_clicked(); }
             }
-            PrimaryButton {
+            if root.selected_count > 0: Button {
                 text: I18n.tr("Copiar Para...");
-                enabled: root.selected_count > 0;
-                btn_color: Theme.surface_header;
-                hover_color: Theme.surface_hover;
+                icon_str: Ic.copy;
                 clicked => { root.copy_items_clicked(); }
             }
-            PrimaryButton {
+            if root.selected_count == 1: Button {
                 // Renomear exige alvo único: com dois marcados não há um nome só.
                 text: I18n.tr("Renomear");
-                enabled: root.selected_count == 1;
-                btn_color: Theme.surface_header;
-                hover_color: Theme.surface_hover;
+                icon_str: Ic.edit;
                 clicked => { root.rename_item_clicked(); }
             }
-            PrimaryButton {
-                text: I18n.tr("🗑️ Excluir");
-                enabled: root.selected_count > 0;
-                btn_color: Theme.danger;
-                hover_color: Theme.danger.darker(0.2);
+            if root.selected_path != "": Button {
+                text: root.selected_is_disabled ? I18n.tr("Reativar Mod") : I18n.tr("Desativar Mod");
+                icon_str: root.selected_is_disabled ? Ic.check : Ic.eye_off;
+                clicked => { root.toggle_disabled_clicked(root.selected_path); }
+            }
+            if root.selected_count > 0: Button {
+                text: I18n.tr("Excluir");
+                icon_str: Ic.trash;
+                kind: ButtonKind.danger;
                 clicked => { root.delete_items_clicked(); }
             }
+
             Rectangle { horizontal-stretch: 1; }
-            PrimaryButton {
-                text: root.selected_count == 0
-                    ? I18n.tr("Nada marcado")
-                    : I18n.tr("Limpar seleção");
-                enabled: root.selected_count > 0;
-                btn_color: Theme.surface_header;
-                hover_color: Theme.surface_hover;
+
+            if root.selected_count > 0: Button {
+                text: I18n.tr("Limpar seleção");
+                icon_str: Ic.close;
+                kind: ButtonKind.text;
                 clicked => { root.clear_selection_clicked(); }
+            }
+
+            OverflowMenu {
+                actions: [
+                    { id: "reload", label: I18n.tr("Recarregar"), glyph: Ic.refresh, enabled: true },
+                    { id: "scripts", label: I18n.tr("Checar Scripts"), glyph: Ic.warning, enabled: true },
+                    { id: "dupes", label: I18n.tr("Duplicatas"), glyph: Ic.search, enabled: true },
+                    { id: "junk", label: I18n.tr("Limpar Lixo"), glyph: Ic.brush, enabled: true },
+                    { id: "disabled", label: I18n.tr("Ver Desativados"), glyph: Ic.eye_off, enabled: true },
+                ];
+                triggered(id) => {
+                    if (id == "reload") { root.refresh_tree_clicked(); }
+                    if (id == "scripts") { root.check_scripts_clicked(); }
+                    if (id == "dupes") { root.find_duplicates_clicked(); }
+                    if (id == "junk") { root.clean_junk_clicked(); }
+                    if (id == "disabled") { root.show_disabled_clicked(); }
+                }
             }
         }
 
@@ -195,7 +174,7 @@ export component OrganizerView inherits Rectangle {
         HorizontalLayout {
             spacing: 10px;
             LineEdit {
-                placeholder-text: I18n.tr("🔎 Buscar por nome...");
+                placeholder-text: I18n.tr("Buscar por nome...");
                 text: root.search_query;
                 edited => { root.search_changed(self.text); }
             }
@@ -222,13 +201,16 @@ export component OrganizerView inherits Rectangle {
                 vertical-alignment: center;
             }
 
-            // Uma pasta Mods real tem centenas de entradas: sem rolagem, tudo
-            // além da altura do Card fica inacessível.
-            if root.mod_entries.length > 0 : ScrollView {
-                VerticalLayout {
-                    padding: 12px;
-                    alignment: start;
+            // `ListView` e não `ScrollView { VerticalLayout { for … } }`: o segundo instancia
+            // **todas** as linhas de uma vez. Numa pasta Mods real de 16 mil entradas isso são
+            // ~114 mil elementos criados dentro do evento do clique — o loop da UI ficava 3s
+            // parado só para abrir a aba (bem mais com o cache de disco frio), tempo suficiente
+            // para o compositor marcar a janela como travada e avisar que "o app parou". O
+            // ListView só materializa as linhas visíveis.
+            if root.mod_entries.length > 0 : VerticalLayout {
+                padding: 12px;
 
+                ListView {
                     for entry in root.mod_entries : Rectangle {
                         height: 36px;
                         background: entry.selected
@@ -250,17 +232,26 @@ export component OrganizerView inherits Rectangle {
                             // devolve a noção de quem está dentro de quem.
                             padding-left: 12px + (entry.depth * 16px);
                             padding-right: 12px;
-                            alignment: center;
                             spacing: 8px;
+                            // Sem `alignment` de propósito: `center` anula o `horizontal-stretch`
+                            // do nome, e a linha inteira flutuava no meio do card. Aí o recuo por
+                            // profundidade deixava de significar hierarquia — cada linha começava
+                            // num lugar diferente sem relação com a anterior.
 
-                            Text {
-                                text: entry.selected ? "☑" : "☐";
+                            Icon {
+                                glyph: entry.selected ? Ic.checkbox_on : Ic.checkbox_off;
                                 font-size: 14px;
                                 color: entry.selected ? Theme.accent_color : Theme.text_muted;
                                 vertical-alignment: center;
                             }
+                            Icon {
+                                glyph: entry.is_dir ? Ic.folder : (entry.disabled ? Ic.ban : Ic.package);
+                                font-size: 15px;
+                                color: entry.disabled ? Theme.danger : Theme.text_secondary;
+                                vertical-alignment: center;
+                            }
                             Text {
-                                text: entry.is_dir ? "📁 " + entry.name : (entry.disabled ? "🔴 " + entry.name : "📦 " + entry.name);
+                                text: entry.name;
                                 font-size: 13px;
                                 color: entry.disabled ? Theme.danger : Theme.text_primary;
                                 horizontal-stretch: 1;
@@ -281,259 +272,238 @@ export component OrganizerView inherits Rectangle {
         }
 
         // Status Bar
-        Card {
-            height: 36px;
-            HorizontalLayout {
-                padding-left: 16px;
-                padding-right: 16px;
-                alignment: center;
-                Text { text: root.organizer_status; font-size: 12px; color: Theme.accent_color; vertical-alignment: center; }
+        StatusBar { text: root.organizer_status; }
+
+    }
+
+    // --- Modais ---------------------------------------------------------------------------
+    // Ficam fora do `VerticalLayout` de propósito: dentro dele o diálogo seria um item de layout
+    // e reservaria espaço na tela em vez de cobrir o que está atrás.
+
+    Dialog {
+        open: root.show_confirm_dialog;
+        title: root.confirm_title;
+        icon_str: Ic.warning;
+        title_color: M3.error;
+        panel_width: 560px;
+        // Confirmação destrutiva não fecha por clique fora: um clique perdido não pode ser a
+        // diferença entre cancelar e não cancelar.
+        dismissed => { }
+
+        Text {
+            text: root.confirm_message;
+            font-size: Type.body_m;
+            color: M3.on_surface_variant;
+            wrap: word-wrap;
+        }
+
+        // Nada é apagado às cegas: o usuário vê a lista exata.
+        if root.confirm_items.length > 0 : Rectangle {
+            height: 200px;
+            background: M3.surface_container_lowest;
+            border-radius: Shape.sm;
+            ScrollView {
+                VerticalLayout {
+                    padding: Space.sm;
+                    alignment: start;
+                    for item in root.confirm_items : Text {
+                        text: item;
+                        font-size: Type.body_s;
+                        color: M3.on_surface_variant;
+                        overflow: elide;
+                    }
+                }
             }
         }
 
-        if root.show_confirm_dialog : Rectangle {
-            width: 100%; height: 100%;
-            background: #000000.transparentize(0.4);
-            TouchArea {}
+        DialogActions {
+            Button {
+                text: I18n.tr("Cancelar");
+                kind: ButtonKind.text;
+                clicked => { root.cancel_action(); }
+            }
+            Button {
+                text: I18n.tr("Confirmar Exclusão");
+                icon_str: Ic.trash;
+                kind: ButtonKind.danger;
+                clicked => { root.confirm_action(); }
+            }
+        }
+    }
 
-            Card {
-                width: 560px;
+    // Diálogo de texto: nova pasta e renomear.
+    Dialog {
+        open: root.show_input_dialog;
+        title: root.input_title;
+        icon_str: Ic.edit;
+        panel_width: 460px;
+        dismissed => { root.cancel_input(); }
+
+        name_input := LineEdit {
+            placeholder-text: root.input_placeholder;
+            text: root.input_initial;
+            accepted => { root.confirm_input(self.text); }
+        }
+
+        DialogActions {
+            Button {
+                text: I18n.tr("Cancelar");
+                kind: ButtonKind.text;
+                clicked => { root.cancel_input(); }
+            }
+            Button {
+                text: I18n.tr("Confirmar");
+                kind: ButtonKind.filled;
+                enabled: name_input.text != "";
+                clicked => { root.confirm_input(name_input.text); }
+            }
+        }
+    }
+
+    // Escolha do destino de mover/copiar: só pastas dentro de Mods.
+    Dialog {
+        open: root.show_folder_picker;
+        title: root.folder_picker_title;
+        icon_str: Ic.folder;
+        panel_width: 560px;
+        dismissed => { root.cancel_folder_pick(); }
+
+        Text {
+            text: I18n.tr("Escolha a pasta de destino:");
+            font-size: Type.body_s;
+            color: M3.on_surface_variant;
+        }
+
+        Rectangle {
+            height: 280px;
+            background: M3.surface_container_lowest;
+            border-radius: Shape.sm;
+            ScrollView {
                 VerticalLayout {
-                    padding: 24px; spacing: 16px;
-                    Text { text: root.confirm_title; font-size: 18px; font-weight: 700; color: Theme.text_primary; }
-                    Text { text: root.confirm_message; font-size: 14px; color: Theme.text_secondary; wrap: word-wrap; }
+                    padding: Space.sm;
+                    alignment: start;
+                    for choice in root.folder_choices : Rectangle {
+                        height: 34px;
+                        border-radius: Shape.xs;
+                        background: pick_touch.has-hover ? M3.surface_container_high : transparent;
+                        pick_touch := TouchArea {
+                            clicked => { root.folder_picked(choice.path_str); }
+                        }
+                        HorizontalLayout {
+                            padding-left: Space.sm;
+                            spacing: Space.sm;
+                            alignment: center;
+                            Icon { glyph: Ic.folder; font-size: 14px; color: M3.on_surface_variant; }
+                            Text {
+                                text: choice.label;
+                                font-size: Type.body_s;
+                                color: M3.on_surface;
+                                horizontal-stretch: 1;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
-                    // Nada é apagado às cegas: o usuário vê a lista exata.
-                    if root.confirm_items.length > 0 : Rectangle {
-                        height: 200px;
-                        background: Theme.background;
-                        border-radius: 6px;
-                        ScrollView {
+        DialogActions {
+            Button {
+                text: I18n.tr("Cancelar");
+                kind: ButtonKind.text;
+                clicked => { root.cancel_folder_pick(); }
+            }
+        }
+    }
+
+    // Painel de desativados: restaurar ou excluir de vez, em lote.
+    Dialog {
+        open: root.show_disabled_panel;
+        title: I18n.tr("Mods Desativados");
+        icon_str: Ic.eye_off;
+        panel_width: 640px;
+        dismissed => { root.close_disabled_panel(); }
+
+        if root.disabled_entries.length == 0 : Text {
+            text: I18n.tr("Nenhum mod desativado no momento.");
+            font-size: Type.body_m;
+            color: M3.outline;
+        }
+
+        if root.disabled_entries.length > 0 : Rectangle {
+            height: 300px;
+            background: M3.surface_container_lowest;
+            border-radius: Shape.sm;
+            // Mesma razão do ListView da árvore: quem desativou meio catálogo tem centenas de
+            // linhas aqui, e abrir o painel não pode instanciar todas.
+            VerticalLayout {
+                padding: Space.sm;
+                ListView {
+                    for item in root.disabled_entries : Rectangle {
+                        height: 42px;
+                        border-radius: Shape.xs;
+                        background: item.selected
+                            ? M3.primary.transparentize(0.85)
+                            : (dis_touch.has-hover ? M3.surface_container_high : transparent);
+                        dis_touch := TouchArea {
+                            clicked => { root.toggle_disabled_selection(item.path_str); }
+                        }
+                        HorizontalLayout {
+                            padding-left: Space.sm;
+                            padding-right: Space.sm;
+                            spacing: Space.sm;
+                            alignment: center;
+                            Icon {
+                                glyph: item.selected ? Ic.checkbox_on : Ic.checkbox_off;
+                                font-size: 15px;
+                                color: item.selected ? M3.primary : M3.outline;
+                            }
                             VerticalLayout {
-                                padding: 8px;
-                                alignment: start;
-                                for item in root.confirm_items : Text {
-                                    text: item;
-                                    font-size: 12px;
-                                    color: Theme.text_secondary;
+                                horizontal-stretch: 1;
+                                alignment: center;
+                                Text {
+                                    // Um registro órfão aponta para um arquivo que já não
+                                    // existe: restaurar não tem o que mover.
+                                    text: item.name;
+                                    font-size: Type.body_m;
+                                    color: item.missing ? M3.warning : M3.on_surface;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: item.note == "" ? item.reason : item.reason + " — " + item.note;
+                                    font-size: Type.label_s;
+                                    color: M3.outline;
                                     overflow: elide;
                                 }
                             }
                         }
                     }
-
-                    HorizontalLayout {
-                        spacing: 8px;
-                        PrimaryButton {
-                            text: I18n.tr("Cancelar");
-                            btn_color: Theme.surface_header;
-                            hover_color: Theme.surface_hover;
-                            clicked => { root.cancel_action(); }
-                        }
-                        PrimaryButton {
-                            text: I18n.tr("Confirmar Exclusão");
-                            btn_color: Theme.danger;
-                            clicked => { root.confirm_action(); }
-                        }
-                    }
                 }
             }
         }
 
-        // Diálogo de texto: nova pasta e renomear.
-        if root.show_input_dialog : Rectangle {
-            width: 100%; height: 100%;
-            background: #000000.transparentize(0.4);
-            TouchArea {}
-
-            Card {
-                width: 460px;
-                VerticalLayout {
-                    padding: 24px; spacing: 16px;
-                    Text { text: root.input_title; font-size: 18px; font-weight: 700; color: Theme.text_primary; }
-
-                    name_input := LineEdit {
-                        placeholder-text: root.input_placeholder;
-                        text: root.input_initial;
-                        accepted => { root.confirm_input(self.text); }
-                    }
-
-                    HorizontalLayout {
-                        spacing: 8px;
-                        PrimaryButton {
-                            text: I18n.tr("Cancelar");
-                            btn_color: Theme.surface_header;
-                            hover_color: Theme.surface_hover;
-                            clicked => { root.cancel_input(); }
-                        }
-                        PrimaryButton {
-                            text: I18n.tr("Confirmar");
-                            enabled: name_input.text != "";
-                            clicked => { root.confirm_input(name_input.text); }
-                        }
-                    }
-                }
+        HorizontalLayout {
+            spacing: Space.sm;
+            Button {
+                text: I18n.tr("Fechar");
+                kind: ButtonKind.text;
+                clicked => { root.close_disabled_panel(); }
             }
-        }
-
-        // Escolha do destino de mover/copiar: só pastas dentro de Mods.
-        if root.show_folder_picker : Rectangle {
-            width: 100%; height: 100%;
-            background: #000000.transparentize(0.4);
-            TouchArea {}
-
-            Card {
-                width: 560px;
-                VerticalLayout {
-                    padding: 24px; spacing: 16px;
-                    Text { text: root.folder_picker_title; font-size: 18px; font-weight: 700; color: Theme.text_primary; }
-                    Text {
-                        text: I18n.tr("Escolha a pasta de destino:");
-                        font-size: 13px;
-                        color: Theme.text_secondary;
-                    }
-
-                    Rectangle {
-                        height: 280px;
-                        background: Theme.background;
-                        border-radius: 6px;
-                        ScrollView {
-                            VerticalLayout {
-                                padding: 8px;
-                                alignment: start;
-                                for choice in root.folder_choices : Rectangle {
-                                    height: 32px;
-                                    border-radius: 4px;
-                                    background: pick_touch.has-hover ? Theme.surface_hover : transparent;
-                                    pick_touch := TouchArea {
-                                        clicked => { root.folder_picked(choice.path_str); }
-                                    }
-                                    HorizontalLayout {
-                                        padding-left: 8px;
-                                        alignment: center;
-                                        Text {
-                                            text: "📁 " + choice.label;
-                                            font-size: 12px;
-                                            color: Theme.text_primary;
-                                            horizontal-stretch: 1;
-                                            vertical-alignment: center;
-                                            overflow: elide;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    PrimaryButton {
-                        text: I18n.tr("Cancelar");
-                        btn_color: Theme.surface_header;
-                        hover_color: Theme.surface_hover;
-                        clicked => { root.cancel_folder_pick(); }
-                    }
-                }
+            Rectangle { horizontal-stretch: 1; }
+            Button {
+                text: I18n.tr("Restaurar Selecionados");
+                icon_str: Ic.arrow_right;
+                kind: ButtonKind.filled;
+                enabled: root.disabled_selected_count > 0;
+                clicked => { root.restore_selected_disabled(); }
             }
-        }
-
-        // Painel de desativados: restaurar ou excluir de vez, em lote.
-        if root.show_disabled_panel : Rectangle {
-            width: 100%; height: 100%;
-            background: #000000.transparentize(0.4);
-            TouchArea {}
-
-            Card {
-                width: 640px;
-                VerticalLayout {
-                    padding: 24px; spacing: 16px;
-                    Text {
-                        text: I18n.tr("🚫 Mods Desativados");
-                        font-size: 18px;
-                        font-weight: 700;
-                        color: Theme.text_primary;
-                    }
-
-                    if root.disabled_entries.length == 0 : Text {
-                        text: I18n.tr("Nenhum mod desativado no momento.");
-                        font-size: 13px;
-                        color: Theme.text_muted;
-                    }
-
-                    if root.disabled_entries.length > 0 : Rectangle {
-                        height: 300px;
-                        background: Theme.background;
-                        border-radius: 6px;
-                        ScrollView {
-                            VerticalLayout {
-                                padding: 8px;
-                                alignment: start;
-                                for item in root.disabled_entries : Rectangle {
-                                    height: 40px;
-                                    border-radius: 4px;
-                                    background: item.selected
-                                        ? Theme.primary_color.transparentize(0.7)
-                                        : (dis_touch.has-hover ? Theme.surface_hover : transparent);
-                                    dis_touch := TouchArea {
-                                        clicked => { root.toggle_disabled_selection(item.path_str); }
-                                    }
-                                    HorizontalLayout {
-                                        padding-left: 8px;
-                                        padding-right: 8px;
-                                        spacing: 8px;
-                                        alignment: center;
-                                        Text {
-                                            text: item.selected ? "☑" : "☐";
-                                            font-size: 14px;
-                                            color: item.selected ? Theme.accent_color : Theme.text_muted;
-                                            vertical-alignment: center;
-                                        }
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            Text {
-                                                // Um registro órfão aponta para
-                                                // um arquivo que já não existe:
-                                                // restaurar não tem o que mover.
-                                                text: item.missing ? "⚠️ " + item.name : item.name;
-                                                font-size: 13px;
-                                                color: item.missing ? Theme.warning : Theme.text_primary;
-                                                overflow: elide;
-                                            }
-                                            Text {
-                                                text: item.note == "" ? item.reason : item.reason + " — " + item.note;
-                                                font-size: 11px;
-                                                color: Theme.text_muted;
-                                                overflow: elide;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    HorizontalLayout {
-                        spacing: 8px;
-                        PrimaryButton {
-                            text: I18n.tr("Fechar");
-                            btn_color: Theme.surface_header;
-                            hover_color: Theme.surface_hover;
-                            clicked => { root.close_disabled_panel(); }
-                        }
-                        Rectangle { horizontal-stretch: 1; }
-                        PrimaryButton {
-                            text: I18n.tr("🟢 Restaurar Selecionados");
-                            enabled: root.disabled_selected_count > 0;
-                            clicked => { root.restore_selected_disabled(); }
-                        }
-                        PrimaryButton {
-                            text: I18n.tr("🗑️ Excluir Definitivamente");
-                            enabled: root.disabled_selected_count > 0;
-                            btn_color: Theme.danger;
-                            hover_color: Theme.danger.darker(0.2);
-                            clicked => { root.delete_selected_disabled(); }
-                        }
-                    }
-                }
+            Button {
+                text: I18n.tr("Excluir Definitivamente");
+                icon_str: Ic.trash;
+                kind: ButtonKind.danger;
+                enabled: root.disabled_selected_count > 0;
+                clicked => { root.delete_selected_disabled(); }
             }
         }
     }

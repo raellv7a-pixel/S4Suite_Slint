@@ -1,0 +1,109 @@
+import { M3 } from "../theme/colors.slint";
+import { Motion } from "../theme/motion.slint";
+import { Type, Shape } from "../theme/typography.slint";
+import { Icon, Ic } from "icon.slint";
+import { StateLayer } from "state_layer.slint";
+
+/// Chip de filtro do Material Design 3: escolha exclusiva dentro de um grupo.
+///
+/// Tema, idioma, limite do merger e pós-ação da unificação eram botões comuns pintados à mão com
+/// `btn_color: ativo ? cor : outra`. Além de repetir a lógica em quatro lugares, um botão não diz
+/// que faz parte de um grupo — um chip diz, e o *check* que entra da esquerda deixa a seleção
+/// legível mesmo sem cor (daltonismo, tema de baixo contraste).
+export component FilterChip inherits Rectangle {
+    in property <string> text;
+    in property <string> icon_str: "";
+    in property <bool> selected: false;
+    in property <bool> enabled: true;
+    /// Cor do ponto à esquerda quando o chip representa uma cor (seletor de tema).
+    in property <color> swatch: #00000000;
+    // `transparent` é aceito como valor mas não como operando de comparação em Slint, daí a
+    // comparação contra o literal.
+    property <bool> tem_swatch: root.swatch != #00000000;
+
+    callback clicked();
+
+    property <color> content_color:
+        !root.enabled ? M3.on_surface.transparentize(0.62)
+        : root.selected ? M3.on_primary_container
+        : M3.on_surface_variant;
+
+    height: 36px;
+    border-radius: Shape.sm;
+    background: root.selected ? M3.primary_container : transparent;
+    border-width: 1px;
+    border-color: root.selected
+        ? transparent
+        : (root.enabled ? M3.outline_variant : M3.on_surface.transparentize(0.88));
+
+    animate background, border-color { duration: Motion.short4; easing: Motion.emphasized; }
+
+    Rectangle {
+        border-radius: parent.border-radius;
+        clip: true;
+        StateLayer {
+            tint: root.content_color;
+            hovered: touch.has-hover && root.enabled;
+            pressed: touch.pressed && root.enabled;
+            focused: fs.has-focus && root.enabled;
+        }
+    }
+
+    fs := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            fs.focus();
+            root.clicked();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 16px;
+        spacing: 8px;
+        alignment: center;
+
+        // O check só ocupa espaço quando existe: sem isto, todo chip carregaria um vão à esquerda
+        // e o grupo ficaria com um buraco desalinhado.
+        if root.selected: Icon {
+            glyph: Ic.check;
+            font-size: 16px;
+            color: root.content_color;
+        }
+
+        if !root.selected && root.tem_swatch: Rectangle {
+            width: 12px;
+            height: 12px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 6px;
+            background: root.swatch;
+        }
+
+        if !root.selected && !root.tem_swatch && root.icon_str != "": Icon {
+            glyph: root.icon_str;
+            font-size: 16px;
+            color: root.content_color;
+        }
+
+        Text {
+            text: root.text;
+            font-size: Type.label_l;
+            font-weight: Type.label_l_w;
+            color: root.content_color;
+            vertical-alignment: center;
+            overflow: elide;
+            animate color { duration: Motion.medium2; easing: Motion.standard; }
+        }
+    }
+}

@@ -22,6 +22,9 @@ pub struct MergeTask {
     pub input_files: Vec<PathBuf>,
     pub output_dir: PathBuf,
     pub max_size_bytes: u64,
+    /// Nome do grupo, como o usuário o vê na fila. Vira o prefixo dos arquivos
+    /// gerados — `None` cai no nome genérico com timestamp.
+    pub name: Option<String>,
 }
 
 pub fn merge_sims4_packages<F>(
@@ -45,7 +48,11 @@ where
         });
     }
 
-    let timestamp = chrono_like_timestamp();
+    // O prefixo é resolvido **antes** de escrever qualquer parte: duas tarefas
+    // da fila que terminam no mesmo segundo produziam o mesmo nome, e a segunda
+    // gravava por cima da primeira — com os originais já consumidos pela
+    // pós-ação, o conteúdo da primeira ia embora sem nenhum erro na tela.
+    let stem = unique_output_stem(&task.output_dir, task.name.as_deref());
     let mut global_resources: IndexMap<ResourceKey, (PathBuf, u32, u32, u32, u16)> = IndexMap::new();
     let mut failed_files = Vec::new();
     let mut success_count = 0;
@@ -132,7 +139,7 @@ where
 
         let res_len = data.len() as u64;
         if current_chunk_bytes + res_len > safe_limit && !current_chunk_resources.is_empty() {
-            let part_name = format!("Merged_Content_{}_Part{:03}.package", timestamp, chunk_index);
+            let part_name = format!("{}_Part{:03}.package", stem, chunk_index);
             let part_path = task.output_dir.join(&part_name);
             write_package_chunk(&part_path, &current_chunk_resources)?;
             output_packages.push(part_path.display().to_string());
@@ -152,7 +159,7 @@ where
     }
 
     if !current_chunk_resources.is_empty() {
-        let part_name = format!("Merged_Content_{}_Part{:03}.package", timestamp, chunk_index);
+        let part_name = format!("{}_Part{:03}.package", stem, chunk_index);
         let part_path = task.output_dir.join(&part_name);
         write_package_chunk(&part_path, &current_chunk_resources)?;
         output_packages.push(part_path.display().to_string());
@@ -167,7 +174,9 @@ where
         output_packages,
     };
 
-    let report_path = task.output_dir.join("merge_report.json");
+    // O relatório acompanha as partes: um `merge_report.json` fixo era
+    // sobrescrito pela tarefa seguinte, apagando o registro da anterior.
+    let report_path = task.output_dir.join(format!("{}_report.json", stem));
     if let Ok(json) = serde_json::to_string_pretty(&report) {
         let _ = fs::write(report_path, json);
     }
@@ -250,6 +259,7 @@ where
             input_files: job.input_files.clone(),
             output_dir: job.output_dir.clone(),
             max_size_bytes: job.max_size_bytes,
+            name: Some(job.name.clone()),
         };
 
         let result = merge_sims4_packages(&task, |current, total, text| {
@@ -454,6 +464,43 @@ fn chrono_like_timestamp() -> String {
     format!("{}", now.as_secs())
 }
 
+/// Deixa o nome do grupo utilizável como nome de arquivo, sem descaracterizá-lo.
+///
+/// Só os separadores de caminho e os controles saem; acento, espaço e emoji
+/// ficam, porque é assim que o usuário nomeou a pasta de onde os packages vieram.
+fn sanitize_stem(raw: &str) -> String {
+    let limpo: String = raw
+        .chars()
+        .map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { '_' } else { c })
+        .collect();
+    limpo.trim().trim_matches('_').trim().to_string()
+}
+
+/// Prefixo livre para os arquivos desta unificação dentro de `output_dir`.
+///
+/// Um merge produz `<prefixo>_PartNNN.package` e `<prefixo>_report.json`; o
+/// prefixo precisa ser único **antes** da primeira parte ser escrita, senão uma
+/// tarefa sobrescreve o resultado de outra que foi para a mesma pasta.
+fn unique_output_stem(output_dir: &Path, name: Option<&str>) -> String {
+    let base = name
+        .map(sanitize_stem)
+        .filter(|s| !s.is_empty())
+        .map(|s| format!("{}_Merged", s))
+        .unwrap_or_else(|| format!("Merged_Content_{}", chrono_like_timestamp()));
+
+    let livre = |stem: &str| !output_dir.join(format!("{}_Part001.package", stem)).exists();
+    if livre(&base) {
+        return base;
+    }
+    for n in 2..1000 {
+        let tentativa = format!("{}_{}", base, n);
+        if livre(&tentativa) {
+            return tentativa;
+        }
+    }
+    format!("{}_{}", base, chrono_like_timestamp())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -498,6 +545,7 @@ mod tests {
             input_files: vec![pkg1_path, pkg2_path],
             output_dir: out_dir.clone(),
             max_size_bytes: 1_000_000_000,
+            name: None,
         };
 
         let report = merge_sims4_packages(&task, |_, _, _| {}).unwrap();

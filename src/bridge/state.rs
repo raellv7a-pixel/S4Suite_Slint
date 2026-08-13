@@ -1,12 +1,12 @@
 use crate::engine::disabled::DisabledManager;
 use crate::engine::installer::ConflictReport;
 use crate::engine::merger::{JobStatus, PostMergeAction};
-use crate::engine::organizer::{DuplicateGroup, TransferMode};
+use crate::engine::organizer::{DuplicateGroup, ScriptDepthIssue, TransferMode};
 use crate::engine::tray::{TrayImportCandidate, TRAY_WORK_DIR};
 use parking_lot::Mutex;
 use std::path::{Path, PathBuf};
 
-/// Ação destrutiva do organizador aguardando confirmação do usuário.
+/// Ação do organizador que mexe em arquivos do usuário e aguarda confirmação.
 ///
 /// Guardamos a lista já resolvida em vez de recalculá-la depois do "confirmar":
 /// entre a análise e a confirmação o disco pode mudar, e o usuário precisa
@@ -18,6 +18,10 @@ pub enum PendingOrganizerAction {
     DeleteSelection(Vec<PathBuf>),
     /// Exclusão definitiva de mods que estavam apenas desativados.
     DeleteDisabled(Vec<PathBuf>),
+    /// Realocação de scripts fundos demais para o jogo carregar. Não apaga
+    /// nada, mas tira arquivos de onde o autor do mod os pôs — o usuário
+    /// precisa ver a lista antes.
+    FixScriptDepth(Vec<ScriptDepthIssue>),
 }
 
 /// Para que serve o texto que o usuário está digitando no diálogo.

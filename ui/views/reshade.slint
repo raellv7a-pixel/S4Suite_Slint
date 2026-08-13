@@ -1,7 +1,12 @@
 import { I18n } from "../i18n.slint";
 import { Theme } from "../palette.slint";
-import { Card } from "../components/card.slint";
-import { PrimaryButton } from "../components/button.slint";
+import { Card, CardKind } from "../components/card.slint";
+import { Button, ButtonKind } from "../components/button.slint";
+import { M3 } from "../theme/colors.slint";
+import { Type, Space } from "../theme/typography.slint";
+import { Icon, Ic } from "../components/icon.slint";
+import { StatusBar } from "../components/status_bar.slint";
+import { ViewHeader } from "../components/view_header.slint";
 
 export component ReshadeView inherits Rectangle {
     in property <string> env_type: "GENERIC";
@@ -23,33 +28,55 @@ export component ReshadeView inherits Rectangle {
         padding: 24px;
         spacing: 16px;
 
-        Text {
-            text: I18n.tr("🔮 Gerenciador ReShade (Linux Edition)");
-            font-size: 22px;
-            font-weight: 800;
-            color: Theme.text_primary;
+        ViewHeader {
+            icon_str: Ic.sparkles;
+            title: I18n.tr("Gerenciador ReShade (Linux Edition)");
         }
 
-        // Environment Detector Banner
+        // Ambiente detectado e a variável que o usuário precisa colar no Steam. É o dado que
+        // ele veio buscar; fica acima das ações.
         Card {
-            height: 100px;
-            border-color: Theme.accent_color;
-
+            kind: CardKind.outlined;
             VerticalLayout {
-                padding: 16px;
-                spacing: 8px;
+                padding: Space.lg;
+                spacing: Space.sm;
+
                 HorizontalLayout {
-                    Text { text: I18n.tr("🐧 Detector de Ambiente Linux: "); font-size: 14px; font-weight: 700; color: Theme.text_primary; }
-                    Text { text: root.env_type; font-size: 14px; font-weight: 800; color: Theme.accent_color; }
+                    spacing: Space.sm;
+                    Icon { glyph: Ic.desktop; font-size: 16px; color: M3.on_surface_variant; }
+                    Text {
+                        text: I18n.tr("Ambiente detectado:");
+                        font-size: Type.body_m;
+                        font-weight: 600;
+                        color: M3.on_surface_variant;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: root.env_type;
+                        font-size: Type.body_m;
+                        font-weight: 800;
+                        color: M3.primary;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
                 }
+
                 HorizontalLayout {
-                    spacing: 8px;
+                    spacing: Space.sm;
                     alignment: center;
-                    Text { text: root.env_command; font-size: 13px; font-weight: 600; color: Theme.info; horizontal-stretch: 1; vertical-alignment: center; }
-                    PrimaryButton {
-                        text: I18n.tr("📋 Copiar Comando");
-                        btn_color: Theme.surface_header;
-                        hover_color: Theme.surface_hover;
+                    Text {
+                        text: root.env_command;
+                        font-size: Type.body_s;
+                        font-weight: 600;
+                        color: M3.info;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    Button {
+                        text: I18n.tr("Copiar Comando");
+                        icon_str: Ic.clipboard;
+                        kind: ButtonKind.outlined;
                         clicked => { root.copy_command_clicked(); }
                     }
                 }
@@ -73,10 +100,15 @@ export component ReshadeView inherits Rectangle {
                 // ter instalado o ReShade por fora ou apagado a DLL na mão.
                 HorizontalLayout {
                     spacing: 8px;
+                    Icon {
+                        glyph: Ic.circle_dot;
+                        font-size: 14px;
+                        color: root.is_installed ? Theme.success : Theme.text_muted;
+                    }
                     Text {
                         text: root.is_installed
-                            ? "🟢 " + I18n.tr("ReShade instalado") + " (" + root.injected_dll + ")"
-                            : "⚪ " + I18n.tr("ReShade não instalado");
+                            ? I18n.tr("ReShade instalado") + " (" + root.injected_dll + ")"
+                            : I18n.tr("ReShade não instalado");
                         font-size: 13px;
                         font-weight: 600;
                         color: root.is_installed ? Theme.success : Theme.text_muted;
@@ -93,49 +125,36 @@ export component ReshadeView inherits Rectangle {
 
                 HorizontalLayout {
                     spacing: 12px;
-                    PrimaryButton {
+                    Button {
+                        kind: ButtonKind.filled;
                         text: root.is_busy
-                            ? I18n.tr("⏳ Baixando e injetando...")
+                            ? I18n.tr("Baixando e injetando...")
                             : (root.is_installed
-                                ? I18n.tr("🔄 Reinstalar ReShade (5.9.2)")
-                                : I18n.tr("✨ Instalar ReShade (5.9.2 Stable)"));
-                        icon_str: "✨";
+                                ? I18n.tr("Reinstalar ReShade (5.9.2)")
+                                : I18n.tr("Instalar ReShade (5.9.2 Stable)"));
+                        icon_str: Ic.wand;
                         enabled: !root.is_busy;
-                        btn_color: Theme.primary_color;
-                        hover_color: Theme.primary_hover;
                         clicked => { root.install_reshade_clicked(); }
                     }
-                    PrimaryButton {
-                        text: I18n.tr("📦 Instalar Preset (.zip)");
-                        icon_str: "📦";
+                    Button {
+                        text: I18n.tr("Instalar Preset (.zip)");
+                        icon_str: Ic.package;
                         // Preset sem ReShade instalado não tem o que carregar.
                         enabled: root.is_installed && !root.is_busy;
-                        btn_color: Theme.surface_header;
-                        hover_color: Theme.surface_hover;
                         clicked => { root.install_preset_clicked(); }
                     }
-                    PrimaryButton {
-                        text: I18n.tr("🗑️ Desinstalar ReShade");
-                        icon_str: "🗑️";
+                    Button {
+                        kind: ButtonKind.danger;
+                        text: I18n.tr("Desinstalar ReShade");
+                        icon_str: Ic.trash;
                         enabled: root.is_installed && !root.is_busy;
-                        btn_color: Theme.danger;
-                        hover_color: Theme.danger.darker(0.2);
                         clicked => { root.uninstall_reshade_clicked(); }
                     }
                 }
             }
         }
 
-        // Status Card
-        Card {
-            height: 40px;
-            HorizontalLayout {
-                padding-left: 16px;
-                padding-right: 16px;
-                alignment: center;
-                Text { text: root.reshade_status; font-size: 13px; color: Theme.info; vertical-alignment: center; }
-            }
-        }
+        StatusBar { text: root.reshade_status; }
 
         Rectangle { vertical-stretch: 1; }
     }

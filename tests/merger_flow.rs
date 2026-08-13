@@ -75,6 +75,7 @@ fn merge_reune_recursos_de_varios_packages_em_um_so() {
         input_files: fx.inputs(),
         output_dir: fx.output_dir.clone(),
         max_size_bytes: 1024 * 1024 * 1024,
+        name: None,
     };
     let report = merge_sims4_packages(&task, |_, _, _| {}).unwrap();
 
@@ -98,6 +99,7 @@ fn merge_divide_em_partes_ao_estourar_o_limite_de_tamanho() {
         input_files: fx.inputs(),
         output_dir: fx.output_dir.clone(),
         max_size_bytes: 200 * 1024,
+        name: None,
     };
     let report = merge_sims4_packages(&task, |_, _, _| {}).unwrap();
 
@@ -117,6 +119,7 @@ fn merge_reporta_progresso_ate_o_fim() {
         input_files: fx.inputs(),
         output_dir: fx.output_dir.clone(),
         max_size_bytes: 1024 * 1024 * 1024,
+        name: None,
     };
     merge_sims4_packages(&task, |cur, total, _| {
         ticks.lock().unwrap().push((cur, total));
@@ -144,6 +147,7 @@ fn arquivo_corrompido_nao_impede_o_merge_dos_demais() {
         input_files: fx.inputs(),
         output_dir: fx.output_dir.clone(),
         max_size_bytes: 1024 * 1024 * 1024,
+        name: None,
     };
     let report = merge_sims4_packages(&task, |_, _, _| {}).unwrap();
 
@@ -404,4 +408,82 @@ fn progresso_da_fila_identifica_a_tarefa_de_origem() {
     // Sem o índice, a barra de progresso da UI não saberia de qual tarefa é o
     // avanço que está recebendo.
     assert!(vistos.contains(&0) && vistos.contains(&1));
+}
+
+/// Duas tarefas para a mesma pasta não podem gravar uma por cima da outra.
+///
+/// O nome de saída era `Merged_Content_<segundos>_PartNNN`: numa fila rápida as
+/// duas tarefas caíam no mesmo segundo, a segunda sobrescrevia a primeira e o
+/// conteúdo dela sumia — sem erro na tela, e com os originais já consumidos pela
+/// pós-ação.
+#[test]
+fn duas_tarefas_no_mesmo_destino_nao_se_sobrescrevem() {
+    let fx = Fixture::new();
+    let grupo_a = fx.input_dir.join("Cabelos");
+    let grupo_b = fx.input_dir.join("Roupas");
+    write_package(&grupo_a.join("a1.package"), &[1, 2], 400);
+    write_package(&grupo_a.join("a2.package"), &[3], 400);
+    write_package(&grupo_b.join("b1.package"), &[10, 11, 12], 400);
+
+    let jobs = vec![
+        MergeJob {
+            name: "Cabelos".to_string(),
+            input_files: vec![grupo_a.join("a1.package"), grupo_a.join("a2.package")],
+            output_dir: fx.output_dir.clone(),
+            max_size_bytes: 1024 * 1024 * 1024,
+            post_action: PostMergeAction::Keep,
+        },
+        MergeJob {
+            name: "Roupas".to_string(),
+            input_files: vec![grupo_b.join("b1.package")],
+            output_dir: fx.output_dir.clone(),
+            max_size_bytes: 1024 * 1024 * 1024,
+            post_action: PostMergeAction::Keep,
+        },
+    ];
+
+    let outcomes = run_merge_queue(&jobs, &fx.manager(), |_, _| {}, |_, _, _, _| {});
+    assert!(outcomes.iter().all(|o| o.status == JobStatus::Done));
+
+    let gerados: Vec<PathBuf> = fs::read_dir(&fx.output_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().map(|x| x == "package").unwrap_or(false))
+        .collect();
+    assert_eq!(gerados.len(), 2, "cada tarefa precisa do seu próprio arquivo: {:?}", gerados);
+
+    let total: usize = gerados
+        .iter()
+        .map(|p| {
+            let mut f = File::open(p).unwrap();
+            DBPFReader::read_index(&mut f).unwrap().1.len()
+        })
+        .sum();
+    assert_eq!(total, 6, "os 6 recursos das duas tarefas precisam sobreviver");
+
+    assert!(fx.output_dir.join("Cabelos_Merged_Part001.package").exists());
+    assert!(fx.output_dir.join("Roupas_Merged_Part001.package").exists());
+    assert!(fx.output_dir.join("Cabelos_Merged_report.json").exists());
+    assert!(fx.output_dir.join("Roupas_Merged_report.json").exists());
+}
+
+/// Unificar o mesmo grupo duas vezes preserva o resultado anterior.
+#[test]
+fn merge_repetido_do_mesmo_grupo_nao_apaga_o_anterior() {
+    let fx = Fixture::new();
+    write_package(&fx.input_dir.join("a.package"), &[1, 2], 300);
+
+    let task = |n: &str| MergeTask {
+        input_files: fx.inputs(),
+        output_dir: fx.output_dir.clone(),
+        max_size_bytes: 1024 * 1024 * 1024,
+        name: Some(n.to_string()),
+    };
+    merge_sims4_packages(&task("Cabelos"), |_, _, _| {}).unwrap();
+    let segundo = merge_sims4_packages(&task("Cabelos"), |_, _, _| {}).unwrap();
+
+    assert!(fx.output_dir.join("Cabelos_Merged_Part001.package").exists());
+    assert!(fx.output_dir.join("Cabelos_Merged_2_Part001.package").exists());
+    assert!(segundo.output_packages[0].contains("Cabelos_Merged_2"));
 }

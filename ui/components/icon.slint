@@ -1,0 +1,22 @@
+import { M3 } from "../theme/colors.slint";
+import { Motion } from "../theme/motion.slint";
+import { Ic } from "../theme/icons.slint";
+
+export { Ic }
+
+/// Um glifo da fonte Tabler, tingível pelo tema.
+///
+/// A cor anima junto com a troca de tema — sem isso, os ícones eram a única coisa que pulava de
+/// um esquema para o outro enquanto o resto da tela escorria.
+export component Icon inherits Text {
+    in property <string> glyph;
+
+    text: root.glyph;
+    font-family: Ic.font;
+    font-size: 18px;
+    color: M3.on_surface_variant;
+    vertical-alignment: center;
+    horizontal-alignment: center;
+
+    animate color { duration: Motion.medium2; easing: Motion.standard; }
+}

@@ -65,8 +65,16 @@ impl Fixture {
 
 #[test]
 fn identidade_de_mod_normaliza_nome_do_arquivo() {
-    assert_eq!(install_identity_name(Path::new("Meu Mod v2.1.zip")), "meu_mod_v2_1");
-    assert_eq!(install_identity_name(Path::new("/tmp/UI-Cheats.package")), "ui_cheats");
+    // O nome vira pasta dentro de Mods e o usuário o lê na árvore: preserva
+    // acento, espaço e maiúscula, e só tira o que não pode estar num nome de
+    // arquivo.
+    assert_eq!(install_identity_name(Path::new("Meu Mod v2.1.zip")), "Meu Mod v2.1");
+    assert_eq!(install_identity_name(Path::new("/tmp/UI-Cheats.package")), "UI-Cheats");
+    assert_eq!(
+        install_identity_name(Path::new("Mod X — Tradução PT-BR.package")),
+        "Mod X — Tradução PT-BR"
+    );
+    assert_eq!(install_identity_name(Path::new("mod:teste*final.zip")), "mod_teste_final");
     assert_eq!(install_identity_name(Path::new("___.zip")), "mod");
 }
 
@@ -95,7 +103,7 @@ fn zip_e_extraido_para_o_staging_sob_a_identidade_do_mod() {
 
     assert_eq!(report.prepared, 1);
     assert!(report.failures.is_empty());
-    assert!(fx.staging().join("cool_mod/CoolMod/cool.package").exists());
+    assert!(fx.staging().join("Cool Mod/CoolMod/cool.package").exists());
 }
 
 #[test]
@@ -106,7 +114,7 @@ fn package_avulso_tambem_entra_no_staging() {
 
     prepare_staging(&[loose], &fx.staging()).unwrap();
 
-    assert!(fx.staging().join("ui_cheats/UI Cheats.package").exists());
+    assert!(fx.staging().join("UI Cheats/UI Cheats.package").exists());
 }
 
 #[test]
@@ -202,7 +210,7 @@ fn instalacao_organiza_packages_e_mantem_scripts_rasos() {
     // .package preserva a estrutura interna do arquivo compactado.
     assert!(fx
         .managed()
-        .join("pacote_completo/mod/texturas/skin.package")
+        .join("Pacote Completo/mod/texturas/skin.package")
         .exists());
 
     // .ts4script fica em Mods/00_Triagem_Novos/ — o jogo só carrega scripts até
@@ -359,4 +367,58 @@ fn mod_sem_dependencia_nao_inventa_nenhuma() {
     let report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
 
     assert!(collect_dependencies(&report.staged_files).is_empty());
+}
+
+/// A marca de dependência só existe **dentro** do recurso, comprimida.
+///
+/// Este é o caso do mundo real: num `.package` de verdade os recursos vêm em
+/// zlib, e a varredura dos bytes crus — que é o que o app fazia — não acha nada.
+/// Medido contra a pasta `Mods` real: 0 acertos em 1569 packages nos bytes
+/// crus, e o mod que de fato exige Lot51 aparece assim que se descomprime.
+#[test]
+fn dependencia_e_encontrada_dentro_de_recurso_comprimido() {
+    use flate2::write::ZlibEncoder;
+    use flate2::Compression;
+    use s4suite::engine::dbpf::{DBPFWriter, PackageResource, ResourceKey};
+
+    let fx = Fixture::new();
+    // Uma tuning real tem centenas de linhas repetitivas; num texto curto o
+    // deflate emite quase tudo literal e a marca sobreviveria por acaso,
+    // fazendo o teste passar pelo motivo errado.
+    let mut tuning: Vec<u8> = Vec::new();
+    for i in 0..200 {
+        tuning.extend_from_slice(
+            format!("<T n=\"parametro_{}\">valor padrao de teste</T>\n", i % 7).as_bytes(),
+        );
+    }
+    tuning.extend_from_slice(br#"<I c="Interaction" m="Lot51:core.interactions">"#);
+    let tuning = tuning;
+
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+    encoder.write_all(&tuning).unwrap();
+    let comprimido = encoder.finish().unwrap();
+
+    let recurso = PackageResource {
+        key: ResourceKey { type_id: 0x03B33DDF, group_id: 0, instance_ex: 0, instance_low: 7 },
+        data: comprimido,
+        mem_size: tuning.len() as u32,
+        compressed: 0x5A42,
+    };
+
+    let pacote = fx.downloads.join("MeuMod.package");
+    let mut f = fs::File::create(&pacote).unwrap();
+    DBPFWriter::write_package(&mut f, &[recurso]).unwrap();
+    drop(f);
+
+    // O que o app fazia antes: procurar no arquivo cru.
+    let cru = fs::read(&pacote).unwrap();
+    assert!(
+        s4suite::engine::installer::detect_dependencies(&cru).is_empty(),
+        "o teste perdeu o sentido: a marca ficou legível sem descomprimir"
+    );
+
+    assert_eq!(
+        s4suite::engine::installer::detect_dependencies_in_package(&pacote),
+        vec!["Lot51 Core Library"]
+    );
 }

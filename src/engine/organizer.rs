@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 /// Caracteres que não podem entrar num nome de arquivo ou pasta. Mesma lista do
 /// `organizer_tab.py`: o app roda no Linux, mas a pasta `Mods` costuma ser
 /// compartilhada com instalações Windows via drive comum.
-const FORBIDDEN_NAME_CHARS: [char; 9] = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
+pub const FORBIDDEN_NAME_CHARS: [char; 9] = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
 
 #[derive(Debug, thiserror::Error)]
 pub enum OrganizerError {

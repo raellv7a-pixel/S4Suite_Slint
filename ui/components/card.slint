@@ -1,8 +1,79 @@
-import { Theme } from "../palette.slint";
+import { M3 } from "../theme/colors.slint";
+import { Motion } from "../theme/motion.slint";
+import { Shape, Elevation } from "../theme/typography.slint";
+import { StateLayer } from "state_layer.slint";
 
+export enum CardKind {
+    /// Superfície de conteúdo padrão. Sem borda, sem sombra.
+    filled,
+    /// Ganha sombra em repouso. Para o que precisa flutuar sobre o resto.
+    elevated,
+    /// Borda em vez de preenchimento. Para agrupar sem competir por atenção.
+    outlined,
+}
+
+/// Card Material Design 3.
+///
+/// O `Card` anterior era um `Rectangle` com raio 12 e borda de 1px — o mesmo peso visual do
+/// banner de boas-vindas ao rodapé de status, o que deixava a tela inteira chapada. Aqui a
+/// hierarquia vem dos níveis de superfície (`surface_container_*`), e a elevação só entra quando
+/// o card é interativo, animada por estado.
 export component Card inherits Rectangle {
-    background: Theme.surface;
-    border-radius: 12px;
-    border-color: Theme.border_color;
-    border-width: 1px;
+    in property <CardKind> kind: CardKind.filled;
+    /// Liga hover, ripple de estado e elevação. Um card não-interativo não deve reagir ao mouse.
+    in property <bool> interactive: false;
+    in property <bool> selected: false;
+
+    callback clicked();
+
+    /// Exposto para quem herda o card (ex.: `StatCard`) poder reagir ao ponteiro sem declarar
+    /// uma segunda `TouchArea` que roubaria os eventos desta.
+    out property <bool> hovered: touch.has-hover;
+
+    background: root.kind == CardKind.elevated ? M3.surface_container_low : M3.surface_container;
+    border-radius: Shape.md;
+    border-width: root.kind == CardKind.outlined ? 1px : 0px;
+    border-color: root.selected ? M3.primary : M3.outline_variant;
+
+    drop-shadow-color: M3.shadow_soft;
+
+    // Entrada mais lenta que a saída: é o que faz o card "subir" e "assentar" em vez de piscar.
+    states [
+        pressionado when root.interactive && touch.pressed: {
+            root.drop-shadow-blur: Elevation.l1;
+            root.drop-shadow-offset-y: 1px;
+            in { animate drop-shadow-blur, drop-shadow-offset-y { duration: Motion.short2; easing: Motion.standard; } }
+        }
+        sobre when root.interactive && touch.has-hover: {
+            root.drop-shadow-blur: Elevation.l3;
+            root.drop-shadow-offset-y: 6px;
+            in { animate drop-shadow-blur, drop-shadow-offset-y { duration: Motion.short4; easing: Motion.emphasized; } }
+            out { animate drop-shadow-blur, drop-shadow-offset-y { duration: Motion.short2; easing: Motion.standard; } }
+        }
+        repouso when true: {
+            root.drop-shadow-blur: root.kind == CardKind.elevated ? Elevation.l1 : Elevation.l0;
+            root.drop-shadow-offset-y: root.kind == CardKind.elevated ? 1px : 0px;
+            in { animate drop-shadow-blur, drop-shadow-offset-y { duration: Motion.short2; easing: Motion.standard; } }
+        }
+    ]
+
+    animate background, border-color { duration: Motion.medium2; easing: Motion.standard; }
+
+    // A camada de estado fica num filho recortado: `clip` no próprio card apagaria a sombra que
+    // ele acabou de ganhar.
+    if root.interactive || root.selected: Rectangle {
+        border-radius: parent.border-radius;
+        clip: true;
+        StateLayer {
+            tint: root.selected ? M3.primary : M3.on_surface;
+            hovered: touch.has-hover && root.interactive;
+            pressed: touch.pressed && root.interactive;
+            selected: root.selected;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.interactive;
+        clicked => { root.clicked(); }
+    }
 }

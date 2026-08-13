@@ -1,24 +1,33 @@
+import { M3 } from "theme/colors.slint";
+
+export { M3 }
+
+// Camada de compatibilidade: os nomes antigos (`surface_header`, `text_muted`, …) continuam
+// funcionando enquanto as 9 views migram para os papéis do `M3`, uma de cada vez. Cada token aqui
+// é só um apelido — mudar uma cor significa mudar o papel correspondente no `M3`, nunca aqui.
+//
+// Este global some quando a última view parar de usá-lo.
 export global Theme {
-    // Theme choices: 0 = Sims Green, 1 = Deep Blue, 2 = Cyber Purple, 3 = Neon Pink
+    // Mantido porque `src/bridge/slint_adapter.rs` grava o índice do tema aqui e
+    // `ui/views/config.slint` lê para marcar o chip ativo.
     in-out property <int> active_theme: 0;
 
-    // Color definitions
-    out property <color> primary_color: active_theme == 0 ? #15803d : (active_theme == 1 ? #1e40af : (active_theme == 2 ? #7e22ce : #be185d));
-    out property <color> primary_hover: active_theme == 0 ? #166534 : (active_theme == 1 ? #1e3a8a : (active_theme == 2 ? #6b21a8 : #9d174d));
-    out property <color> accent_color: active_theme == 0 ? #22c55e : (active_theme == 1 ? #3b82f6 : (active_theme == 2 ? #a855f7 : #f43f5e));
+    out property <color> primary_color: M3.primary_container;
+    out property <color> primary_hover: M3.primary_container.brighter(0.18);
+    out property <color> accent_color: M3.primary;
 
-    out property <color> background: #0f172a;
-    out property <color> surface: #1e293b;
-    out property <color> surface_header: #334155;
-    out property <color> surface_hover: #475569;
-    out property <color> border_color: #334155;
+    out property <color> background: M3.surface;
+    out property <color> surface: M3.surface_container;
+    out property <color> surface_header: M3.surface_container_high;
+    out property <color> surface_hover: M3.surface_container_highest;
+    out property <color> border_color: M3.outline_variant;
 
-    out property <color> text_primary: #f8fafc;
-    out property <color> text_secondary: #94a3b8;
-    out property <color> text_muted: #64748b;
+    out property <color> text_primary: M3.on_surface;
+    out property <color> text_secondary: M3.on_surface_variant;
+    out property <color> text_muted: M3.outline;
 
-    out property <color> success: #10b981;
-    out property <color> warning: #f59e0b;
-    out property <color> danger: #ef4444;
-    out property <color> info: #06b6d4;
+    out property <color> success: M3.tertiary;
+    out property <color> warning: M3.warning;
+    out property <color> danger: M3.error;
+    out property <color> info: M3.info;
 }

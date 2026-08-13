@@ -1,0 +1,76 @@
+import { M3 } from "../theme/colors.slint";
+import { Motion } from "../theme/motion.slint";
+import { Type, Space } from "../theme/typography.slint";
+import { Icon } from "icon.slint";
+import { Card, CardKind } from "card.slint";
+
+/// Card de métrica do painel.
+///
+/// Os quatro do dashboard eram blocos de ~20 linhas quase idênticos, com `height: 110px` travado e
+/// um "clique para ver a lista" que **só aparecia no hover** — ou seja, o card não avisava que era
+/// clicável até o ponteiro chegar nele. Aqui a dica fica sempre visível quando há detalhe, apenas
+/// mais discreta em repouso, e a altura é mínima em vez de fixa: um número que quebre linha
+/// aumenta o card em vez de vazar.
+export component StatCard inherits Card {
+    in property <string> label;
+    in property <string> value;
+    in property <string> hint;
+    in property <string> icon_str;
+    /// Cor do número. É o único ponto onde cada card se diferencia.
+    in property <color> accent: M3.primary;
+    in property <bool> has_details: false;
+
+    kind: CardKind.filled;
+    interactive: root.has_details;
+    min-height: 118px;
+    max-height: 132px;
+    horizontal-stretch: 1;
+    // Sem isto o card herda o esticamento vertical do `Rectangle` e engole a folga da tela.
+    vertical-stretch: 0;
+
+    VerticalLayout {
+        padding: Space.lg;
+        spacing: Space.xs;
+
+        HorizontalLayout {
+            spacing: Space.sm;
+            alignment: start;
+            Icon {
+                glyph: root.icon_str;
+                font-size: 16px;
+                color: M3.on_surface_variant;
+            }
+            Text {
+                text: root.label;
+                font-size: Type.body_s;
+                color: M3.on_surface_variant;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+                animate color { duration: Motion.medium2; easing: Motion.standard; }
+            }
+        }
+
+        Text {
+            text: root.value;
+            font-size: 28px;
+            font-weight: 800;
+            color: root.accent;
+            overflow: elide;
+            animate color { duration: Motion.medium2; easing: Motion.standard; }
+        }
+
+        Rectangle { vertical-stretch: 1; }
+
+        if root.has_details: Text {
+            text: root.hint;
+            font-size: Type.label_s;
+            color: M3.outline;
+            // A dica existe sempre; o hover só a torna mais legível. Fazê-la aparecer do nada
+            // significava que o card não tinha affordance nenhuma em repouso.
+            opacity: root.hovered ? 1.0 : 0.55;
+            overflow: elide;
+            animate opacity { duration: Motion.short2; easing: Motion.standard; }
+        }
+    }
+}

@@ -1,0 +1,16 @@
+// Severidade de uma mensagem de status.
+//
+// As 77 chamadas de `set_*_status` no adapter já codificam a severidade no começo da mensagem
+// ("✅ Instalação concluída!", "⚠️ Configure a pasta…"). Trocar isso por uma propriedade nova em
+// cada uma das 8 vistas seria uma cirurgia grande na ponte UI↔engine — justamente a parte que
+// esta refatoração não deve tocar.
+//
+// A saída é a mesma que o `I18n` já usa: um callback puro implementado no Rust. A UI pergunta a
+// severidade e o rótulo limpo; o marcador nunca chega à tela, e nenhum ponto de chamada muda.
+// (Slint não tem `starts-with` nem substring, então isto não pode ser resolvido no .slint.)
+export global StatusRules {
+    /// "idle" | "busy" | "ok" | "warn" | "error"
+    pure callback severity(string) -> string;
+    /// A mensagem sem o marcador de severidade.
+    pure callback label(string) -> string;
+}
