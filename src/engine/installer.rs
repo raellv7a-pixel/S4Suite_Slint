@@ -1,5 +1,5 @@
 use crate::core::safety::{safe_remove_file, unique_dest_path};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File};
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -21,6 +21,8 @@ pub enum InstallerError {
     NoUsefulFiles,
     #[error("Erro ao descompactar: {0}")]
     ExtractionFailed(String),
+    #[error("Selecione ao menos um arquivo pertencente ao grupo de possíveis variantes")]
+    InvalidVariantSelection,
     #[error("Erro de I/O: {0}")]
     Io(#[from] io::Error),
 }
@@ -199,7 +201,8 @@ pub fn prepare_staging(
 
     for source in sources {
         let identity = install_identity_name(source);
-        let dest = staging_dir.join(&identity);
+        // Fontes homônimas continuam independentes, inclusive após sanitização.
+        let dest = unique_dest_path(staging_dir, &identity);
         let label = source
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -314,6 +317,38 @@ pub struct ConflictReport {
     pub new_files: usize,
 }
 
+impl ConflictReport {
+    /// Filtra apenas este grupo; arquivos comuns e outros grupos são preservados.
+    pub fn select_variants(
+        &mut self,
+        group: &VariantGroup,
+        selected: &[PathBuf],
+    ) -> Result<(), InstallerError> {
+        if selected.is_empty() || selected.iter().any(|path| !group.files.contains(path)) {
+            return Err(InstallerError::InvalidVariantSelection);
+        }
+        self.staged_files.retain(|file| {
+            !group.files.contains(&file.rel_path) || selected.contains(&file.rel_path)
+        });
+        self.new_files = self
+            .staged_files
+            .iter()
+            .filter(|file| file.conflict == ConflictType::NewFile)
+            .count();
+        self.updates = self
+            .staged_files
+            .iter()
+            .filter(|file| file.conflict == ConflictType::SizeDiff)
+            .count();
+        self.exact_matches = self
+            .staged_files
+            .iter()
+            .filter(|file| file.conflict == ConflictType::ExactMatch)
+            .count();
+        Ok(())
+    }
+}
+
 pub fn calculate_conflicts(
     staging_dir: &Path,
     mods_dir: &Path,
@@ -394,42 +429,74 @@ pub fn calculate_conflicts(
     })
 }
 
-/// Marcas que autores usam em nomes de pasta para dizer "escolha só um destes".
-const EXCLUSIVE_KEYWORDS: [&str; 8] = [
-    "option",
-    "choose",
-    "pick",
-    "exclusive",
-    "select one",
-    "only one",
-    "select_one",
-    "only_one",
-];
+/// Um grupo heurístico, não uma incompatibilidade comprovada.
+/// `folder` inclui a identidade da fonte e a pasta interna marcada como opções.
+#[derive(Debug, Clone)]
+pub struct VariantGroup {
+    pub source: String,
+    pub folder: PathBuf,
+    pub files: Vec<PathBuf>,
+}
 
-/// Variantes do mesmo mod que não devem ser instaladas juntas.
-///
-/// Um pacote com `Options/Cabelo Loiro.package` e `Options/Cabelo Ruivo.package`
-/// espera que o usuário escolha uma. Instalar as duas costuma dar conflito
-/// dentro do jogo, então a UI pergunta antes de gravar.
-pub fn detect_mutually_exclusive(staged: &[StagedFile]) -> Vec<StagedFile> {
-    let opcoes: Vec<StagedFile> = staged
-        .iter()
-        .filter(|file| {
-            let rel = file.rel_path.to_string_lossy().replace('\\', "/").to_lowercase();
-            // A marca tem que estar num componente do caminho, não no arquivo
-            // inteiro: "description.package" contém "script", mas não é opção.
-            rel.split('/')
-                .any(|parte| EXCLUSIVE_KEYWORDS.iter().any(|key| parte.contains(key)))
-        })
-        .cloned()
-        .collect();
+fn is_variant_folder(name: &std::ffi::OsStr) -> bool {
+    let normalized = name
+        .to_string_lossy()
+        .to_lowercase()
+        .replace(['_', '-'], " ");
+    let mut words = normalized.split_whitespace();
+    matches!(
+        (words.next(), words.next(), words.next(), words.next()),
+        (
+            Some("option" | "options" | "exclusive" | "exclusives"),
+            None,
+            None,
+            None
+        ) | (
+            Some("choose" | "pick" | "select" | "only"),
+            Some("one"),
+            None,
+            None
+        ) | (Some("choose" | "pick"), Some("only"), Some("one"), None)
+    )
+}
 
-    // Uma opção sozinha não é uma escolha.
-    if opcoes.len() > 1 {
-        opcoes
-    } else {
-        Vec::new()
+/// Procura marcadores explícitos somente em pastas internas da mesma fonte.
+/// Nome do ZIP, arquivo avulso e substrings como "Optional" não são evidência.
+/// A pasta marcada mais próxima separa decisões internas do mesmo pacote.
+pub fn detect_mutually_exclusive(staged: &[StagedFile]) -> Vec<VariantGroup> {
+    let mut groups: BTreeMap<PathBuf, VariantGroup> = BTreeMap::new();
+    for file in staged {
+        let Some(parent) = file.rel_path.parent() else {
+            continue;
+        };
+        let mut folder = PathBuf::new();
+        let mut marked = None;
+        for (index, component) in parent.components().enumerate() {
+            folder.push(component.as_os_str());
+            if index > 0 && is_variant_folder(component.as_os_str()) {
+                marked = Some(folder.clone());
+            }
+        }
+        if let Some(folder) = marked {
+            groups
+                .entry(folder.clone())
+                .or_insert_with(|| VariantGroup {
+                    source: file.mod_root.clone(),
+                    folder,
+                    files: Vec::new(),
+                })
+                .files
+                .push(file.rel_path.clone());
+        }
     }
+    groups
+        .into_values()
+        .filter(|group| group.files.len() > 1)
+        .map(|mut group| {
+            group.files.sort();
+            group
+        })
+        .collect()
 }
 
 /// Maior recurso que vale a pena descomprimir à procura de uma marca.

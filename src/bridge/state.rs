@@ -1,10 +1,28 @@
 use crate::engine::disabled::DisabledManager;
-use crate::engine::installer::ConflictReport;
-use crate::engine::merger::{JobStatus, PostMergeAction};
+use crate::engine::installer::{
+    detect_dependencies_in_package, detect_mutually_exclusive, ConflictReport, InstallerError,
+    VariantGroup,
+};
+use crate::engine::merger::{AuthorizedMergeJob, JobStatus, MergeReview, PostMergeAction};
 use crate::engine::organizer::{DuplicateGroup, ScriptDepthIssue, TransferMode};
+use crate::engine::translations::PendingTranslationRemoval;
 use crate::engine::tray::{TrayImportCandidate, TRAY_WORK_DIR};
 use parking_lot::Mutex;
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::sync::{
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    Arc,
+};
+
+/// Permissão exclusiva entre manutenção e merge; liberada inclusive em erro/panic.
+pub struct BackgroundGuard(Arc<AtomicBool>);
+
+impl Drop for BackgroundGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
 
 /// Ação do organizador que mexe em arquivos do usuário e aguarda confirmação.
 ///
@@ -44,13 +62,115 @@ pub struct PendingTransfer {
 /// Guarda a lista de arquivos, e não a pasta de origem: entre montar a fila e
 /// executá-la o usuário pode trocar a seleção, e a tarefa precisa unificar
 /// exatamente o que estava à vista quando foi adicionada.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct QueuedJob {
     pub name: String,
     pub input_files: Vec<PathBuf>,
     pub output_dir: PathBuf,
     pub post_action: PostMergeAction,
     pub status: JobStatus,
+}
+
+pub struct PendingMergeReview {
+    pub queue: Vec<QueuedJob>,
+    pub indices: Vec<usize>,
+    pub limit: u64,
+    pub revision: u64,
+    pub decision_revision: i32,
+    pub reviews: VecDeque<MergeReview>,
+    pub authorized: Vec<AuthorizedMergeJob>,
+    pub permit: BackgroundGuard,
+}
+
+/// Decisões isoladas por fonte e pasta, anteriores ao resumo de instalação.
+pub struct PendingInstall {
+    pub report: ConflictReport,
+    pub groups: VecDeque<VariantGroup>,
+    pub selected: Vec<PathBuf>,
+    pub mode: &'static str,
+    pub warnings: String,
+    pub dependencies: Vec<(PathBuf, Vec<String>)>,
+}
+
+impl PendingInstall {
+    pub fn new(report: ConflictReport, warnings: String) -> Self {
+        let groups = detect_mutually_exclusive(&report.staged_files).into();
+        // Executado na preparação em background; o resumo só filtra este cache.
+        let dependencies = report
+            .staged_files
+            .iter()
+            .filter(|file| !file.is_script())
+            .map(|file| {
+                (
+                    file.rel_path.clone(),
+                    detect_dependencies_in_package(&file.src_path),
+                )
+            })
+            .collect();
+        let mut pending = Self {
+            report,
+            groups,
+            selected: Vec::new(),
+            mode: "all",
+            warnings,
+            dependencies,
+        };
+        pending.reset_selection();
+        pending
+    }
+
+    fn reset_selection(&mut self) {
+        self.mode = "all";
+        self.selected = self
+            .groups
+            .front()
+            .map(|group| group.files.clone())
+            .unwrap_or_default();
+    }
+
+    pub fn set_mode(&mut self, mode: &str) {
+        let Some(group) = self.groups.front() else {
+            return;
+        };
+        match mode {
+            "all" => {
+                self.mode = "all";
+                self.selected = group.files.clone();
+            }
+            "one" => {
+                self.mode = "one";
+                self.selected = group.files.first().cloned().into_iter().collect();
+            }
+            "manual" => self.mode = "manual",
+            _ => {}
+        }
+    }
+
+    pub fn toggle_file(&mut self, path: &Path) {
+        let Some(group) = self.groups.front() else {
+            return;
+        };
+        if self.mode == "all" || !group.files.iter().any(|file| file == path) {
+            return;
+        }
+        if self.mode == "one" {
+            self.selected = vec![path.to_path_buf()];
+        } else if let Some(index) = self.selected.iter().position(|file| file == path) {
+            self.selected.remove(index);
+        } else {
+            self.selected.push(path.to_path_buf());
+        }
+    }
+
+    pub fn confirm_group(&mut self) -> Result<(), InstallerError> {
+        let Some(group) = self.groups.front() else {
+            return Ok(());
+        };
+        self.report.select_variants(group, &self.selected)?;
+        self.groups.pop_front();
+        self.reset_selection();
+        Ok(())
+    }
 }
 
 /// Estado que precisa sobreviver entre callbacks da UI.
@@ -63,7 +183,11 @@ pub struct AppState {
     /// Arquivos que o usuário escolheu para instalar (caminhos reais em disco).
     installer_sources: Mutex<Vec<PathBuf>>,
     /// Análise de conflitos aguardando confirmação no diálogo.
-    pending_install: Mutex<Option<ConflictReport>>,
+    pending_install: Mutex<Option<PendingInstall>>,
+    pending_translation_removal: Mutex<Option<PendingTranslationRemoval>>,
+    background_busy: Arc<AtomicBool>,
+    merger_revision: AtomicU64,
+    pending_merge_review: Mutex<Option<PendingMergeReview>>,
 
     /// Itens marcados na árvore do organizador. As operações do explorador
     /// agem sobre este conjunto, como no menu de contexto do app PyQt.
@@ -107,6 +231,10 @@ impl AppState {
         Self {
             installer_sources: Mutex::new(Vec::new()),
             pending_install: Mutex::new(None),
+            pending_translation_removal: Mutex::new(None),
+            background_busy: Arc::new(AtomicBool::new(false)),
+            merger_revision: AtomicU64::new(0),
+            pending_merge_review: Mutex::new(None),
             selected_mods: Mutex::new(Vec::new()),
             organizer_search: Mutex::new(String::new()),
             pending_organizer: Mutex::new(None),
@@ -130,6 +258,13 @@ impl AppState {
         &self.disabled_mgr
     }
 
+    pub fn try_begin_background_operation(&self) -> Option<BackgroundGuard> {
+        self.background_busy
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .ok()
+            .map(|_| BackgroundGuard(Arc::clone(&self.background_busy)))
+    }
+
     // --- Instalador ---
 
     pub fn set_installer_sources(&self, files: Vec<PathBuf>) {
@@ -145,14 +280,26 @@ impl AppState {
         *self.pending_install.lock() = None;
     }
 
-    pub fn set_pending_install(&self, report: ConflictReport) {
-        *self.pending_install.lock() = Some(report);
+    pub fn set_pending_install(&self, report: ConflictReport, warnings: String) {
+        *self.pending_install.lock() = Some(PendingInstall::new(report, warnings));
+    }
+
+    pub fn with_pending_install<R>(&self, f: impl FnOnce(&mut PendingInstall) -> R) -> Option<R> {
+        self.pending_install.lock().as_mut().map(f)
     }
 
     /// Consome a análise pendente. Devolve `None` se o diálogo já foi resolvido,
     /// o que também protege contra duplo-clique em "Prosseguir".
-    pub fn take_pending_install(&self) -> Option<ConflictReport> {
+    pub fn take_pending_install(&self) -> Option<PendingInstall> {
         self.pending_install.lock().take()
+    }
+
+    pub fn set_pending_translation_removal(&self, pending: PendingTranslationRemoval) {
+        *self.pending_translation_removal.lock() = Some(pending);
+    }
+
+    pub fn take_pending_translation_removal(&self) -> Option<PendingTranslationRemoval> {
+        self.pending_translation_removal.lock().take()
     }
 
     // --- Organizador ---
@@ -245,6 +392,7 @@ impl AppState {
     // --- Merger ---
 
     pub fn set_merger_inputs(&self, files: Vec<PathBuf>) {
+        self.invalidate_merge_review();
         *self.merger_inputs.lock() = files;
     }
 
@@ -253,6 +401,7 @@ impl AppState {
     }
 
     pub fn set_merger_output(&self, dir: Option<PathBuf>) {
+        self.invalidate_merge_review();
         *self.merger_output.lock() = dir;
     }
 
@@ -261,6 +410,7 @@ impl AppState {
     }
 
     pub fn clear_merger(&self) {
+        self.invalidate_merge_review();
         self.merger_inputs.lock().clear();
         *self.merger_output.lock() = None;
     }
@@ -268,6 +418,7 @@ impl AppState {
     // --- Fila do merger ---
 
     pub fn push_merge_job(&self, job: QueuedJob) {
+        self.invalidate_merge_review();
         self.merge_jobs.lock().push(job);
     }
 
@@ -298,6 +449,7 @@ impl AppState {
     /// Remove as tarefas marcadas. Descartamos de trás para frente porque cada
     /// remoção desloca os índices seguintes.
     pub fn remove_selected_jobs(&self) -> usize {
+        self.invalidate_merge_review();
         let mut selected = self.selected_jobs.lock();
         selected.sort_unstable();
         selected.dedup();
@@ -319,11 +471,36 @@ impl AppState {
     }
 
     pub fn set_merge_post_action(&self, action: PostMergeAction) {
+        self.invalidate_merge_review();
         *self.merge_post_action.lock() = action;
     }
 
     pub fn merge_post_action(&self) -> PostMergeAction {
         *self.merge_post_action.lock()
+    }
+
+    fn invalidate_merge_review(&self) {
+        self.merger_revision.fetch_add(1, Ordering::AcqRel);
+        self.pending_merge_review.lock().take();
+    }
+
+    pub fn merger_revision(&self) -> u64 {
+        self.merger_revision.load(Ordering::Acquire)
+    }
+
+    pub fn set_pending_merge_review(&self, pending: PendingMergeReview) {
+        *self.pending_merge_review.lock() = Some(pending);
+    }
+
+    pub fn take_pending_merge_review(&self) -> Option<PendingMergeReview> {
+        self.pending_merge_review.lock().take()
+    }
+
+    pub fn with_pending_merge_review<T>(
+        &self,
+        f: impl FnOnce(&mut PendingMergeReview) -> T,
+    ) -> Option<T> {
+        self.pending_merge_review.lock().as_mut().map(f)
     }
 
     // --- Tray ---

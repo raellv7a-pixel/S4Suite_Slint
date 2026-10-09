@@ -1,16 +1,18 @@
 use crate::bridge::state::{
-    AppState, PendingInput, PendingOrganizerAction, PendingTransfer, QueuedJob,
+    AppState, BackgroundGuard, PendingInput, PendingMergeReview, PendingOrganizerAction,
+    PendingTransfer, QueuedJob,
 };
 use crate::core::config::{get_mods_dir, get_saves_dir, get_tray_dir, ConfigManager};
 use crate::core::i18n::t;
 use crate::core::theme;
+use crate::engine::backup::create_zip_archive;
+use crate::engine::cache::clean_game_cache;
 use crate::engine::installer::{
-    calculate_conflicts, clear_staging, collect_dependencies, detect_mutually_exclusive,
-    execute_installation, prepare_staging, ConflictType, MANAGED_BASE_DIR, STAGING_DIR_NAME,
+    calculate_conflicts, clear_staging, execute_installation, prepare_staging, ConflictType,
+    MANAGED_BASE_DIR, STAGING_DIR_NAME,
 };
 use crate::engine::merger::{
-    apply_post_merge_action, common_ancestor, merge_sims4_packages, run_merge_queue, JobStatus,
-    MergeJob, MergeTask, PostMergeAction,
+    common_ancestor, run_merge_queue, JobStatus, MergeJob, MergeReview, PostMergeAction,
 };
 use crate::engine::organizer::{
     auto_fix_script_depth, check_script_depth, create_folder, detect_duplicates, filter_tree,
@@ -22,14 +24,13 @@ use crate::engine::reshade::{
     uninstall_reshade,
 };
 use crate::engine::stats::collect_stats;
-use crate::engine::translations::{install_translation, list_installed, remove_translation};
+use crate::engine::translations::{install_translation, list_installed, prepare_translation_removal};
 use crate::engine::tray::{
     clear_tray_work_dir, import_tray_item, prepare_tray_candidates, TrayCacheDb,
 };
 use crate::MainWindow;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
-use std::fs::{self, File};
-use std::io::{self, Read, Write};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -75,61 +76,114 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         }
     });
 
-    // Callback: clear_cache
+    // Manutenção usa um worker bloqueante, não o executor local da UI.
     let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_clear_cache(move || {
+        let Some(w) = weak_clone.upgrade() else {
+            return;
+        };
         let config = cfg_clone.load();
-        if let Some(sims_path) = &config.sims4_path {
-            let locothumb = sims4_path_cache(sims_path);
-            let lang = config.language.clone();
-            let weak_async = weak_clone.clone();
-            slint::spawn_local(async move {
-                let mut _count = 0;
-                for p in locothumb {
-                    if p.exists() {
-                        let _ = fs::remove_file(p);
-                        _count += 1;
-                    }
-                }
-                if let Some(w) = weak_async.upgrade() {
-                    w.set_dashboard_status(SharedString::from(format!(
-                        "🧹 {}",
-                        t("Arquivos de cache limpos com sucesso!", &lang)
-                    )));
-                }
-            })
-            .unwrap();
-        }
+        let Some(game_dir) = config.sims4_path else {
+            w.set_dashboard_status(
+                t("⚠️ Configure a pasta do jogo primeiro.", &config.language).into(),
+            );
+            return;
+        };
+        let Some(permit) = state_clone.try_begin_background_operation() else {
+            w.set_dashboard_status(
+                t(
+                    "⚠️ Outra operação de manutenção está em andamento.",
+                    &config.language,
+                )
+                .into(),
+            );
+            return;
+        };
+        let lang = config.language;
+        run_dashboard_maintenance(&w, permit, move || {
+            let report = clean_game_cache(&game_dir).map_err(|e| e.to_string())?;
+            let message = format!(
+                "{} {} {} · {} {} · {} {}",
+                if report.failures.is_empty() {
+                    "✅"
+                } else {
+                    "⚠️"
+                },
+                t("Caches removidos:", &lang),
+                report.removed.len(),
+                t("Ausentes:", &lang),
+                report.missing.len(),
+                t("Falhas:", &lang),
+                report.failures.len(),
+            );
+            let details = report
+                .failures
+                .into_iter()
+                .map(|failure| format!("{}: {}", failure.path.display(), failure.error))
+                .collect::<Vec<_>>()
+                .join("\n");
+            Ok((message, details))
+        });
     });
 
-    // Callback: backup_saves
     let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_backup_saves(move || {
+        let Some(w) = weak_clone.upgrade() else {
+            return;
+        };
         let config = cfg_clone.load();
-        if let Some(sims_path) = &config.sims4_path {
-            let saves_dir = get_saves_dir(sims_path);
-            if saves_dir.exists() {
-                if let Some(dest_file) = rfd::FileDialog::new()
-                    .set_file_name("Saves_Backup.zip")
-                    .save_file()
-                {
-                    let weak_async = weak_clone.clone();
-                    slint::spawn_local(async move {
-                        if create_zip_archive(&saves_dir, &dest_file).is_ok() {
-                            if let Some(w) = weak_async.upgrade() {
-                                w.set_dashboard_status(SharedString::from(format!(
-                                    "🛡️ Backup salvo em: {}",
-                                    dest_file.display()
-                                )));
-                            }
-                        }
-                    })
-                    .unwrap();
-                }
-            }
+        let Some(game_dir) = config.sims4_path else {
+            w.set_dashboard_status(
+                t("⚠️ Configure a pasta do jogo primeiro.", &config.language).into(),
+            );
+            return;
+        };
+        let Some(permit) = state_clone.try_begin_background_operation() else {
+            w.set_dashboard_status(
+                t(
+                    "⚠️ Outra operação de manutenção está em andamento.",
+                    &config.language,
+                )
+                .into(),
+            );
+            return;
+        };
+        let source = get_saves_dir(&game_dir);
+        if !source.is_dir() {
+            w.set_dashboard_status(
+                format!(
+                    "❌ {}",
+                    t("Pasta de saves não encontrada.", &config.language)
+                )
+                .into(),
+            );
+            return;
         }
+        let Some(destination) = rfd::FileDialog::new()
+            .set_file_name("Saves_Backup.zip")
+            .save_file()
+        else {
+            w.set_dashboard_status(t("Backup cancelado.", &config.language).into());
+            return;
+        };
+        let lang = config.language;
+        run_dashboard_maintenance(&w, permit, move || {
+            let report = create_zip_archive(&source, &destination).map_err(|e| e.to_string())?;
+            Ok((
+                format!(
+                    "✅ {} {} ({} {})",
+                    t("Backup salvo em:", &lang),
+                    destination.display(),
+                    report.files,
+                    t("arquivos", &lang)
+                ),
+                String::new(),
+            ))
+        });
     });
 
     // Callback: refresh_stats
@@ -176,6 +230,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_start_install(move || {
+        if weak_clone.upgrade().is_some_and(|w| w.get_is_installing()) {
+            return;
+        }
         let config = cfg_clone.load();
         let Some(sims_path) = config.sims4_path.clone() else {
             set_installer_error(&weak_clone, "⚠️ Configure a pasta do jogo antes de instalar mods.");
@@ -206,14 +263,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
 
             match outcome {
                 Ok((staging_report, conflicts)) => {
-                    let summary = format!(
-                        "O instalador encontrou:\n\
-                         • {} mods novos\n\
-                         • {} atualizações\n\
-                         • {} já instalados (serão ignorados)\n\n\
-                         Deseja aplicar essas alterações à sua pasta Mods?",
-                        conflicts.new_files, conflicts.updates, conflicts.exact_matches
-                    );
+                    // As falhas de fontes continuam visíveis após as decisões.
                     let warnings = if staging_report.failures.is_empty() {
                         String::new()
                     } else {
@@ -228,60 +278,11 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                                 .join(", ")
                         )
                     };
-                    // Bibliotecas que os packages exigem. Sem elas o mod
-                    // instala, mas não funciona dentro do jogo.
-                    let deps = collect_dependencies(&conflicts.staged_files);
-                    let deps_texto = if deps.is_empty() {
-                        String::new()
-                    } else {
-                        format!("\n\n📌 Requer instalado: {}", deps.join(", "))
-                    };
-
-                    // Variantes do mesmo mod marcadas como "escolha uma".
-                    let exclusivos: Vec<String> = detect_mutually_exclusive(&conflicts.staged_files)
-                        .iter()
-                        .map(|f| f.rel_path.display().to_string())
-                        .collect();
-
-                    let statuses: Vec<(String, String)> = conflicts
-                        .staged_files
-                        .iter()
-                        .map(|f| {
-                            let label = match f.conflict {
-                                ConflictType::ExactMatch => "Já instalado",
-                                ConflictType::SizeDiff => "Atualização",
-                                ConflictType::NewFile => "Novo",
-                            };
-                            (f.filename.clone(), label.to_string())
-                        })
-                        .collect();
-
-                    state_async.set_pending_install(conflicts);
+                    state_async.set_pending_install(conflicts, warnings);
 
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(w) = weak_async.upgrade() {
-                            let model = Rc::new(VecModel::default());
-                            for (name, status) in statuses {
-                                model.push(crate::QueueItem {
-                                    name: SharedString::from(name),
-                                    size_str: SharedString::default(),
-                                    status: SharedString::from(status),
-                                });
-                            }
-                            w.set_installer_queue(ModelRc::from(model));
-                            w.set_careful_scan_message(SharedString::from(format!(
-                                "{}{}{}",
-                                summary, deps_texto, warnings
-                            )));
-
-                            // A escolha entre variantes vem antes: só depois
-                            // dela a contagem do resumo faz sentido.
-                            if exclusivos.is_empty() {
-                                w.set_show_careful_scan_dialog(true);
-                            } else {
-                                w.set_exclusive_options(to_string_model(exclusivos));
-                                w.set_show_exclusive_dialog(true);
-                            }
+                            refresh_install_decision(&w, &state_async);
                         }
                     });
                 }
@@ -300,49 +301,35 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         });
     });
 
-    // Callback: exclusive_option_picked
-    //
-    // O usuário escolheu qual variante fica. As outras saem da análise antes
-    // do resumo, senão o diálogo seguinte prometeria instalar todas.
+    // Modos e seleção só alteram o grupo atualmente apresentado.
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
-    window.on_exclusive_option_picked(move |escolhida| {
-        let Some(mut report) = state_clone.take_pending_install() else { return };
-
-        let descartadas: Vec<String> = detect_mutually_exclusive(&report.staged_files)
-            .iter()
-            .map(|f| f.rel_path.display().to_string())
-            .filter(|rel| rel != escolhida.as_str())
-            .collect();
-
-        report
-            .staged_files
-            .retain(|f| !descartadas.contains(&f.rel_path.display().to_string()));
-
-        // As contagens do resumo precisam refletir o que sobrou.
-        report.new_files =
-            report.staged_files.iter().filter(|f| f.conflict == ConflictType::NewFile).count();
-        report.updates =
-            report.staged_files.iter().filter(|f| f.conflict == ConflictType::SizeDiff).count();
-        report.exact_matches =
-            report.staged_files.iter().filter(|f| f.conflict == ConflictType::ExactMatch).count();
-
-        let resumo = format!(
-            "Variante escolhida: {}\n\n\
-             O instalador vai aplicar:\n\
-             • {} mods novos\n\
-             • {} atualizações\n\
-             • {} já instalados (serão ignorados)\n\n\
-             Deseja aplicar essas alterações à sua pasta Mods?",
-            escolhida, report.new_files, report.updates, report.exact_matches
-        );
-
-        state_clone.set_pending_install(report);
-
+    window.on_exclusive_mode_selected(move |mode| {
+        state_clone.with_pending_install(|pending| pending.set_mode(mode.as_str()));
         if let Some(w) = weak_clone.upgrade() {
-            w.set_show_exclusive_dialog(false);
-            w.set_careful_scan_message(SharedString::from(resumo));
-            w.set_show_careful_scan_dialog(true);
+            refresh_install_decision(&w, &state_clone);
+        }
+    });
+
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_toggle_exclusive_option(move |path| {
+        state_clone.with_pending_install(|pending| pending.toggle_file(Path::new(path.as_str())));
+        if let Some(w) = weak_clone.upgrade() {
+            refresh_install_decision(&w, &state_clone);
+        }
+    });
+
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_confirm_exclusive_selection(move || {
+        let outcome = state_clone.with_pending_install(|pending| pending.confirm_group());
+        if let Some(w) = weak_clone.upgrade() {
+            match outcome {
+                Some(Ok(())) => refresh_install_decision(&w, &state_clone),
+                Some(Err(e)) => w.set_installer_status(SharedString::from(format!("⚠️ {}", e))),
+                None => {}
+            }
         }
     });
 
@@ -370,15 +357,26 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_proceed_install_clicked(move || {
+        // A confirmação de gravação só vale depois de resolver todos os grupos.
+        if !weak_clone
+            .upgrade()
+            .is_some_and(|w| w.get_show_careful_scan_dialog())
+            || state_clone
+                .with_pending_install(|pending| !pending.groups.is_empty())
+                .unwrap_or(true)
+        {
+            return;
+        }
         let config = cfg_clone.load();
         let Some(sims_path) = config.sims4_path.clone() else {
             return;
         };
 
         // `take` garante que um duplo-clique não instale duas vezes.
-        let Some(report) = state_clone.take_pending_install() else {
+        let Some(pending) = state_clone.take_pending_install() else {
             return;
         };
+        let report = pending.report;
 
         let mods_dir = get_mods_dir(&sims_path);
         let staging = mods_dir.join(STAGING_DIR_NAME);
@@ -452,6 +450,8 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
 
         if let Some(w) = weak_clone.upgrade() {
             w.set_installer_queue(ModelRc::from(Rc::new(VecModel::default())));
+            w.set_show_exclusive_dialog(false);
+            w.set_show_careful_scan_dialog(false);
             w.set_is_installing(false);
             w.set_installer_status(SharedString::from("Fila limpa."));
         }
@@ -1137,6 +1137,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_select_merger_input(move || {
+        if weak_clone.upgrade().is_none_or(|w| w.get_is_merging()) {
+            return;
+        }
         if let Some(dir) = rfd::FileDialog::new().pick_folder() {
             let mut inputs: Vec<PathBuf> = Vec::new();
             let model = Rc::new(VecModel::default());
@@ -1144,19 +1147,28 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             for entry in crate::engine::walk_user_mods(&dir, usize::MAX) {
                 let path = entry.path();
                 let is_package = path.is_file()
-                    && path.extension().and_then(|e| e.to_str()).unwrap_or("").eq_ignore_ascii_case("package");
+                    && path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("")
+                        .eq_ignore_ascii_case("package");
                 if !is_package {
                     continue;
                 }
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
                 model.push(crate::MergeQueueItem {
                     name: SharedString::from(entry.file_name().to_string_lossy().to_string()),
-                    size_str: SharedString::from(crate::bridge::slint_models::format_size_bytes(size)),
+                    size_str: SharedString::from(crate::bridge::slint_models::format_size_bytes(
+                        size,
+                    )),
                 });
                 inputs.push(path.to_path_buf());
             }
 
-            let total: u64 = inputs.iter().map(|p| fs::metadata(p).map(|m| m.len()).unwrap_or(0)).sum();
+            let total: u64 = inputs
+                .iter()
+                .map(|p| fs::metadata(p).map(|m| m.len()).unwrap_or(0))
+                .sum();
             let count = inputs.len();
             state_clone.set_merger_inputs(inputs);
 
@@ -1180,6 +1192,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_select_merger_output(move || {
+        if weak_clone.upgrade().is_none_or(|w| w.get_is_merging()) {
+            return;
+        }
         if let Some(dir) = rfd::FileDialog::new().pick_folder() {
             state_clone.set_merger_output(Some(dir.clone()));
             if let Some(w) = weak_clone.upgrade() {
@@ -1195,6 +1210,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_add_merge_job(move || {
+        if weak_clone.upgrade().is_none_or(|w| w.get_is_merging()) {
+            return;
+        }
         let inputs = state_clone.merger_inputs();
         let Some(output_dir) = state_clone.merger_output() else {
             if let Some(w) = weak_clone.upgrade() {
@@ -1246,6 +1264,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_merge_job_clicked(move |index| {
+        if weak_clone.upgrade().is_none_or(|w| w.get_is_merging()) {
+            return;
+        }
         state_clone.toggle_selected_job(index as usize);
         refresh_merge_jobs(&weak_clone, &state_clone);
     });
@@ -1254,6 +1275,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_remove_merge_job(move || {
+        if weak_clone.upgrade().is_none_or(|w| w.get_is_merging()) {
+            return;
+        }
         let removidos = state_clone.remove_selected_jobs();
         refresh_merge_jobs(&weak_clone, &state_clone);
         if let Some(w) = weak_clone.upgrade() {
@@ -1268,6 +1292,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_merge_post_action_selected(move |acao| {
+        if weak_clone.upgrade().is_none_or(|w| w.get_is_merging()) {
+            return;
+        }
         let parsed = PostMergeAction::parse(acao.as_str());
         state_clone.set_merge_post_action(parsed);
         if let Some(w) = weak_clone.upgrade() {
@@ -1279,301 +1306,129 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         }
     });
 
-    // Callback: start_merge_queue
-    //
-    // Roda a fila inteira em `spawn_blocking`. A pós-ação de cada tarefa é
-    // decidida pelo engine: com merge parcial, apagar ou desativar os originais
-    // perderia o conteúdo que não entrou.
+    // Analisa todos os jobs em background antes de autorizar qualquer escrita.
     let cfg_clone = Arc::clone(&config_mgr);
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_start_merge_queue(move || {
-        let jobs = state_clone.merge_jobs();
-        if jobs.is_empty() {
+        let Some(w) = weak_clone.upgrade() else { return; };
+        if w.get_is_merging() { return; }
+        let queue = state_clone.merge_jobs();
+        let indices: Vec<usize> = queue.iter().enumerate()
+            .filter(|(_, job)| job.status == JobStatus::Pending)
+            .map(|(i, _)| i).collect();
+        if indices.is_empty() {
+            w.set_merge_status("Nada a executar: todas as tarefas da fila já foram processadas. Remova-as ou adicione novas.".into());
             return;
         }
-
-        // Só o que ainda não rodou. A fila continua mostrando as tarefas
-        // concluídas — é o histórico do lote —, mas repetir uma delas refaria um
-        // merge cujos originais a pós-ação já apagou ou desativou.
-        let pendentes: Vec<usize> = jobs
-            .iter()
-            .enumerate()
-            .filter(|(_, j)| j.status == JobStatus::Pending)
-            .map(|(i, _)| i)
-            .collect();
-
-        if pendentes.is_empty() {
-            if let Some(w) = weak_clone.upgrade() {
-                w.set_merge_status(SharedString::from(
-                    "Nada a executar: todas as tarefas da fila já foram processadas. \
-                     Remova-as ou adicione novas.",
-                ));
-            }
+        let config = cfg_clone.load();
+        let Some(permit) = state_clone.try_begin_background_operation() else {
+            w.set_merge_status(t("⚠️ Outra operação de manutenção está em andamento.", &config.language).into());
             return;
-        }
-
-        let limite_bytes = (cfg_clone.load().merge_limit_gb * 1_073_741_824.0) as u64;
-        if let Some(w) = weak_clone.upgrade() {
-            w.set_is_merging(true);
-            w.set_merge_progress(0.0);
-            w.set_merge_status(SharedString::from(format!(
-                "🚀 Executando fila com {} tarefa(s)...",
-                pendentes.len()
-            )));
-        }
-
-        let engine_jobs: Vec<MergeJob> = pendentes
-            .iter()
-            .map(|i| &jobs[*i])
-            .map(|j| MergeJob {
-                name: j.name.clone(),
-                input_files: j.input_files.clone(),
-                output_dir: j.output_dir.clone(),
-                max_size_bytes: limite_bytes,
-                post_action: j.post_action,
-            })
-            .collect();
-
-        let weak_async = weak_clone.clone();
-        let state_async = Arc::clone(&state_clone);
-        tokio::task::spawn_blocking(move || {
-            let total_jobs = engine_jobs.len();
-
-            let on_job = {
-                let weak = weak_async.clone();
-                let state = Arc::clone(&state_async);
-                let mapa = pendentes.clone();
-                move |index: usize, status: JobStatus| {
-                    // O engine numera as tarefas que recebeu; a fila da tela
-                    // ainda tem as concluídas do lote anterior no meio.
-                    let na_fila = mapa.get(index).copied().unwrap_or(index);
-                    state.set_job_status(na_fila, status);
-                    let weak_ui = weak.clone();
-                    let state_ui = Arc::clone(&state);
-                    let _ = slint::invoke_from_event_loop(move || {
-                        refresh_merge_jobs(&weak_ui, &state_ui);
+        };
+        let revision = state_clone.merger_revision();
+        let limit = (config.merge_limit_gb * 1_073_741_824.0) as u64;
+        let jobs: Vec<MergeJob> = indices.iter().map(|i| {
+            let job = &queue[*i];
+            MergeJob { name: job.name.clone(), input_files: job.input_files.clone(),
+                output_dir: job.output_dir.clone(), max_size_bytes: limit, post_action: job.post_action }
+        }).collect();
+        w.set_is_merging(true);
+        w.set_merge_progress(0.0);
+        w.set_merge_status(t("Analisando os arquivos de todas as tarefas...", &config.language).into());
+        let state = Arc::clone(&state_clone);
+        let cfg = Arc::clone(&cfg_clone);
+        let weak = weak_clone.clone();
+        let future = async move {
+            let result = tokio::task::spawn_blocking(move || {
+                let reviews = jobs.into_iter().map(MergeReview::prepare)
+                    .collect::<Result<std::collections::VecDeque<_>, _>>();
+                (reviews, permit)
+            }).await;
+            let Some(w) = weak.upgrade() else { return; };
+            match result {
+                Ok((Ok(reviews), permit)) if state.merger_revision() == revision
+                    && state.merge_jobs() == queue
+                    && (cfg.load().merge_limit_gb * 1_073_741_824.0) as u64 == limit => {
+                    state.set_pending_merge_review(PendingMergeReview {
+                        queue, indices, limit, revision, decision_revision: 0,
+                        reviews, authorized: Vec::new(), permit,
                     });
+                    present_merge_review(&w, &cfg, &state);
                 }
-            };
-
-            let on_progress = {
-                let weak = weak_async.clone();
-                move |index: usize, current: usize, total: usize, texto: &str| {
-                    // O avanço mostrado é o da fila inteira, não o da tarefa:
-                    // uma barra que reinicia a cada tarefa esconde o quanto
-                    // ainda falta no total.
-                    let dentro = if total == 0 { 0.0 } else { current as f32 / total as f32 };
-                    let geral = (index as f32 + dentro) / total_jobs as f32;
-                    let msg = format!("[{}/{}] {}", index + 1, total_jobs, texto);
-                    let weak_ui = weak.clone();
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(w) = weak_ui.upgrade() {
-                            w.set_merge_progress(geral);
-                            w.set_merge_status(SharedString::from(msg));
-                        }
-                    });
-                }
-            };
-
-            let outcomes = run_merge_queue(
-                &engine_jobs,
-                state_async.disabled_manager(),
-                on_job,
-                on_progress,
-            );
-
-            let concluidas = outcomes.iter().filter(|o| o.status == JobStatus::Done).count();
-            let parciais = outcomes.iter().filter(|o| o.status == JobStatus::Partial).count();
-            let falhas = outcomes.iter().filter(|o| o.status == JobStatus::Failed).count();
-
-            let mut msg = format!("✅ Fila concluída: {} de {} tarefa(s).", concluidas, total_jobs);
-            if parciais > 0 {
-                msg.push_str(&format!(
-                    " ⚠️ {} parcial(is) — os originais foram mantidos.",
-                    parciais
-                ));
-            }
-            if falhas > 0 {
-                msg.push_str(&format!(" ❌ {} falha(s).", falhas));
-            }
-
-            let _ = slint::invoke_from_event_loop(move || {
-                refresh_merge_jobs(&weak_async, &state_async);
-                if let Some(w) = weak_async.upgrade() {
+                Ok((Err(error), _)) => {
                     w.set_is_merging(false);
-                    w.set_merge_progress(1.0);
-                    w.set_merge_status(SharedString::from(msg));
+                    w.set_merge_status(format!("❌ {error}").into());
                 }
-            });
-        });
+                Ok(_) => cancel_merge_review(&w, &state, &config.language, true),
+                Err(error) => {
+                    w.set_is_merging(false);
+                    w.set_merge_status(format!("❌ {error}").into());
+                }
+            }
+        };
+        if let Err(error) = slint::spawn_local(future) {
+            w.set_is_merging(false);
+            w.set_merge_status(format!("❌ {error}").into());
+        }
     });
 
-    // Callback: start_merge
-    // Unifica só a origem atual, sem passar pela fila — o atalho para quem tem
-    // um grupo só.
     let cfg_clone = Arc::clone(&config_mgr);
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
-    window.on_start_merge(move || {
-        let inputs = state_clone.merger_inputs();
-        let Some(output_dir) = state_clone.merger_output() else {
-            if let Some(w) = weak_clone.upgrade() {
-                w.set_merge_status(SharedString::from("⚠️ Selecione a pasta de destino antes de unificar."));
-            }
-            return;
-        };
-        if inputs.is_empty() {
-            if let Some(w) = weak_clone.upgrade() {
-                w.set_merge_status(SharedString::from("⚠️ Nenhum package selecionado."));
-            }
-            return;
-        }
-
-        let max_size_gb = cfg_clone.load().merge_limit_gb;
-        // Mesmo nome que a fila usaria: o da pasta de onde os packages vieram.
-        let nome = common_ancestor(&inputs).map(|root| file_label(&root));
-        let task = MergeTask {
-            input_files: inputs,
-            output_dir,
-            max_size_bytes: (max_size_gb * 1024.0 * 1024.0 * 1024.0) as u64,
-            name: nome,
-        };
-
+    window.on_cancel_merge_review(move || {
         if let Some(w) = weak_clone.upgrade() {
-            w.set_is_merging(true);
-            w.set_merge_progress(0.0);
-            w.set_merge_status(SharedString::from("🚀 Lendo índices DBPF..."));
+            // Não cancela um worker já iniciado: só uma revisão ainda pendente.
+            if w.get_show_merge_review() {
+                cancel_merge_review(&w, &state_clone, &cfg_clone.load().language, false);
+            }
         }
-
-        let weak_async = weak_clone.clone();
-        let weak_progress = weak_clone.clone();
-        tokio::task::spawn_blocking(move || {
-            let result = merge_sims4_packages(&task, move |current, total, label| {
-                let fraction = if total == 0 { 0.0 } else { current as f32 / total as f32 };
-                let text = label.to_string();
-                let weak_tick = weak_progress.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(w) = weak_tick.upgrade() {
-                        w.set_merge_progress(fraction);
-                        w.set_merge_status(SharedString::from(text));
-                    }
-                });
-            });
-
-            let _ = slint::invoke_from_event_loop(move || {
-                let Some(w) = weak_async.upgrade() else { return };
-                w.set_is_merging(false);
-                w.set_merge_progress(0.0);
-
-                match result {
-                    Ok(report) if !report.output_packages.is_empty() => {
-                        let mut msg = format!(
-                            "✅ {} package(s) unificados em {} parte(s).",
-                            report.success_count,
-                            report.output_packages.len()
-                        );
-                        if report.partial {
-                            msg.push_str(&format!(" ⚠️ {} arquivo(s) falharam e foram ignorados.", report.failed_files.len()));
-                        }
-                        w.set_merge_status(SharedString::from(msg));
-                        w.set_post_merge_message(SharedString::from(format!(
-                            "Foram geradas {} parte(s) otimizadas. Os {} arquivos originais continuam na pasta de origem — mantê-los junto das partes unificadas duplica o conteúdo dentro do jogo.",
-                            report.output_packages.len(),
-                            report.success_count
-                        )));
-                        w.set_show_post_merge_dialog(true);
-                    }
-                    Ok(report) => {
-                        w.set_merge_status(SharedString::from(format!(
-                            "❌ Nenhum recurso pôde ser lido ({} arquivo(s) com falha).",
-                            report.failed_files.len()
-                        )));
-                    }
-                    Err(e) => {
-                        w.set_merge_status(SharedString::from(format!("❌ Falha na unificação: {}", e)));
-                    }
-                }
-            });
-        });
     });
 
-    // Callback: post_merge_action
-    // Executa de verdade o destino dos originais. Antes só trocava o texto.
+    let cfg_clone = Arc::clone(&config_mgr);
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
-    window.on_post_merge_action(move |action| {
-        let choice = PostMergeAction::parse(action.as_str());
-        let originals = state_clone.merger_inputs();
-
-        if let Some(w) = weak_clone.upgrade() {
-            w.set_show_post_merge_dialog(false);
-        }
-
-        if choice == PostMergeAction::Keep {
-            state_clone.clear_merger();
-            if let Some(w) = weak_clone.upgrade() {
-                w.set_merge_items(ModelRc::from(Rc::new(VecModel::default())));
-                w.set_merge_input_dir(SharedString::default());
-                w.set_merge_status(SharedString::from("Arquivos originais mantidos como estavam."));
-            }
-            return;
-        }
-
-        // A pasta de origem é a raiz de segurança: nada fora dela pode ser
-        // tocado, mesmo que o manifesto ou a lista digam o contrário.
-        let Some(input_root) = common_ancestor(&originals) else {
+    window.on_confirm_merge_review(move |decision_revision, phrase| {
+        let Some(w) = weak_clone.upgrade() else {
             return;
         };
-
-        if let Some(w) = weak_clone.upgrade() {
-            w.set_merge_status(SharedString::from("⏳ Processando arquivos originais..."));
+        let config = cfg_clone.load();
+        let current = state_clone
+            .with_pending_merge_review(|pending| {
+                merge_review_is_current(pending, &state_clone, &config)
+            })
+            .unwrap_or(false);
+        if !current {
+            cancel_merge_review(&w, &state_clone, &config.language, true);
+            return;
         }
-
-        let weak_async = weak_clone.clone();
-        let state_async = Arc::clone(&state_clone);
-        tokio::task::spawn_blocking(move || {
-            let outcome =
-                apply_post_merge_action(choice, &originals, &input_root, state_async.disabled_manager());
-            state_async.clear_merger();
-
-            let msg = if let Some(err) = &outcome.error {
-                format!("❌ Backup falhou, nada foi removido: {}", err)
-            } else {
-                let mut m = match choice {
-                    PostMergeAction::Disable => {
-                        format!("🔴 {} original(is) desativados (.disabled).", outcome.affected)
-                    }
-                    PostMergeAction::Backup => format!(
-                        "📦 {} original(is) arquivados em {} e removidos da pasta.",
-                        outcome.affected,
-                        outcome
-                            .backup_path
-                            .as_deref()
-                            .map(file_label)
-                            .unwrap_or_default()
-                    ),
-                    PostMergeAction::Delete => format!(
-                        "🗑️ {} original(is) excluídos ({} liberados).",
-                        outcome.affected,
-                        crate::bridge::slint_models::format_size_bytes(outcome.freed_bytes)
-                    ),
-                    PostMergeAction::Keep => "Arquivos originais mantidos.".to_string(),
-                };
-                if outcome.failed > 0 {
-                    m.push_str(&format!(" ⚠️ {} bloqueados por segurança.", outcome.failed));
-                }
-                m
+        let result = state_clone.with_pending_merge_review(|pending| {
+            if pending.decision_revision != decision_revision {
+                return Err(t(
+                    "A revisão mudou. Confirme a tarefa exibida novamente.",
+                    &config.language,
+                ));
+            }
+            let Some(review) = pending.reviews.front() else {
+                return Ok(());
             };
-
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(w) = weak_async.upgrade() {
-                    w.set_merge_items(ModelRc::from(Rc::new(VecModel::default())));
-                    w.set_merge_input_dir(SharedString::default());
-                    w.set_merge_status(SharedString::from(msg));
-                }
-            });
+            if review.requires_delete_confirmation() && phrase.as_str() != "EXCLUIR ORIGINAIS" {
+                return Err(t(
+                    "Digite exatamente EXCLUIR ORIGINAIS para autorizar esta tarefa.",
+                    &config.language,
+                ));
+            }
+            let review = pending.reviews.pop_front().unwrap();
+            pending
+                .authorized
+                .push(review.approve(phrase.as_str()).map_err(|e| e.to_string())?);
+            Ok(())
         });
+        match result {
+            Some(Ok(())) => present_merge_review(&w, &cfg_clone, &state_clone),
+            Some(Err(error)) => w.set_merge_status(format!("⚠️ {error}").into()),
+            None => cancel_merge_review(&w, &state_clone, &config.language, true),
+        }
     });
 
     // Callback: select_tray_files
@@ -1880,23 +1735,81 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         });
     });
 
-    // Callback: delete_translation
+    // A primeira ação prepara a identidade do item, sem alterar o disco.
     let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_delete_translation(move |name| {
-        let config = cfg_clone.load();
-        let Some(sims_path) = config.sims4_path.clone() else { return };
-        let mods_dir = get_mods_dir(&sims_path);
-
-        let msg = match remove_translation(&mods_dir, name.as_str(), &[mods_dir.clone()]) {
-            Ok(()) => format!("🗑️ Tradução removida: {}", name),
-            Err(e) => format!("❌ Não foi possível remover '{}': {}", name, e),
+        let Some(w) = weak_clone.upgrade() else {
+            return;
         };
-
-        refresh_translations_list(&weak_clone, &cfg_clone);
-        if let Some(w) = weak_clone.upgrade() {
-            w.set_translations_status(SharedString::from(msg));
+        if w.get_show_translation_confirm() {
+            return;
         }
+        let config = cfg_clone.load();
+        let Some(sims_path) = config.sims4_path else {
+            w.set_translations_status(SharedString::from(t(
+                "⚠️ Configure a pasta do jogo primeiro.",
+                &config.language,
+            )));
+            return;
+        };
+        match prepare_translation_removal(&get_mods_dir(&sims_path), name.as_str()) {
+            Ok(pending) => {
+                w.set_translation_removal_name(SharedString::from(pending.name()));
+                state_clone.set_pending_translation_removal(pending);
+                w.set_show_translation_confirm(true);
+            }
+            Err(e) => w.set_translations_status(SharedString::from(format!("❌ {}", e))),
+        }
+    });
+
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_cancel_translation_removal(move || {
+        state_clone.take_pending_translation_removal();
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_show_translation_confirm(false);
+            w.set_translations_status(SharedString::from(t(
+                "Exclusão cancelada.",
+                w.get_active_language().as_str(),
+            )));
+        }
+    });
+
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_confirm_translation_removal(move || {
+        let Some(pending) = state_clone.take_pending_translation_removal() else {
+            return;
+        };
+        let config = cfg_clone.load();
+        let current_root = config
+            .sims4_path
+            .as_ref()
+            .and_then(|path| dunce::canonicalize(get_mods_dir(path)).ok());
+        let result = if current_root.as_deref() == Some(pending.mods_dir()) {
+            pending.execute()
+        } else {
+            Err(crate::core::safety::SafetyError::InvalidPath(t(
+                "A pasta do jogo mudou. Revise a operação novamente.",
+                &config.language,
+            )))
+        };
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_show_translation_confirm(false);
+            let status = match result {
+                Ok(()) => format!(
+                    "✅ {} {}",
+                    t("Tradução removida:", &config.language),
+                    pending.name()
+                ),
+                Err(e) => format!("❌ {}", e),
+            };
+            w.set_translations_status(SharedString::from(status));
+        }
+        refresh_translations_list(&weak_clone, &cfg_clone);
     });
 
     // Callback: install_reshade
@@ -1908,7 +1821,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         let config = cfg_clone.load();
         let Some(sims_path) = config.sims4_path.clone() else {
             if let Some(w) = weak_clone.upgrade() {
-                w.set_reshade_status(SharedString::from("⚠️ Configure a pasta do jogo antes de instalar o ReShade."));
+                w.set_reshade_status(SharedString::from(
+                    "⚠️ Configure a pasta do jogo antes de instalar o ReShade.",
+                ));
             }
             return;
         };
@@ -1916,7 +1831,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
 
         if let Some(w) = weak_clone.upgrade() {
             w.set_is_reshade_busy(true);
-            w.set_reshade_status(SharedString::from("🌐 Baixando e injetando ReShade (5.9.2)..."));
+            w.set_reshade_status(SharedString::from(
+                "🌐 Baixando e injetando ReShade (5.9.2)...",
+            ));
         }
 
         let weak_async = weak_clone.clone();
@@ -2196,6 +2113,91 @@ fn file_label(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| path.display().to_string())
+}
+
+/// Redesenha a decisão atual ou o resumo final sem reler o disco na thread da UI.
+fn refresh_install_decision(w: &MainWindow, state: &AppState) {
+    state.with_pending_install(|pending| {
+        let queue = Rc::new(VecModel::default());
+        for file in &pending.report.staged_files {
+            let status = match file.conflict {
+                ConflictType::ExactMatch => "Já instalado",
+                ConflictType::SizeDiff => "Atualização",
+                ConflictType::NewFile => "Novo",
+            };
+            queue.push(crate::QueueItem {
+                name: SharedString::from(file.rel_path.display().to_string()),
+                size_str: SharedString::from(crate::bridge::slint_models::format_size_bytes(
+                    file.size,
+                )),
+                status: SharedString::from(status),
+            });
+        }
+        w.set_installer_queue(ModelRc::from(queue));
+
+        if let Some(group) = pending.groups.front() {
+            let options = Rc::new(VecModel::default());
+            for path in &group.files {
+                options.push(crate::VariantOption {
+                    path: SharedString::from(path.display().to_string()),
+                    label: SharedString::from(
+                        path.strip_prefix(&group.folder)
+                            .unwrap_or(path)
+                            .display()
+                            .to_string(),
+                    ),
+                    selected: pending.selected.contains(path),
+                });
+            }
+            w.set_exclusive_group(SharedString::from(format!(
+                "{} — {}",
+                group.source,
+                group.folder.display()
+            )));
+            w.set_exclusive_mode(SharedString::from(pending.mode));
+            w.set_exclusive_selected_count(pending.selected.len() as i32);
+            w.set_exclusive_options(ModelRc::from(options));
+            w.set_show_careful_scan_dialog(false);
+            w.set_show_exclusive_dialog(true);
+            return;
+        }
+
+        let mut dependencies = Vec::new();
+        for (path, deps) in &pending.dependencies {
+            if pending
+                .report
+                .staged_files
+                .iter()
+                .any(|file| file.rel_path == *path)
+            {
+                for dependency in deps {
+                    if !dependencies.contains(dependency) {
+                        dependencies.push(dependency.clone());
+                    }
+                }
+            }
+        }
+        dependencies.sort();
+        let deps_text = if dependencies.is_empty() {
+            String::new()
+        } else {
+            format!("\n\n📌 Requer instalado: {}", dependencies.join(", "))
+        };
+        w.set_careful_scan_message(SharedString::from(format!(
+            "O instalador vai aplicar:\n\
+             • {} mods novos\n\
+             • {} atualizações\n\
+             • {} já instalados (serão ignorados)\n\n\
+             Deseja aplicar essas alterações à sua pasta Mods?{}{}",
+            pending.report.new_files,
+            pending.report.updates,
+            pending.report.exact_matches,
+            deps_text,
+            pending.warnings
+        )));
+        w.set_show_exclusive_dialog(false);
+        w.set_show_careful_scan_dialog(true);
+    });
 }
 
 /// Devolve o instalador ao estado ocioso mostrando o motivo da recusa.
@@ -2563,32 +2565,268 @@ fn refresh_translations_list(weak_win: &slint::Weak<MainWindow>, config_mgr: &Co
     }
 }
 
-fn sims4_path_cache(sims_path: &Path) -> Vec<PathBuf> {
-    vec![
-        sims_path.join("localthumbcache.package"),
-        sims_path.join("spotlight_thumbnails.package"),
-        sims_path.join("cache"),
-        sims_path.join("cachestr"),
-    ]
+fn run_dashboard_maintenance(
+    window: &MainWindow,
+    permit: BackgroundGuard,
+    operation: impl FnOnce() -> Result<(String, String), String> + Send + 'static,
+) {
+    window.set_is_maintenance_busy(true);
+    window.set_maintenance_details(SharedString::default());
+    let lang = window.global::<crate::I18n>().get_lang();
+    window.set_dashboard_status(t("Processando manutenção em background...", lang.as_str()).into());
+    let weak = window.as_weak();
+    let future = async move {
+        let result = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            operation()
+        })
+        .await;
+        if let Some(w) = weak.upgrade() {
+            w.set_is_maintenance_busy(false);
+            let (message, details) = match result {
+                Ok(Ok(outcome)) => outcome,
+                Ok(Err(error)) => (
+                    format!("❌ {}", t("Falha na manutenção.", lang.as_str())),
+                    error,
+                ),
+                Err(error) => (
+                    format!("❌ {}", t("Falha na manutenção.", lang.as_str())),
+                    error.to_string(),
+                ),
+            };
+            w.set_dashboard_status(message.into());
+            w.set_maintenance_details(details.into());
+        }
+    };
+    if let Err(error) = slint::spawn_local(future) {
+        window.set_is_maintenance_busy(false);
+        window.set_dashboard_status(format!("❌ {error}").into());
+    }
 }
 
-fn create_zip_archive(src_dir: &Path, zip_path: &Path) -> io::Result<()> {
-    let file = File::create(zip_path)?;
-    let mut zip = zip::ZipWriter::new(file);
-    let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+fn merge_review_is_current(
+    pending: &PendingMergeReview,
+    state: &AppState,
+    config: &crate::core::config::Config,
+) -> bool {
+    pending.revision == state.merger_revision()
+        && pending.queue == state.merge_jobs()
+        && pending.limit == (config.merge_limit_gb * 1_073_741_824.0) as u64
+}
 
-    for entry in walkdir::WalkDir::new(src_dir).into_iter().filter_map(|e| e.ok()) {
-        let path = entry.path();
-        let name = path.strip_prefix(src_dir).unwrap_or(path);
+fn cancel_merge_review(window: &MainWindow, state: &AppState, lang: &str, changed: bool) {
+    state.take_pending_merge_review();
+    window.set_show_merge_review(false);
+    window.set_is_merging(false);
+    window.set_merge_status(
+        t(
+            if changed {
+                "A seleção ou configuração mudou. Revise a fila novamente."
+            } else {
+                "Unificação cancelada. Nenhum original foi alterado."
+            },
+            lang,
+        )
+        .into(),
+    );
+}
 
-        if path.is_file() {
-            zip.start_file(name.to_string_lossy().to_string(), options)?;
-            let mut f = File::open(path)?;
-            let mut buffer = Vec::new();
-            f.read_to_end(&mut buffer)?;
-            zip.write_all(&buffer)?;
+fn present_merge_review(window: &MainWindow, config_mgr: &ConfigManager, state: &Arc<AppState>) {
+    let config = config_mgr.load();
+    let presentation = state.with_pending_merge_review(|pending| -> Result<_, String> {
+        if !merge_review_is_current(pending, state, &config) {
+            return Err(t(
+                "A seleção ou configuração mudou. Revise a fila novamente.",
+                &config.language,
+            ));
         }
+        // CC sem indícios e Keep/Disable/Backup não precisam de consentimento extra.
+        while pending.reviews.front().is_some_and(|review| {
+            review.risks().is_empty() && !review.requires_delete_confirmation()
+        }) {
+            pending.authorized.push(
+                pending
+                    .reviews
+                    .pop_front()
+                    .unwrap()
+                    .approve("")
+                    .map_err(|e| e.to_string())?,
+            );
+        }
+        let Some(review) = pending.reviews.front() else {
+            return Ok(None);
+        };
+        let job = review.job();
+        let mut files = std::collections::BTreeMap::<PathBuf, Vec<String>>::new();
+        for file in &job.input_files {
+            files.insert(file.clone(), Vec::new());
+        }
+        for risk in review.risks() {
+            files
+                .entry(risk.file.clone())
+                .or_default()
+                .push(t(risk.reason, &config.language));
+        }
+        let items: Vec<SharedString> = files
+            .into_iter()
+            .map(|(file, reasons)| {
+                if reasons.is_empty() {
+                    file.display().to_string().into()
+                } else {
+                    format!("{}\n{}", file.display(), reasons.join("\n")).into()
+                }
+            })
+            .collect();
+        let title = format!("{} {}", t("Revisar tarefa:", &config.language), job.name);
+        let message = format!(
+            "{} {} · {} {}\n{} {}",
+            t("Arquivos:", &config.language),
+            job.input_files.len(),
+            t("Pós-ação:", &config.language),
+            t(post_action_label(job.post_action), &config.language),
+            t("Destino:", &config.language),
+            job.output_dir.display()
+        );
+        let nonce = window.get_merge_review_revision().wrapping_add(1);
+        pending.decision_revision = nonce;
+        Ok(Some((
+            title,
+            message,
+            items,
+            review.requires_delete_confirmation(),
+            !review.risks().is_empty(),
+            nonce,
+        )))
+    });
+    match presentation {
+        Some(Ok(Some((title, message, items, delete, risks, nonce)))) => {
+            window.set_merge_review_revision(nonce);
+            window.set_merge_review_title(title.into());
+            window.set_merge_review_message(message.into());
+            window.set_merge_review_items(ModelRc::from(Rc::new(VecModel::from(items))));
+            window.set_merge_review_requires_delete(delete);
+            window.set_merge_review_has_risks(risks);
+            window.set_show_merge_review(true);
+            window.set_merge_status(
+                t(
+                    "Revise os indícios e a pós-ação de cada tarefa.",
+                    &config.language,
+                )
+                .into(),
+            );
+        }
+        Some(Ok(None)) => {
+            if let Some(pending) = state.take_pending_merge_review() {
+                run_reviewed_merge_queue(window, state, pending, config.language);
+            }
+        }
+        Some(Err(error)) => {
+            cancel_merge_review(window, state, &config.language, true);
+            window.set_merge_status(format!("❌ {error}").into());
+        }
+        None => cancel_merge_review(window, state, &config.language, true),
     }
-    zip.finish()?;
-    Ok(())
+}
+
+fn run_reviewed_merge_queue(
+    window: &MainWindow,
+    state: &Arc<AppState>,
+    pending: PendingMergeReview,
+    lang: String,
+) {
+    window.set_show_merge_review(false);
+    window.set_merge_status(t("Executando tarefas autorizadas...", &lang).into());
+    let weak = window.as_weak();
+    let state = Arc::clone(state);
+    let ui_state = Arc::clone(&state);
+    let failed_indices = pending.indices.clone();
+    let future = async move {
+        let weak_worker = weak.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let _permit = pending.permit;
+            let total = pending.authorized.len();
+            let on_job = |index: usize, status: JobStatus| {
+                state.set_job_status(pending.indices[index], status);
+                let weak = weak_worker.clone();
+                let state = Arc::clone(&state);
+                let _ = slint::invoke_from_event_loop(move || refresh_merge_jobs(&weak, &state));
+            };
+            let on_progress = |index: usize, current: usize, count: usize, text: &str| {
+                let fraction = if count == 0 {
+                    0.0
+                } else {
+                    current as f32 / count as f32
+                };
+                let progress = (index as f32 + fraction) / total as f32;
+                let text = format!("[{}/{}] {text}", index + 1, total);
+                let weak = weak_worker.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak.upgrade() {
+                        w.set_merge_progress(progress);
+                        w.set_merge_status(text.into());
+                    }
+                });
+            };
+            let outcomes = run_merge_queue(
+                &pending.authorized,
+                state.disabled_manager(),
+                on_job,
+                on_progress,
+            );
+            let done = outcomes
+                .iter()
+                .filter(|o| o.status == JobStatus::Done)
+                .count();
+            let partial = outcomes
+                .iter()
+                .filter(|o| o.status == JobStatus::Partial)
+                .count();
+            let failed = outcomes
+                .iter()
+                .filter(|o| o.status == JobStatus::Failed)
+                .count();
+            let mut message = format!(
+                "{} {} {} / {} · {} {} · {} {}",
+                if done == total { "✅" } else { "⚠️" },
+                t("Fila concluída:", &lang),
+                done,
+                total,
+                partial,
+                t("parciais", &lang),
+                failed,
+                t("falhas", &lang)
+            );
+            for outcome in outcomes {
+                if let Some(error) = outcome.error.or_else(|| outcome.post.and_then(|p| p.error)) {
+                    message.push_str(&format!("\n{}: {error}", outcome.name));
+                }
+            }
+            message
+        })
+        .await;
+        if result.is_err() {
+            let jobs = ui_state.merge_jobs();
+            for index in failed_indices {
+                if jobs
+                    .get(index)
+                    .is_some_and(|j| matches!(j.status, JobStatus::Running | JobStatus::Pending))
+                {
+                    ui_state.set_job_status(index, JobStatus::Failed);
+                }
+            }
+        }
+        refresh_merge_jobs(&weak, &ui_state);
+        if let Some(w) = weak.upgrade() {
+            w.set_is_merging(false);
+            w.set_merge_progress(1.0);
+            w.set_merge_status(match result {
+                Ok(message) => message.into(),
+                Err(error) => format!("❌ {error}").into(),
+            });
+        }
+    };
+    if let Err(error) = slint::spawn_local(future) {
+        window.set_is_merging(false);
+        window.set_merge_status(format!("❌ {error}").into());
+    }
 }

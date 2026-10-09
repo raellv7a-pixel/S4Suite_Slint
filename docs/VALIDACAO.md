@@ -17,13 +17,17 @@ verdade, com centenas de mods e nomes acentuados.
 
 ## Estado automatizado
 
-`cargo test` — **138 testes, todos verdes.**
-`simulacao_usuario` contra 287 packages e 95 scripts reais — **90 verificações,
-todas verdes.**
+`cargo test --offline` — **167 testes, todos verdes** após a correção do
+Smart Mod Installer V4. Smoke gráfico com dados sintéticos: três ZIPs e um
+package avulso, sete payloads corretos após decisões todos/único/manual,
+resumo prévio e staging limpo. Nenhum dado real foi usado nessa validação.
+
+Registro anterior: `simulacao_usuario` contra 287 packages e 95 scripts reais —
+**90 verificações, todas verdes**; essa sessão não foi repetida na correção do V4.
 
 | Motor | Arquivo | Testes | Camada 1 | Camada 2 |
 |---|---|---:|:---:|:---:|
-| Instalador | `installer_flow.rs` | 18 | ✅ | ✅ |
+| Instalador | `installer_flow.rs` | 25 | ✅ | ✅ |
 | Organizador | `organizer_flow.rs` | 28 | ✅ | ✅ |
 | Merger | `merger_flow.rs` | 17 | ✅ | ✅ |
 | Tray | `tray_flow.rs` | 12 | ✅ | ✅ |
@@ -32,8 +36,9 @@ todas verdes.**
 | Estatísticas | `stats_flow.rs` | 6 | ✅ | ✅ |
 | ReShade | `reshade_flow.rs` | 8 | ⚠️ parcial | — |
 | i18n | `i18n_coverage.rs` | 7 | ✅ | ✅ |
-| Bridge | `bridge_wiring.rs` | 14 | n/a | ✅ |
-| Unitários | `src/engine/*` | 5 | ✅ | n/a |
+| Temas | `theme_system.rs` | 11 | ✅ | ✅ |
+| Bridge | `bridge_wiring.rs` | 17 | n/a | ✅ |
+| Unitários | `src/core/*` + `src/engine/*` | 13 | ✅ | n/a |
 
 Mods desativados (`engine/disabled.rs`) são cobertos dentro de
 `organizer_flow.rs`, que é onde o motor é usado.
@@ -80,8 +85,15 @@ propósito.
 - [ ] Reinstalar o mesmo arquivo → é reportado como já instalado, não recopiado.
 - [ ] Instalar versão diferente do mesmo mod → atualiza no lugar e guarda cópia
       em `.s4suite_backups/`.
-- [ ] Um mod com pasta `Options/` pergunta qual variante instalar, e só a
-      escolhida é gravada.
+- [ ] Um pacote de roupas com palavras como `options` no nome do ZIP/arquivo
+      ou `Optional` numa pasta não obriga a escolher uma peça.
+- [ ] Uma pasta interna `Options/` oferece possíveis variantes, sem afirmar
+      incompatibilidade: instalar todos, escolher apenas um ou seleção manual.
+- [ ] Vários ZIPs e pastas de opções na mesma fila geram decisões independentes;
+      desmarcar arquivos de um grupo não remove arquivos comuns nem outros grupos.
+- [ ] Seleção manual aceita múltiplos arquivos; seleção vazia não avança.
+- [ ] Depois das decisões, a fila, as contagens e as dependências do resumo
+      refletem a seleção. Nada é gravado até confirmar o resumo final.
 - [ ] Um mod que exige biblioteca (Lot51, XML Injector) mostra o aviso.
 - [ ] Cancelar no diálogo não grava nada em `Mods`.
 - [ ] Um `.ts4script` fica no máximo um nível abaixo de `Mods`.

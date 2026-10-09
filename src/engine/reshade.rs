@@ -238,7 +238,7 @@ pub fn uninstall_reshade(game_bin_path: &Path, allowed_roots: &[PathBuf]) -> Res
     for dll_name in &INJECT_DLL_NAMES {
         let dll_path = game_bin_path.join(dll_name);
         if is_reshade_dll(&dll_path) {
-            let _ = safe_remove_file(&dll_path, allowed_roots);
+            safe_remove_file(&dll_path, allowed_roots).map_err(io::Error::other)?;
 
             // Restore latest backup
             let mut backups = Vec::new();
@@ -252,14 +252,14 @@ pub fn uninstall_reshade(game_bin_path: &Path, allowed_roots: &[PathBuf]) -> Res
             }
             backups.sort_by_key(|p| fs::metadata(p).and_then(|m| m.modified()).ok());
             if let Some(latest) = backups.last() {
-                let _ = fs::rename(latest, &dll_path);
+                fs::rename(latest, &dll_path)?;
             }
         }
     }
 
     let manifest_path = game_bin_path.join(MANIFEST_NAME);
     if manifest_path.exists() {
-        let _ = safe_remove_file(&manifest_path, allowed_roots);
+        safe_remove_file(&manifest_path, allowed_roots).map_err(io::Error::other)?;
     }
 
     Ok(())

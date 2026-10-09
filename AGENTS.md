@@ -47,3 +47,17 @@ The same index is also available over MCP (server: `prowl-agent serve`) for
 agents that prefer typed tools, but the shell commands above are the
 recommended, lowest-overhead path (no server, no per-call schema cost).
 <!-- /prowl-agent -->
+
+<!-- prowl-agent:map -->
+## Prowl project map
+
+Auto-generated from the Prowl index, refreshed on each `overview`/`init`. Prefer retrieving from Prowl (and reading the cited files) over grepping or relying on training memory; this is the current shape of the repo.
+
+- size: 81 files, 4184 symbols, 457 edges (resolved 105, external deps 347, unresolved 5)
+- languages: rust:40 python:23 json:8 markdown:7 bash:2 toml:1
+- subsystems: tests(14,rust) · src/engine(12,rust) · src/core(6,rust) · src/bridge(4,rust) · src(2,rust)
+- entrypoints: examples/simulacao_usuario.rs · src/main.rs
+- central files (most depended-on): src/core/safety.rs · src/engine/installer.rs · src/engine/tray.rs · src/engine/mod.rs · src/engine/dbpf.rs
+
+Depth on demand: `prowl find|def|outline|references <name>`, `search <text>`, `context search "<question>"`, `sketch <ui>`.
+<!-- /prowl-agent:map -->

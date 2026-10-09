@@ -41,3 +41,50 @@ dist/
 # Config local do Claude Code
 .claude/settings.local.json
 .claude/*.tmp.*
+# prowl-agent: derived state
+!.prowl/
+.prowl/*
+!.prowl/config.toml
+!.prowl/rules.toml
+!.prowl/knowledge/
+!.prowl/knowledge/**
+!.prowl/proposals/
+!.prowl/proposals/**
+.prowl/index.db*
+.prowl/cache/
+.prowl/logs/
+.prowl/editor/
+.prowl/setup-applies.json
+.prowl-setup.lock
+# /prowl-agent: derived state
+
+# Dados privados e amostras: este repositório é público.
+*.package
+*.ts4script
+*.save
+*.save.ver*
+*.zip
+*.rar
+*.7z
+*.tar
+*.tar.gz
+*.tgz
+*.dll
+.env
+.env.*
+*.pem
+*.key
+credentials*.json
+secrets*.json
+config.json
+settings.json
+Mods/
+Tray/
+Saves/
+cache/
+cachestr/
+.s4suite_backups/
+sandbox/
+
+# O índice e a configuração de revisão desta máquina não são código do produto.
+/.prowl/

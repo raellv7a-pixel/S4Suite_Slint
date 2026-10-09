@@ -8,13 +8,14 @@
 //! substituído e o rollback. O que sobra aqui é só o que é específico de
 //! tradução — a pasta de destino e a listagem.
 
-use crate::core::safety::{safe_remove_dir_all, safe_remove_file, SafetyError};
+use crate::core::safety::{is_safe_to_delete, safe_remove_dir_all, safe_remove_file, SafetyError};
 use crate::engine::installer::{
     calculate_conflicts, clear_staging, prepare_staging, ConflictReport, ConflictType,
     InstallerError, STAGING_DIR_NAME,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 /// Pasta das traduções dentro de `Mods`, mesma convenção do app PyQt.
 pub const TRANSLATIONS_DIR: &str = "01_Traducoes";
@@ -153,24 +154,240 @@ fn dir_size(dir: &Path) -> u64 {
         .sum()
 }
 
-/// Remove uma tradução pelo nome exibido na lista.
+/// Uma exclusão autorizada no preparo, vinculada à raiz e ao item vistos ali.
 ///
-/// O nome vem da UI, então nunca é concatenado direto: resolvemos contra a
-/// listagem real e a remoção passa por `core::safety`. Sem isso, um nome como
-/// `../../algo` sairia de `Mods`.
+/// Não modifica o disco até `execute`. A UI deve também comparar `mods_dir()`
+/// com a configuração atual antes de confirmar: mudar a configuração não muda
+/// o destino desta operação. Links, substituições e alterações do alvo invalidam
+/// a confirmação, em vez de autorizar uma nova entrada com o mesmo nome.
+#[derive(Debug)]
+pub struct PendingTranslationRemoval {
+    name: String,
+    configured_mods_dir: PathBuf,
+    mods_dir: PathBuf,
+    directory: PathBuf,
+    target: PathBuf,
+    mods_identity: EntryIdentity,
+    directory_identity: EntryIdentity,
+    target_fingerprint: TargetFingerprint,
+    contents: Vec<(PathBuf, TargetFingerprint)>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct EntryIdentity {
+    created: Option<SystemTime>,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+}
+
+impl EntryIdentity {
+    fn read(metadata: &fs::Metadata) -> Result<Self, SafetyError> {
+        let created = metadata.created().ok();
+        // Sem um identificador de inode, a data de criação é obrigatória.
+        #[cfg(not(unix))]
+        if created.is_none() {
+            return Err(SafetyError::InvalidPath(
+                "Não foi possível identificar o alvo com segurança".to_string(),
+            ));
+        }
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        Ok(Self {
+            created,
+            #[cfg(unix)]
+            device: metadata.dev(),
+            #[cfg(unix)]
+            inode: metadata.ino(),
+        })
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct TargetFingerprint {
+    identity: EntryIdentity,
+    is_dir: bool,
+    len: u64,
+    modified: SystemTime,
+    #[cfg(unix)]
+    changed: (i64, i64),
+}
+
+impl TargetFingerprint {
+    fn read(metadata: &fs::Metadata) -> Result<Self, SafetyError> {
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        Ok(Self {
+            identity: EntryIdentity::read(metadata)?,
+            is_dir: metadata.is_dir(),
+            len: metadata.len(),
+            modified: metadata.modified()?,
+            #[cfg(unix)]
+            changed: (metadata.ctime(), metadata.ctime_nsec()),
+        })
+    }
+}
+
+fn real_metadata(path: &Path) -> Result<fs::Metadata, SafetyError> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| match error.kind() {
+        std::io::ErrorKind::NotFound => SafetyError::InvalidPath(path.display().to_string()),
+        _ => SafetyError::Io(error),
+    })?;
+    if metadata.file_type().is_symlink() || (!metadata.is_file() && !metadata.is_dir()) {
+        return Err(SafetyError::InvalidPath(path.display().to_string()));
+    }
+    Ok(metadata)
+}
+
+fn translation_contents(
+    path: &Path,
+    is_dir: bool,
+) -> Result<Vec<(PathBuf, TargetFingerprint)>, SafetyError> {
+    let mut contents = Vec::new();
+    if is_dir {
+        for entry in walkdir::WalkDir::new(path).min_depth(1).follow_links(false) {
+            let entry = entry.map_err(|error| SafetyError::Io(error.into()))?;
+            let metadata = real_metadata(entry.path())?;
+            let relative = entry
+                .path()
+                .strip_prefix(path)
+                .map_err(|_| SafetyError::InvalidPath(entry.path().display().to_string()))?;
+            contents.push((relative.to_path_buf(), TargetFingerprint::read(&metadata)?));
+        }
+        contents.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    }
+    Ok(contents)
+}
+
+impl PendingTranslationRemoval {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Raiz canônica capturada, para conferir a configuração na confirmação.
+    pub fn mods_dir(&self) -> &Path {
+        &self.mods_dir
+    }
+
+    pub fn execute(&self) -> Result<(), SafetyError> {
+        let configured_directory = translations_dir(&self.configured_mods_dir);
+        let configured_target = configured_directory.join(
+            self.target
+                .file_name()
+                .ok_or_else(|| SafetyError::InvalidPath(self.target.display().to_string()))?,
+        );
+        let changed = || SafetyError::ChangedTarget(self.target.display().to_string());
+
+        // Usa os caminhos originais, não só os canônicos: uma pasta substituída
+        // por link depois do preparo não pode redirecionar a exclusão.
+        let target = is_safe_to_delete(
+            &configured_target,
+            std::slice::from_ref(&configured_directory),
+        )?;
+        let mods_dir = dunce::canonicalize(&self.configured_mods_dir)?;
+        let directory = dunce::canonicalize(&configured_directory)?;
+        if mods_dir != self.mods_dir || directory != self.directory || target != self.target {
+            return Err(changed());
+        }
+        let mods_metadata = real_metadata(&self.configured_mods_dir)?;
+        let directory_metadata = real_metadata(&configured_directory)?;
+        let target_metadata = real_metadata(&configured_target)?;
+        if !mods_metadata.is_dir()
+            || !directory_metadata.is_dir()
+            || EntryIdentity::read(&mods_metadata)? != self.mods_identity
+            || EntryIdentity::read(&directory_metadata)? != self.directory_identity
+            || TargetFingerprint::read(&target_metadata)? != self.target_fingerprint
+        {
+            return Err(changed());
+        }
+        // Alterações em níveis internos não mudam necessariamente o mtime da
+        // pasta selecionada; a autorização inclui também seus descendentes.
+        if translation_contents(&configured_target, target_metadata.is_dir())? != self.contents {
+            return Err(changed());
+        }
+
+        if target_metadata.is_dir() {
+            safe_remove_dir_all(&configured_target, std::slice::from_ref(&self.directory))
+        } else {
+            safe_remove_file(&configured_target, std::slice::from_ref(&self.directory))
+        }
+    }
+}
+
+/// Resolve o nome contra entradas reais, sem confiar em um caminho vindo da UI.
+/// O escopo permitido é estritamente o interior da pasta real de traduções.
+pub fn prepare_translation_removal(
+    mods_dir: &Path,
+    name: &str,
+) -> Result<PendingTranslationRemoval, SafetyError> {
+    let mut components = Path::new(name).components();
+    if !matches!(components.next(), Some(std::path::Component::Normal(_)))
+        || components.next().is_some()
+    {
+        return Err(SafetyError::InvalidPath(name.to_string()));
+    }
+    let configured_mods_dir = if mods_dir.is_absolute() {
+        mods_dir.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(mods_dir)
+    };
+    let configured_directory = translations_dir(&configured_mods_dir);
+    let directory = is_safe_to_delete(
+        &configured_directory,
+        std::slice::from_ref(&configured_mods_dir),
+    )?;
+    let mods_metadata = real_metadata(&configured_mods_dir)?;
+    let directory_metadata = real_metadata(&configured_directory)?;
+    if !mods_metadata.is_dir() || !directory_metadata.is_dir() {
+        return Err(SafetyError::InvalidPath(
+            configured_directory.display().to_string(),
+        ));
+    }
+
+    // Não calcula tamanhos da listagem nem aceita aliases de nomes Unicode
+    // inválidos: a autorização corresponde a uma entrada exata do diretório.
+    let mut selected = None;
+    for entry in fs::read_dir(&configured_directory)? {
+        let entry = entry?;
+        if entry.file_name().to_str() == Some(name) {
+            selected = Some(entry.path());
+            break;
+        }
+    }
+    let selected = selected.ok_or_else(|| SafetyError::InvalidPath(name.to_string()))?;
+    let target = is_safe_to_delete(&selected, std::slice::from_ref(&configured_directory))?;
+    if target.parent() != Some(directory.as_path()) {
+        return Err(SafetyError::OutsideAllowedScope(
+            target.display().to_string(),
+            directory.display().to_string(),
+        ));
+    }
+    let metadata = real_metadata(&selected)?;
+    let contents = translation_contents(&selected, metadata.is_dir())?;
+    Ok(PendingTranslationRemoval {
+        name: name.to_string(),
+        mods_dir: dunce::canonicalize(&configured_mods_dir)?,
+        configured_mods_dir,
+        directory,
+        target,
+        mods_identity: EntryIdentity::read(&mods_metadata)?,
+        directory_identity: EntryIdentity::read(&directory_metadata)?,
+        target_fingerprint: TargetFingerprint::read(&metadata)?,
+        contents,
+    })
+}
+
+/// Remoção imediata para consumidores sem diálogo de confirmação.
+///
+/// Mantém o escopo adicional informado pelo chamador; a UI usa a operação
+/// pendente para não reconstruir a autorização a partir do nome ao confirmar.
 pub fn remove_translation(
     mods_dir: &Path,
     name: &str,
     allowed_roots: &[PathBuf],
 ) -> Result<(), SafetyError> {
-    let target = list_installed(mods_dir)
-        .into_iter()
-        .find(|item| item.name == name)
-        .ok_or_else(|| SafetyError::InvalidPath(name.to_string()))?;
-
-    if target.path.is_dir() {
-        safe_remove_dir_all(&target.path, allowed_roots)
-    } else {
-        safe_remove_file(&target.path, allowed_roots)
-    }
+    let pending = prepare_translation_removal(mods_dir, name)?;
+    is_safe_to_delete(&pending.target, allowed_roots)?;
+    pending.execute()
 }

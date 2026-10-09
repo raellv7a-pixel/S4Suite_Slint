@@ -6,6 +6,8 @@ import { Type, Space } from "../theme/typography.slint";
 import { Icon, Ic } from "../components/icon.slint";
 import { StatusBar } from "../components/status_bar.slint";
 import { ViewHeader } from "../components/view_header.slint";
+import { Dialog, DialogActions } from "../components/dialog.slint";
+import { M3 } from "../theme/colors.slint";
 
 export struct TranslationItem {
     name: string,
@@ -18,6 +20,10 @@ export component TranslationsView inherits Rectangle {
 
     callback select_translation_clicked();
     callback delete_translation_clicked(string);
+    in property <bool> show_confirm: false;
+    in property <string> removal_name;
+    callback cancel_removal();
+    callback confirm_removal();
 
     VerticalLayout {
         padding: 24px;
@@ -71,5 +77,37 @@ export component TranslationsView inherits Rectangle {
         }
 
         StatusBar { text: root.status_text; }
+    }
+
+    Dialog {
+        open: root.show_confirm;
+        title: I18n.tr("Excluir tradução permanentemente?");
+        icon_str: Ic.trash;
+        title_color: M3.error;
+        dismissed => { }
+        Text {
+            text: root.removal_name;
+            font-size: Type.body_m;
+            color: M3.on_surface;
+            wrap: word-wrap;
+        }
+        Text {
+            text: I18n.tr("Esta operação exclui permanentemente o item e seu conteúdo. Não pode ser desfeita.");
+            font-size: Type.body_s;
+            color: M3.on_surface_variant;
+            wrap: word-wrap;
+        }
+        DialogActions {
+            Button {
+                text: I18n.tr("Cancelar");
+                kind: ButtonKind.text;
+                clicked => { root.cancel_removal(); }
+            }
+            Button {
+                text: I18n.tr("Excluir permanentemente");
+                kind: ButtonKind.danger;
+                clicked => { root.confirm_removal(); }
+            }
+        }
     }
 }

@@ -173,3 +173,18 @@ fn extracao_crua_aceita_dll_que_o_filtro_de_mods_bloqueia() {
     assert!(crua.join("ReShade64.dll").exists());
     assert!(is_reshade_dll(&crua.join("ReShade64.dll")));
 }
+
+#[test]
+fn remocao_recusada_nao_restaura_backup_sobre_dll_protegida() {
+    let fx = Fixture::new();
+    let dll = fx.game_bin.join("dxgi.dll");
+    let bytes = reshade_dll_bytes();
+    write_file(&dll, &bytes);
+    let backup = fx.game_bin.join("dxgi.dll.backup.1");
+    write_file(&backup, b"original");
+    let unrelated = fx._root.path().join("other");
+    fs::create_dir_all(&unrelated).unwrap();
+    assert!(uninstall_reshade(&fx.game_bin, &[unrelated]).is_err());
+    assert_eq!(fs::read(&dll).unwrap(), bytes);
+    assert_eq!(fs::read(&backup).unwrap(), b"original");
+}

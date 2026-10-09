@@ -5,7 +5,7 @@ import { Sidebar } from "components/sidebar.slint";
 import { Icon, Ic } from "components/icon.slint";
 import { ViewSlot } from "components/view_slot.slint";
 import { DashboardView } from "views/dashboard.slint";
-import { InstallerView, QueueItem } from "views/installer.slint";
+import { InstallerView, QueueItem, VariantOption } from "views/installer.slint";
 import { OrganizerView, ModTreeEntry, FolderChoice, DisabledEntry } from "views/organizer.slint";
 import { MergerView, MergeQueueItem, MergeJobItem } from "views/merger.slint";
 import { TrayView, TrayItem } from "views/tray.slint";
@@ -36,6 +36,8 @@ export component MainWindow inherits Window {
     in property <string> total_mods_size: "0 MB";
     in property <string> total_tray_count: "0";
     in property <string> dashboard_status: "Pronto";
+    in property <bool> is_maintenance_busy: false;
+    in property <string> maintenance_details;
     in property <[string]> folder_size_details;
     in property <[string]> scripts_details;
     in property <[string]> tray_details;
@@ -82,10 +84,16 @@ export component MainWindow inherits Window {
     callback toggle_disabled_selection(string);
     callback restore_selected_disabled();
     callback delete_selected_disabled();
-    // Merger Dialog
-    in property <bool> show_post_merge_dialog: false;
-    in property <string> post_merge_message: "";
-    callback post_merge_action(string);
+    // Revisão vinculada a cada tarefa antes de qualquer escrita do merger.
+    in property <bool> show_merge_review: false;
+    in property <string> merge_review_title;
+    in property <string> merge_review_message;
+    in property <[string]> merge_review_items;
+    in property <bool> merge_review_requires_delete: false;
+    in property <bool> merge_review_has_risks: false;
+    in property <int> merge_review_revision: 0;
+    callback confirm_merge_review(int, string);
+    callback cancel_merge_review();
 
     // Organizer: confirmação de ações destrutivas
     in property <bool> show_organizer_confirm: false;
@@ -101,8 +109,13 @@ export component MainWindow inherits Window {
     callback cancel_install_clicked();
     callback proceed_install_clicked();
     in property <bool> show_exclusive_dialog: false;
-    in property <[string]> exclusive_options;
-    callback exclusive_option_picked(string);
+    in property <string> exclusive_group;
+    in property <string> exclusive_mode: "all";
+    in property <int> exclusive_selected_count: 0;
+    in property <[VariantOption]> exclusive_options;
+    callback exclusive_mode_selected(string);
+    callback toggle_exclusive_option(string);
+    callback confirm_exclusive_selection();
     callback cancel_exclusive();
 
     in property <[MergeQueueItem]> merge_items;
@@ -133,6 +146,10 @@ export component MainWindow inherits Window {
 
     in property <[TranslationItem]> installed_translations;
     in property <string> translations_status: "Pronto";
+    in property <bool> show_translation_confirm: false;
+    in property <string> translation_removal_name;
+    callback cancel_translation_removal();
+    callback confirm_translation_removal();
 
     in property <string> reshade_env_type: "GENERIC";
     in property <string> reshade_env_command: "WINEDLLOVERRIDES=\"dxgi=n,b\" %command%";
@@ -163,7 +180,6 @@ export component MainWindow inherits Window {
     callback toggle_disabled_mod(string);
     callback select_merger_input();
     callback select_merger_output();
-    callback start_merge();
     callback select_tray_files();
     callback start_tray_import();
     callback select_translation_file();
@@ -214,6 +230,8 @@ export component MainWindow inherits Window {
                     total_mods_size: root.total_mods_size;
                     total_tray_count: root.total_tray_count;
                     status_message: root.dashboard_status;
+                    is_busy: root.is_maintenance_busy;
+                    operation_details: root.maintenance_details;
                     clear_cache_clicked => { root.clear_cache(); }
                     backup_saves_clicked => { root.backup_saves(); }
                     refresh_stats_clicked => { root.refresh_stats(); }
@@ -237,7 +255,12 @@ export component MainWindow inherits Window {
                     cancel_install_clicked => { root.cancel_install_clicked(); }
                     show_exclusive_dialog: root.show_exclusive_dialog;
                     exclusive_options: root.exclusive_options;
-                    exclusive_option_picked(o) => { root.exclusive_option_picked(o); }
+                    exclusive_group: root.exclusive_group;
+                    exclusive_mode: root.exclusive_mode;
+                    exclusive_selected_count: root.exclusive_selected_count;
+                    exclusive_mode_selected(mode) => { root.exclusive_mode_selected(mode); }
+                    toggle_exclusive_option(path) => { root.toggle_exclusive_option(path); }
+                    confirm_exclusive_selection => { root.confirm_exclusive_selection(); }
                     cancel_exclusive => { root.cancel_exclusive(); }
                     proceed_install_clicked => { root.proceed_install_clicked(); }
                 }
@@ -306,12 +329,17 @@ export component MainWindow inherits Window {
                     input_dir: root.merge_input_dir;
                     output_dir: root.merge_output_dir;
                     merge_progress: root.merge_progress;
-                    show_post_merge_dialog: root.show_post_merge_dialog;
-                    post_merge_message: root.post_merge_message;
-                    post_merge_action(action) => { root.post_merge_action(action); }
+                    show_review: root.show_merge_review;
+                    review_title: root.merge_review_title;
+                    review_message: root.merge_review_message;
+                    review_items: root.merge_review_items;
+                    review_requires_delete: root.merge_review_requires_delete;
+                    review_has_risks: root.merge_review_has_risks;
+                    review_revision: root.merge_review_revision;
+                    confirm_review(revision, phrase) => { root.confirm_merge_review(revision, phrase); }
+                    cancel_review => { root.cancel_merge_review(); }
                     select_input_clicked => { root.select_merger_input(); }
                     select_output_clicked => { root.select_merger_output(); }
-                    start_merge_clicked => { root.start_merge(); }
 
                     jobs: root.merge_jobs;
                     jobs_selected_count: root.merge_jobs_selected_count;
@@ -347,6 +375,10 @@ export component MainWindow inherits Window {
                 TranslationsView {
                     installed_translations: root.installed_translations;
                     status_text: root.translations_status;
+                    show_confirm: root.show_translation_confirm;
+                    removal_name: root.translation_removal_name;
+                    cancel_removal => { root.cancel_translation_removal(); }
+                    confirm_removal => { root.confirm_translation_removal(); }
                     select_translation_clicked => { root.select_translation_file(); }
                     delete_translation_clicked(name) => { root.delete_translation(name); }
                 }

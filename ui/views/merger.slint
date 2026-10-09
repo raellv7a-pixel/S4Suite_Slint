@@ -1,4 +1,4 @@
-import { ListView } from "std-widgets.slint";
+import { ListView, ScrollView, LineEdit } from "std-widgets.slint";
 import { I18n } from "../i18n.slint";
 import { Theme } from "../palette.slint";
 import { Card } from "../components/card.slint";
@@ -49,11 +49,25 @@ export component MergerView inherits Rectangle {
 
     callback select_input_clicked();
     callback select_output_clicked();
-    callback start_merge_clicked();
+    in property <bool> show_review: false;
+    in property <string> review_title: "";
+    in property <string> review_message: "";
+    in property <[string]> review_items;
+    in property <bool> review_requires_delete: false;
+    in property <bool> review_has_risks: false;
+    /// Incrementado por tarefa, inclusive quando nome, resumo e indícios são iguais.
+    in property <int> review_revision: 0;
+    callback confirm_review(int, string);
+    callback cancel_review();
 
-    in property <bool> show_post_merge_dialog: false;
-    in property <string> post_merge_message: "";
-    callback post_merge_action(string); // "keep", "disable", "backup", "delete"
+    property <string> delete_phrase: "";
+    property <int> phrase_revision: -1;
+    changed show_review => { root.delete_phrase = ""; }
+    changed review_revision => { root.delete_phrase = ""; root.phrase_revision = -1; }
+    changed review_title => { root.delete_phrase = ""; }
+    changed review_message => { root.delete_phrase = ""; }
+    changed review_items => { root.delete_phrase = ""; }
+    changed review_requires_delete => { root.delete_phrase = ""; }
 
     VerticalLayout {
         padding: 24px;
@@ -257,6 +271,7 @@ export component MergerView inherits Rectangle {
                             : (job_touch.has-hover ? Theme.surface_header : transparent);
 
                         job_touch := TouchArea {
+                            enabled: !root.is_merging;
                             clicked => { root.job_clicked(job.index); }
                         }
 
@@ -334,52 +349,86 @@ export component MergerView inherits Rectangle {
     }
 
     Dialog {
-        open: root.show_post_merge_dialog;
-        title: I18n.tr("Merge Concluído");
-        icon_str: Ic.check_circle;
-        title_color: M3.tertiary;
-        panel_width: 520px;
-        // Só há saída escolhendo uma das ações: fechar por engano deixaria os originais em
-        // estado indefinido depois do merge.
-        dismissed => { }
+        open: root.show_review;
+        title: root.review_title;
+        icon_str: Ic.warning;
+        title_color: root.review_requires_delete ? M3.error : M3.warning;
+        panel_width: 640px;
+        dismissed => { root.cancel_review(); }
 
         Text {
-            text: root.post_merge_message;
+            text: root.review_message;
             font-size: Type.body_m;
-            color: M3.on_surface_variant;
-            wrap: word-wrap;
-        }
-        Text {
-            text: I18n.tr("O que deseja fazer com os arquivos originais?");
-            font-size: Type.title_s;
-            font-weight: Type.title_s_w;
             color: M3.on_surface;
             wrap: word-wrap;
         }
+        if root.review_has_risks : Text {
+            text: I18n.tr("Os nomes e caminhos abaixo são indícios heurísticos, não incompatibilidades comprovadas. A autorização vale somente para esta tarefa.");
+            font-size: Type.body_s;
+            color: M3.on_surface_variant;
+            wrap: word-wrap;
+        }
 
-        VerticalLayout {
-            spacing: Space.sm;
+        if root.show_review && root.review_items.length > 0 : Rectangle {
+            height: min(180px, root.height / 4);
+            background: M3.surface_container_lowest;
+            border-radius: Shape.sm;
+            ScrollView {
+                VerticalLayout {
+                    padding: Space.sm;
+                    spacing: Space.sm;
+                    alignment: start;
+                    // Sem elisão: caminhos longos continuam acessíveis pela rolagem horizontal.
+                    for item in root.review_items : Text {
+                        text: item;
+                        font-size: Type.body_s;
+                        color: M3.on_surface_variant;
+                    }
+                }
+            }
+        }
+        if !root.review_has_risks : Text {
+            text: I18n.tr("Nenhum indício foi encontrado. Isso não garante compatibilidade; revise a origem, o destino e a pós-ação antes de prosseguir.");
+            font-size: Type.body_s;
+            color: M3.on_surface_variant;
+            wrap: word-wrap;
+        }
+
+        if root.review_requires_delete : Text {
+            text: I18n.tr("A exclusão dos originais após a unificação é permanente. Não será criado um backup por esta pós-ação.");
+            font-size: Type.body_m;
+            font-weight: Type.title_s_w;
+            color: M3.error;
+            wrap: word-wrap;
+        }
+        if root.review_requires_delete : Text {
+            text: I18n.tr("Para autorizar esta tarefa, digite exatamente:") + " EXCLUIR ORIGINAIS";
+            font-size: Type.body_s;
+            color: M3.on_surface;
+            wrap: word-wrap;
+        }
+        if root.review_requires_delete : LineEdit {
+            placeholder-text: "EXCLUIR ORIGINAIS";
+            text <=> root.delete_phrase;
+            enabled: root.show_review;
+            edited => { root.phrase_revision = root.review_revision; }
+        }
+
+        DialogActions {
             Button {
-                text: I18n.tr("Manter Originais (Recomendado para Testes)");
-                icon_str: Ic.shield_check;
-                kind: ButtonKind.filled;
-                clicked => { root.post_merge_action("keep"); }
+                text: I18n.tr("Cancelar");
+                kind: ButtonKind.text;
+                enabled: root.show_review;
+                clicked => { root.cancel_review(); }
             }
             Button {
-                text: I18n.tr("Desativar (.disabled)");
-                icon_str: Ic.eye_off;
-                clicked => { root.post_merge_action("disable"); }
-            }
-            Button {
-                text: I18n.tr("Mover para Backup (Zip)");
-                icon_str: Ic.archive;
-                clicked => { root.post_merge_action("backup"); }
-            }
-            Button {
-                text: I18n.tr("Excluir Definitivamente");
-                icon_str: Ic.trash;
-                kind: ButtonKind.danger;
-                clicked => { root.post_merge_action("delete"); }
+                text: root.review_requires_delete
+                    ? I18n.tr("Prosseguir e excluir originais")
+                    : I18n.tr("Prosseguir com esta tarefa");
+                icon_str: root.review_requires_delete ? Ic.trash : Ic.check_circle;
+                kind: root.review_requires_delete ? ButtonKind.danger : ButtonKind.filled;
+                enabled: root.show_review && (!root.review_requires_delete || (root.delete_phrase == "EXCLUIR ORIGINAIS" && root.phrase_revision == root.review_revision));
+                clicked => { root.confirm_review(root.review_requires_delete ? root.phrase_revision : root.review_revision, root.delete_phrase); }
             }
         }
     }

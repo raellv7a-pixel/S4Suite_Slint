@@ -6,6 +6,7 @@ use s4suite::engine::installer::{
     install_identity_name, is_valid_mod_file,
     prepare_staging, ConflictType, MANAGED_BASE_DIR, STAGING_DIR_NAME,
 };
+use s4suite::bridge::state::PendingInstall;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -295,8 +296,14 @@ fn variantes_marcadas_como_opcao_viram_uma_escolha() {
     let report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
     let opcoes = detect_mutually_exclusive(&report.staged_files);
 
-    assert_eq!(opcoes.len(), 2, "as duas variantes deveriam virar opções");
-    assert!(opcoes.iter().all(|f| f.filename.starts_with("Cabelo")));
+    assert_eq!(opcoes.len(), 1, "as variantes pertencem a um único grupo");
+    assert_eq!(
+        opcoes[0].files,
+        vec![
+            PathBuf::from("CabeloPack/Options/Cabelo Loiro.package"),
+            PathBuf::from("CabeloPack/Options/Cabelo Ruivo.package"),
+        ]
+    );
 }
 
 /// Uma opção sozinha não é uma escolha — perguntar ali só atrapalharia.
@@ -328,6 +335,323 @@ fn mod_comum_nao_e_confundido_com_variante_exclusiva() {
     let report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
 
     assert!(detect_mutually_exclusive(&report.staged_files).is_empty());
+}
+
+#[test]
+fn grupos_de_zips_e_pastas_distintos_nao_se_misturam() {
+    let fx = Fixture::new();
+    let first = fx.downloads.join("A.zip");
+    let second = fx.downloads.join("B.zip");
+    make_zip(
+        &first,
+        &[
+            ("Hair/Options/red.package", b"red".to_vec()),
+            ("Hair/Options/blue.package", b"blue".to_vec()),
+            ("Dress/ONLY_ONE/short.package", b"short".to_vec()),
+            ("Dress/ONLY_ONE/long.package", b"long".to_vec()),
+            ("common.package", b"common".to_vec()),
+        ],
+    );
+    make_zip(
+        &second,
+        &[
+            ("Hair/Options/black.package", b"black".to_vec()),
+            ("Hair/Options/white.package", b"white".to_vec()),
+        ],
+    );
+    prepare_staging(&[first, second], &fx.staging()).unwrap();
+    let mut report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
+    let groups = detect_mutually_exclusive(&report.staged_files);
+    assert_eq!(groups.len(), 3);
+    let hair = groups
+        .iter()
+        .find(|group| group.folder == Path::new("A/Hair/Options"))
+        .unwrap();
+    report
+        .select_variants(hair, &[PathBuf::from("A/Hair/Options/red.package")])
+        .unwrap();
+    assert_eq!(report.new_files, 6);
+    execute_installation(
+        &report,
+        &fx.mods_dir,
+        MANAGED_BASE_DIR,
+        &[fx.mods_dir.clone()],
+    )
+    .unwrap();
+    assert!(!fx.managed().join("A/Hair/Options/blue.package").exists());
+    for (path, bytes) in [
+        ("A/Hair/Options/red.package", b"red".as_slice()),
+        ("A/Dress/ONLY_ONE/short.package", b"short".as_slice()),
+        ("A/Dress/ONLY_ONE/long.package", b"long".as_slice()),
+        ("A/common.package", b"common".as_slice()),
+        ("B/Hair/Options/black.package", b"black".as_slice()),
+        ("B/Hair/Options/white.package", b"white".as_slice()),
+    ] {
+        assert_eq!(fs::read(fx.managed().join(path)).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn selecao_manual_recalcula_conflitos_e_recusa_itens_de_outro_grupo() {
+    let fx = Fixture::new();
+    let archive = fx.downloads.join("Variants.zip");
+    make_zip(
+        &archive,
+        &[
+            ("Choose One/new.package", b"new".to_vec()),
+            ("Choose One/update.package", b"updated".to_vec()),
+            ("Choose One/same.package", b"same".to_vec()),
+            ("Choose One/unselected.package", b"skip".to_vec()),
+            ("common.package", b"common".to_vec()),
+        ],
+    );
+    write_file(&fx.mods_dir.join("old/update.package"), b"old");
+    write_file(&fx.mods_dir.join("old/same.package"), b"same");
+    prepare_staging(&[archive], &fx.staging()).unwrap();
+    let mut report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
+    let group = detect_mutually_exclusive(&report.staged_files).remove(0);
+    assert!(report.select_variants(&group, &[]).is_err());
+    assert!(report
+        .select_variants(&group, &[PathBuf::from("Variants/common.package")])
+        .is_err());
+    let selected = [
+        PathBuf::from("Variants/Choose One/new.package"),
+        PathBuf::from("Variants/Choose One/update.package"),
+        PathBuf::from("Variants/Choose One/same.package"),
+    ];
+    report.select_variants(&group, &selected).unwrap();
+    assert_eq!(
+        (report.new_files, report.updates, report.exact_matches),
+        (2, 1, 1)
+    );
+    let outcome = execute_installation(
+        &report,
+        &fx.mods_dir,
+        MANAGED_BASE_DIR,
+        &[fx.mods_dir.clone()],
+    )
+    .unwrap();
+    assert_eq!(outcome, (3, 1));
+    assert_eq!(
+        fs::read(fx.mods_dir.join("old/update.package")).unwrap(),
+        b"updated"
+    );
+    assert_eq!(
+        fs::read(fx.mods_dir.join(".s4suite_backups/update.package")).unwrap(),
+        b"old"
+    );
+    assert!(!fx
+        .managed()
+        .join("Variants/Choose One/unselected.package")
+        .exists());
+    assert_eq!(
+        fs::read(fx.managed().join("Variants/common.package")).unwrap(),
+        b"common"
+    );
+}
+
+#[test]
+fn instalar_todas_as_possiveis_variantes_preserva_o_pacote() {
+    let fx = Fixture::new();
+    let archive = fx.downloads.join("Clothes.zip");
+    make_zip(
+        &archive,
+        &[
+            ("Options/dress.package", b"dress".to_vec()),
+            ("Options/skirt.package", b"skirt".to_vec()),
+        ],
+    );
+    prepare_staging(&[archive], &fx.staging()).unwrap();
+    let mut report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
+    let group = detect_mutually_exclusive(&report.staged_files).remove(0);
+    report.select_variants(&group, &group.files).unwrap();
+    assert_eq!(report.new_files, 2);
+    execute_installation(
+        &report,
+        &fx.mods_dir,
+        MANAGED_BASE_DIR,
+        &[fx.mods_dir.clone()],
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read(fx.managed().join("Clothes/Options/dress.package")).unwrap(),
+        b"dress"
+    );
+    assert_eq!(
+        fs::read(fx.managed().join("Clothes/Options/skirt.package")).unwrap(),
+        b"skirt"
+    );
+}
+
+#[test]
+fn opcoes_isoladas_em_fontes_independentes_nao_geram_grupo_global() {
+    let fx = Fixture::new();
+    let first = fx.downloads.join("A.zip");
+    let second = fx.downloads.join("B.zip");
+    make_zip(&first, &[("Options/top.package", b"top".to_vec())]);
+    make_zip(&second, &[("Options/skirt.package", b"skirt".to_vec())]);
+    prepare_staging(&[first, second], &fx.staging()).unwrap();
+    let report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
+    assert!(detect_mutually_exclusive(&report.staged_files).is_empty());
+}
+
+#[test]
+fn fontes_homonimas_mantem_staging_e_decisoes_independentes() {
+    let fx = Fixture::new();
+    let first = fx.downloads.join("A/Mod.zip");
+    let second = fx.downloads.join("B/Mod.zip");
+    fs::create_dir_all(first.parent().unwrap()).unwrap();
+    fs::create_dir_all(second.parent().unwrap()).unwrap();
+    make_zip(
+        &first,
+        &[
+            ("Options/first.package", b"first".to_vec()),
+            ("Options/second.package", b"second".to_vec()),
+        ],
+    );
+    make_zip(
+        &second,
+        &[
+            ("Options/third.package", b"third".to_vec()),
+            ("Options/fourth.package", b"fourth".to_vec()),
+        ],
+    );
+    prepare_staging(&[first, second], &fx.staging()).unwrap();
+    let mut report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
+    let groups = detect_mutually_exclusive(&report.staged_files);
+    assert_eq!(groups.len(), 2);
+    assert_ne!(groups[0].source, groups[1].source);
+    report
+        .select_variants(&groups[0], &groups[0].files[..1])
+        .unwrap();
+    assert!(groups[1].files.iter().all(|path| report
+        .staged_files
+        .iter()
+        .any(|file| file.rel_path == *path)));
+    assert_eq!(report.new_files, 3);
+}
+
+#[test]
+fn decisoes_todos_unico_e_manual_isolam_os_grupos_e_preservam_arquivos_comuns() {
+    let fx = Fixture::new();
+    let archive = fx.downloads.join("Mixed.zip");
+    make_zip(
+        &archive,
+        &[
+            ("A/Options/a.package", b"a".to_vec()),
+            ("A/Options/b.package", b"b".to_vec()),
+            ("B/Options/c.package", b"c".to_vec()),
+            ("B/Options/d.package", b"d".to_vec()),
+            ("C/Options/e.package", b"e".to_vec()),
+            ("C/Options/f.package", b"f".to_vec()),
+            ("C/Options/g.package", b"g".to_vec()),
+            ("common.package", b"common".to_vec()),
+        ],
+    );
+    prepare_staging(&[archive], &fx.staging()).unwrap();
+    let report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
+    let mut pending = PendingInstall::new(report, String::new());
+    pending.confirm_group().unwrap(); // Instalar todos no primeiro grupo.
+    pending.set_mode("one");
+    pending.toggle_file(Path::new("Mixed/B/Options/d.package"));
+    pending.toggle_file(Path::new("Mixed/C/Options/g.package")); // Outro grupo não é selecionável.
+    assert_eq!(
+        pending.selected,
+        vec![PathBuf::from("Mixed/B/Options/d.package")]
+    );
+    pending.confirm_group().unwrap();
+    assert_eq!(pending.mode, "all");
+    pending.set_mode("manual");
+    let files = pending.groups.front().unwrap().files.clone();
+    for file in &files {
+        pending.toggle_file(file);
+    }
+    assert!(pending.confirm_group().is_err()); // Vazio não avança nem descarta.
+    assert_eq!(pending.groups.len(), 1);
+    pending.toggle_file(Path::new("Mixed/C/Options/e.package"));
+    pending.toggle_file(Path::new("Mixed/C/Options/g.package"));
+    pending.confirm_group().unwrap();
+    assert!(pending.groups.is_empty());
+    assert_eq!(pending.report.new_files, 6);
+    execute_installation(
+        &pending.report,
+        &fx.mods_dir,
+        MANAGED_BASE_DIR,
+        &[fx.mods_dir.clone()],
+    )
+    .unwrap();
+    for path in [
+        "Mixed/A/Options/a.package",
+        "Mixed/A/Options/b.package",
+        "Mixed/B/Options/d.package",
+        "Mixed/C/Options/e.package",
+        "Mixed/C/Options/g.package",
+        "Mixed/common.package",
+    ] {
+        assert!(fx.managed().join(path).is_file(), "{path}");
+    }
+    assert!(!fx.managed().join("Mixed/B/Options/c.package").exists());
+    assert!(!fx.managed().join("Mixed/C/Options/f.package").exists());
+}
+#[test]
+fn roupas_e_fontes_avulsas_nao_viram_variantes_por_substrings() {
+    let fx = Fixture::new();
+    let archive = fx.downloads.join("Fashion Options.zip");
+    make_zip(
+        &archive,
+        &[
+            ("Adoption/pick_top.package", b"top".to_vec()),
+            (
+                "Optional accessories/exclusive_skirt.package",
+                b"skirt".to_vec(),
+            ),
+            ("Clothes/options_dress.package", b"dress".to_vec()),
+        ],
+    );
+    let loose = fx.downloads.join("choose_one_shoes.package");
+    write_file(&loose, b"shoes");
+    prepare_staging(&[archive, loose], &fx.staging()).unwrap();
+    let report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
+    assert!(detect_mutually_exclusive(&report.staged_files).is_empty());
+    execute_installation(
+        &report,
+        &fx.mods_dir,
+        MANAGED_BASE_DIR,
+        &[fx.mods_dir.clone()],
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read(
+            fx.managed()
+                .join("Fashion Options/Adoption/pick_top.package")
+        )
+        .unwrap(),
+        b"top"
+    );
+    assert_eq!(
+        fs::read(
+            fx.managed()
+                .join("Fashion Options/Optional accessories/exclusive_skirt.package")
+        )
+        .unwrap(),
+        b"skirt"
+    );
+    assert_eq!(
+        fs::read(
+            fx.managed()
+                .join("Fashion Options/Clothes/options_dress.package")
+        )
+        .unwrap(),
+        b"dress"
+    );
+    assert_eq!(
+        fs::read(
+            fx.managed()
+                .join("choose_one_shoes/choose_one_shoes.package")
+        )
+        .unwrap(),
+        b"shoes"
+    );
 }
 
 #[test]

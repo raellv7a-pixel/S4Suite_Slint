@@ -402,7 +402,7 @@ async fn main() {
         "",
     );
 
-    // (e) variantes exclusivas
+    // (e) possíveis variantes: escolha explícita antes do resumo
     let zip_opts = downloads.join("Vestido de Festa.zip");
     zip_com(
         &zip_opts,
@@ -415,7 +415,11 @@ async fn main() {
     state.set_installer_sources(vec![zip_opts.clone()]);
     w.invoke_start_install();
     let abriu_ex = esperar(|| w.get_show_exclusive_dialog(), 30_000);
-    let opcoes: Vec<String> = w.get_exclusive_options().iter().map(|s| s.to_string()).collect();
+    let opcoes: Vec<String> = w
+        .get_exclusive_options()
+        .iter()
+        .map(|s| s.path.to_string())
+        .collect();
     r.check(
         "pasta Options/ dispara a escolha de variante",
         abriu_ex && opcoes.len() == 2,
@@ -423,9 +427,15 @@ async fn main() {
     );
     if abriu_ex {
         let escolhida = opcoes.iter().find(|o| o.contains("Vermelho")).cloned().unwrap_or_default();
-        w.invoke_exclusive_option_picked(escolhida.clone().into());
+        w.invoke_exclusive_mode_selected("one".into());
+        w.invoke_toggle_exclusive_option(escolhida.clone().into());
+        w.invoke_confirm_exclusive_selection();
         pump(200);
-        r.check("escolher a variante leva ao resumo", w.get_show_careful_scan_dialog(), "");
+        r.check(
+            "escolher a variante leva ao resumo",
+            w.get_show_careful_scan_dialog(),
+            "",
+        );
         w.invoke_proceed_install_clicked();
         esperar(|| w.get_installer_status().contains("concluída"), 30_000);
         let base = mods.join("00_Triagem_Novos/Vestido de Festa/Options");
@@ -766,7 +776,22 @@ async fn main() {
     );
 
     w.invoke_start_merge_queue();
-    let terminou = esperar(|| !w.get_is_merging(), 180_000);
+    let terminou = esperar(
+        || {
+            if w.get_show_merge_review() {
+                // Somente as pós-ações backup/disable desta simulação; Delete
+                // jamais recebe uma autorização automática.
+                assert!(!w.get_merge_review_requires_delete());
+                println!(
+                    "Revisão consciente da tarefa: {}",
+                    w.get_merge_review_title()
+                );
+                w.invoke_confirm_merge_review(w.get_merge_review_revision(), "".into());
+            }
+            !w.get_is_merging()
+        },
+        180_000,
+    );
     r.check("fila do merger termina", terminou, w.get_merge_status().to_string());
 
     let partes: Vec<PathBuf> = fs::read_dir(&saida)
@@ -1074,6 +1099,12 @@ async fn main() {
         .find(|n| n.to_lowercase().contains("mod_x") || n.contains("Mod X"))
         .unwrap_or_default();
     w.invoke_delete_translation(alvo_del.clone().into());
+    r.check(
+        "exclusão pede confirmação antes de alterar o disco",
+        w.get_show_translation_confirm(),
+        w.get_translations_status().to_string(),
+    );
+    w.invoke_confirm_translation_removal();
     pump(300);
     let sumiu = !walkdir::WalkDir::new(&dir_trad)
         .into_iter()

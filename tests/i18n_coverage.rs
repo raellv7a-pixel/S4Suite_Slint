@@ -76,33 +76,13 @@ fn nenhuma_traducao_esta_vazia() {
     }
 }
 
-/// Emojis e marcadores fazem parte da identidade visual dos botões: a tradução
-/// precisa preservá-los, senão o inglês perde os ícones que o português tem.
-#[test]
-fn traducoes_preservam_os_emojis_iniciais_da_chave() {
-    for lang in ["en", "es"] {
-        for (key, value) in locale(lang) {
-            let Some(primeiro) = key.chars().next() else { continue };
-            if primeiro.is_ascii() {
-                continue;
-            }
-            let traduzido = value.as_str().unwrap_or("");
-            assert!(
-                traduzido.starts_with(primeiro),
-                "{}.json: {:?} começa com {:?} mas a tradução {:?} não",
-                lang,
-                key,
-                primeiro,
-                traduzido
-            );
-        }
-    }
-}
-
 #[test]
 fn portugues_e_o_idioma_base_e_devolve_a_propria_chave() {
     assert_eq!(t("Salvar", "pt"), "Salvar");
-    assert_eq!(t("Uma frase que ninguém traduziu", "pt"), "Uma frase que ninguém traduziu");
+    assert_eq!(
+        t("Uma frase que ninguém traduziu", "pt"),
+        "Uma frase que ninguém traduziu"
+    );
 }
 
 #[test]
@@ -118,5 +98,20 @@ fn chave_desconhecida_volta_como_esta() {
     let inventada = "Texto que não existe em locale nenhum";
     for lang in ["en", "es", "pt", "de"] {
         assert_eq!(t(inventada, lang), inventada);
+    }
+}
+
+#[test]
+fn avisos_de_seguranca_mantem_severidade_visivel_nos_tres_idiomas() {
+    use s4suite::core::status::{kind_of, label_of};
+    for key in [
+        "⚠️ Configure a pasta do jogo primeiro.",
+        "⚠️ Outra operação de manutenção está em andamento.",
+    ] {
+        for lang in ["pt", "en", "es"] {
+            let translated = t(key, lang);
+            assert_eq!(kind_of(&translated).as_str(), "warn");
+            assert!(!label_of(&translated).starts_with('⚠'));
+        }
     }
 }

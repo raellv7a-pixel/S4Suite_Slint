@@ -3,6 +3,7 @@ import { ScrollView, ListView } from "std-widgets.slint";
 import { Theme } from "../palette.slint";
 import { Card, CardKind } from "../components/card.slint";
 import { Button, ButtonKind } from "../components/button.slint";
+import { FilterChip } from "../components/chip.slint";
 import { M3 } from "../theme/colors.slint";
 import { Type, Shape, Space } from "../theme/typography.slint";
 import { Dialog, DialogActions } from "../components/dialog.slint";
@@ -16,6 +17,12 @@ export struct QueueItem {
     status: string,
 }
 
+export struct VariantOption {
+    path: string,
+    label: string,
+    selected: bool,
+}
+
 export component InstallerView inherits Rectangle {
     in property <[QueueItem]> queue_items;
     in property <bool> is_installing: false;
@@ -27,10 +34,15 @@ export component InstallerView inherits Rectangle {
     in property <bool> show_careful_scan_dialog: false;
     in property <string> careful_scan_message: "";
 
-    // Escolha entre variantes exclusivas do mesmo mod.
+    // Possíveis variantes inferidas da estrutura, sem incompatibilidade comprovada.
     in property <bool> show_exclusive_dialog: false;
-    in property <[string]> exclusive_options;
-    callback exclusive_option_picked(string);
+    in property <string> exclusive_group;
+    in property <string> exclusive_mode: "all";
+    in property <int> exclusive_selected_count: 0;
+    in property <[VariantOption]> exclusive_options;
+    callback exclusive_mode_selected(string);
+    callback toggle_exclusive_option(string);
+    callback confirm_exclusive_selection();
     callback cancel_exclusive();
     callback cancel_install_clicked();
     callback proceed_install_clicked();
@@ -174,54 +186,70 @@ export component InstallerView inherits Rectangle {
         }
     }
 
-    // Variantes do mesmo mod: o autor marcou a pasta como "escolha uma", e instalar todas
-    // costuma dar conflito dentro do jogo.
+    // Cada decisão vale apenas para a fonte e a pasta mostradas neste diálogo.
     Dialog {
         open: root.show_exclusive_dialog;
-        title: I18n.tr("Escolha uma variante");
+        title: I18n.tr("Possíveis variantes");
         icon_str: Ic.git_merge;
-        panel_width: 560px;
-        dismissed => { root.cancel_exclusive(); }
+        panel_width: 640px;
+        dismissed => { }
 
         Text {
-            text: I18n.tr("Este mod traz versões alternativas que não devem ser instaladas juntas. Escolha a que você quer:");
+            text: I18n.tr("Os nomes das pastas sugerem alternativas, mas não comprovam incompatibilidade. A decisão afeta somente este grupo.");
             font-size: Type.body_s;
             color: M3.on_surface_variant;
             wrap: word-wrap;
         }
 
+        Text {
+            text: root.exclusive_group;
+            font-size: Type.body_s;
+            color: M3.on_surface;
+            wrap: word-wrap;
+        }
+
+        VerticalLayout {
+            spacing: Space.sm;
+            FilterChip {
+                text: I18n.tr("Instalar todos");
+                selected: root.exclusive_mode == "all";
+                clicked => { root.exclusive_mode_selected("all"); }
+            }
+            FilterChip {
+                text: I18n.tr("Escolher apenas um");
+                selected: root.exclusive_mode == "one";
+                clicked => { root.exclusive_mode_selected("one"); }
+            }
+            FilterChip {
+                text: I18n.tr("Seleção manual de múltiplos arquivos");
+                selected: root.exclusive_mode == "manual";
+                clicked => { root.exclusive_mode_selected("manual"); }
+            }
+        }
+
         Rectangle {
-            height: 240px;
+            height: 160px;
             background: M3.surface_container_lowest;
             border-radius: Shape.sm;
             ScrollView {
                 VerticalLayout {
                     padding: Space.sm;
                     alignment: start;
-                    for opcao in root.exclusive_options : Rectangle {
-                        height: 36px;
-                        border-radius: Shape.xs;
-                        background: opt_touch.has-hover ? M3.surface_container_high : transparent;
-                        opt_touch := TouchArea {
-                            clicked => { root.exclusive_option_picked(opcao); }
-                        }
-                        HorizontalLayout {
-                            padding-left: Space.sm;
-                            spacing: Space.sm;
-                            alignment: center;
-                            Icon { glyph: Ic.package; font-size: 14px; color: M3.on_surface_variant; }
-                            Text {
-                                text: opcao;
-                                font-size: Type.body_s;
-                                color: M3.on_surface;
-                                horizontal-stretch: 1;
-                                vertical-alignment: center;
-                                overflow: elide;
-                            }
-                        }
+                    for opcao in root.exclusive_options : FilterChip {
+                        text: opcao.label;
+                        icon_str: Ic.package;
+                        selected: opcao.selected;
+                        enabled: root.exclusive_mode != "all";
+                        clicked => { root.toggle_exclusive_option(opcao.path); }
                     }
                 }
             }
+        }
+
+        Text {
+            text: I18n.tr("Selecionados:") + " " + root.exclusive_selected_count;
+            font-size: Type.body_s;
+            color: root.exclusive_selected_count == 0 ? M3.warning : M3.on_surface_variant;
         }
 
         DialogActions {
@@ -230,6 +258,12 @@ export component InstallerView inherits Rectangle {
                 icon_str: Ic.close;
                 kind: ButtonKind.text;
                 clicked => { root.cancel_exclusive(); }
+            }
+            Button {
+                text: I18n.tr("Confirmar seleção");
+                kind: ButtonKind.filled;
+                enabled: root.exclusive_selected_count > 0;
+                clicked => { root.confirm_exclusive_selection(); }
             }
         }
     }

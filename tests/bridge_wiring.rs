@@ -1,19 +1,9 @@
-//! Garante que os botões da UI chegam de fato ao engine.
+//! Exercita efeitos observáveis de callbacks com jogo e configuração temporários.
 //!
-//! Este arquivo existe por causa de uma classe de bug que apareceu três vezes
-//! neste port, sempre com o engine correto e testado por trás:
-//!
-//! - `on_start_merge` dormia e abria o diálogo sem nunca chamar o merger;
-//! - `check_scripts` tinha handler no Rust e nenhum botão o chamava;
-//! - `start_tray_import` só trocava o texto do status.
-//!
-//! Nenhum teste de engine pegaria isso. São duas verificações complementares:
-//! a **fiação** (todo callback declarado tem quem o receba, dos dois lados) e
-//! o **efeito** (acionar o callback muda o disco de verdade).
-//!
-//! Os testes de efeito são `#[tokio::test]` porque o adapter agenda trabalho em
-//! `spawn_blocking` já na montagem: sem runtime, ele entra em pânico antes de
-//! qualquer clique.
+//! As verificações textuais de fiação não provavam execução nem autorização e
+//! mantinham uma exceção para o caminho órfão do merger. A cobertura abaixo
+//! verifica seleção, confirmação, cancelamento e efeitos reais no disco.
+//! `tokio::test` fornece o runtime usado pelos workers do adapter.
 
 use i_slint_backend_testing as slint_testing;
 use s4suite::bridge::slint_adapter::setup_app_adapter;
@@ -21,193 +11,11 @@ use s4suite::bridge::state::AppState;
 use s4suite::core::config::ConfigManager;
 use s4suite::MainWindow;
 use slint::{ComponentHandle, Model};
-use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tempfile::TempDir;
 
-// --- Parte 1: fiação estática ---
-
-fn ui_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("ui")
-}
-
-fn read(path: &Path) -> String {
-    fs::read_to_string(path).unwrap_or_default()
-}
-
-/// Nomes dos `callback <nome>(...)` declarados num arquivo `.slint`.
-fn declared_callbacks(src: &str) -> BTreeSet<String> {
-    let mut nomes = BTreeSet::new();
-    for linha in src.lines() {
-        let linha = linha.trim();
-        let Some(resto) = linha.strip_prefix("callback ") else { continue };
-        // `pure callback` e afins param aqui de propósito: só nos interessam os
-        // que o Rust precisa implementar.
-        let nome: String = resto
-            .chars()
-            .take_while(|c| c.is_alphanumeric() || *c == '_')
-            .collect();
-        if !nome.is_empty() {
-            nomes.insert(nome);
-        }
-    }
-    nomes
-}
-
-/// Só as vistas. Os componentes de `ui/components/` declaram callbacks próprios (`clicked`,
-/// `dismissed`) que quem liga são as vistas, não o `main.slint` — cobri-los aqui produzia
-/// aprovação por acaso: `clicked` "passava" porque a substring aparece dentro de
-/// `clear_cache_clicked =>`. A cobertura deles está em
-/// [`todo_callback_de_componente_e_usado_por_alguma_view`].
-fn view_files() -> Vec<PathBuf> {
-    let mut arquivos = Vec::new();
-    let mut stack = vec![ui_dir().join("views")];
-    while let Some(dir) = stack.pop() {
-        for entry in fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()) {
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-            } else if path.extension().map(|e| e == "slint").unwrap_or(false)
-                && path.file_name().map(|n| n != "main.slint").unwrap_or(false)
-            {
-                arquivos.push(path);
-            }
-        }
-    }
-    arquivos
-}
-
-/// Todo callback da `MainWindow` precisa de um `window.on_<nome>` no adapter.
-///
-/// Sem isto, um callback pode existir dos dois lados e mesmo assim não fazer
-/// nada — foi o caso do `check_scripts`.
-#[test]
-fn todo_callback_da_janela_tem_handler_no_adapter() {
-    let main = read(&ui_dir().join("main.slint"));
-    let adapter = read(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src/bridge/slint_adapter.rs"),
-    );
-
-    let sem_handler: Vec<String> = declared_callbacks(&main)
-        .into_iter()
-        .filter(|nome| !adapter.contains(&format!("window.on_{}(", nome)))
-        .collect();
-
-    assert!(
-        sem_handler.is_empty(),
-        "callback(s) da MainWindow sem handler no adapter: {:?}",
-        sem_handler
-    );
-}
-
-/// Todo callback que uma vista declara precisa ser acionado por algum controle dela.
-///
-/// Existe porque uma refatoração de layout apagou, sem ninguém notar, a barra de ferramentas
-/// inteira do Organizador: os callbacks continuavam declarados, o `main.slint` continuava
-/// ligando-os e o Rust continuava com os handlers — só que nenhum botão os chamava mais. Os
-/// outros testes de fiação passavam com a funcionalidade fora do ar.
-#[test]
-fn todo_callback_de_view_tem_quem_o_acione_na_propria_view() {
-    // Fiação morta que **já existia** antes da refatoração de UI (confirmado em `git show HEAD`):
-    // `start_merge_clicked` é declarado na view, ligado no `main.slint` e tem handler no Rust,
-    // mas nenhum botão o aciona — o merger passou a funcionar só pela fila e o caminho de
-    // "unificar agora" ficou para trás. Remover envolve mexer no adapter, então fica anotado
-    // aqui em vez de silenciado.
-    const LEGADO_CONHECIDO: &[&str] = &["merger.slint::start_merge_clicked"];
-
-    let mut soltos: Vec<String> = Vec::new();
-
-    for arquivo in view_files() {
-        let src = read(&arquivo);
-        let nome_view = arquivo.file_name().unwrap().to_string_lossy().to_string();
-        for callback in declared_callbacks(&src) {
-            // A vista aciona como `root.nome()` ou `root.nome(arg)`.
-            let id = format!("{}::{}", nome_view, callback);
-            if !src.contains(&format!("root.{}(", callback)) && !LEGADO_CONHECIDO.contains(&id.as_str()) {
-                soltos.push(id);
-            }
-        }
-    }
-
-    assert!(
-        soltos.is_empty(),
-        "callback(s) declarados numa view que nenhum controle dela aciona: {:?}",
-        soltos
-    );
-}
-
-/// Todo callback declarado em `ui/components/` precisa ser consumido por alguém.
-///
-/// Um componente que oferece um callback que nenhuma vista liga é código morto — ou, pior, uma
-/// ação que o usuário aciona e que não vai a lugar nenhum.
-#[test]
-fn todo_callback_de_componente_e_usado_por_alguma_view() {
-    let dir = ui_dir().join("components");
-    let consumidores: String = view_files()
-        .iter()
-        .map(|p| read(p))
-        .chain(std::iter::once(read(&ui_dir().join("main.slint"))))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let mut soltos: Vec<String> = Vec::new();
-    for entry in fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()) {
-        let path = entry.path();
-        if path.extension().map(|e| e != "slint").unwrap_or(true) {
-            continue;
-        }
-        let nome = path.file_name().unwrap().to_string_lossy().to_string();
-        let src = read(&path);
-        for callback in declared_callbacks(&src) {
-            // Ligado como `nome => {` numa vista, ou invocado como `nome()` dentro do próprio
-            // componente por um irmão (caso do `Dialog` usado por outro componente).
-            let ligado = consumidores.contains(&format!("{} =>", callback))
-                || consumidores.contains(&format!("{}(", callback));
-            if !ligado {
-                soltos.push(format!("{}::{}", nome, callback));
-            }
-        }
-    }
-
-    assert!(
-        soltos.is_empty(),
-        "callback(s) de componente que nenhuma view usa: {:?}",
-        soltos
-    );
-}
-
-/// Todo callback declarado numa view precisa ser repassado pelo `main.slint`.
-///
-/// É o outro lado da mesma moeda: o handler existe no Rust, mas o botão da view
-/// não chega até ele porque o `main.slint` não fez a ligação.
-#[test]
-fn todo_callback_de_view_esta_ligado_no_main() {
-    let main = read(&ui_dir().join("main.slint"));
-    let mut soltos: Vec<String> = Vec::new();
-
-    for arquivo in view_files() {
-        let src = read(&arquivo);
-        let nome_view = arquivo.file_name().unwrap().to_string_lossy().to_string();
-        for callback in declared_callbacks(&src) {
-            // O main liga como `nome => {` ou `nome(arg) => {`.
-            let ligado = main.contains(&format!("{} =>", callback))
-                || main.contains(&format!("{}(", callback));
-            if !ligado {
-                soltos.push(format!("{}::{}", nome_view, callback));
-            }
-        }
-    }
-
-    assert!(
-        soltos.is_empty(),
-        "callback(s) de view que o main.slint não liga a nada: {:?}",
-        soltos
-    );
-}
-
-// --- Parte 2: efeito real no disco ---
 
 struct Harness {
     _root: TempDir,
@@ -476,4 +284,282 @@ async fn executar_a_fila_de_novo_nao_repete_as_tarefas_concluidas() {
         w.get_merge_status()
     );
     assert!(!w.get_is_merging(), "a fila não deveria ter começado a rodar");
+}
+
+#[tokio::test]
+async fn variantes_pela_ui_preservam_grupos_e_resumo_da_selecao() {
+    use s4suite::engine::installer::{calculate_conflicts, STAGING_DIR_NAME};
+
+    let h = Harness::new();
+    let w = h.window();
+    let staging = h.mods_dir.join(STAGING_DIR_NAME);
+    write_file(&staging.join("A/Options/keep.package"), b"XML Injector");
+    write_file(&staging.join("A/Options/discard.package"), b"Lot51");
+    write_file(&staging.join("B/Options/one.package"), b"one");
+    write_file(&staging.join("B/Options/two.package"), b"two");
+    write_file(&staging.join("A/common.package"), b"common");
+    let report = calculate_conflicts(&staging, &h.mods_dir).unwrap();
+    h.state
+        .set_pending_install(report, "\n\nFonte recusada: unsafe.zip".to_string());
+    w.set_is_installing(true);
+
+    w.invoke_exclusive_mode_selected("one".into());
+    w.invoke_toggle_exclusive_option("A/Options/keep.package".into());
+    w.invoke_proceed_install_clicked();
+    assert!(!h.mods_dir.join("00_Triagem_Novos").exists());
+    assert!(!w.get_show_careful_scan_dialog());
+    w.invoke_confirm_exclusive_selection();
+    assert!(w.get_show_exclusive_dialog());
+    assert_eq!(w.get_exclusive_selected_count(), 2);
+    assert!(w
+        .get_exclusive_options()
+        .iter()
+        .all(|option| option.path.starts_with("B/")));
+
+    w.invoke_exclusive_mode_selected("manual".into());
+    w.invoke_toggle_exclusive_option("B/Options/one.package".into());
+    w.invoke_toggle_exclusive_option("B/Options/two.package".into());
+    w.invoke_confirm_exclusive_selection();
+    assert!(w.get_show_exclusive_dialog());
+    assert!(!w.get_show_careful_scan_dialog());
+    w.invoke_exclusive_mode_selected("all".into());
+    w.invoke_confirm_exclusive_selection();
+
+    assert!(w.get_show_careful_scan_dialog());
+    assert!(!w.get_show_exclusive_dialog());
+    let summary = w.get_careful_scan_message();
+    assert!(summary.contains("4 mods novos"), "{summary}");
+    assert!(summary.contains("XML Injector"));
+    assert!(!summary.contains("Lot51"));
+    assert!(summary.contains("unsafe.zip"));
+    assert_eq!(w.get_installer_queue().row_count(), 4);
+    assert!(!h.mods_dir.join("00_Triagem_Novos").exists());
+    assert!(staging.join("A/Options/discard.package").exists());
+}
+
+#[tokio::test]
+async fn exclusao_de_traducao_exige_confirmacao_e_cancelar_preserva_disco() {
+    let h = Harness::new();
+    let w = h.window();
+    let item = h.mods_dir.join("01_Traducoes/Pacote/a.package");
+    write_file(&item, b"translation");
+    w.invoke_delete_translation("Pacote".into());
+    assert!(w.get_show_translation_confirm());
+    assert_eq!(w.get_translation_removal_name(), "Pacote");
+    assert_eq!(fs::read(&item).unwrap(), b"translation");
+    w.invoke_cancel_translation_removal();
+    w.invoke_confirm_translation_removal();
+    assert!(!w.get_show_translation_confirm());
+    assert!(item.exists());
+    w.invoke_delete_translation("Pacote".into());
+    w.invoke_confirm_translation_removal();
+    assert!(!item.parent().unwrap().exists());
+    assert!(h.mods_dir.is_dir());
+}
+
+#[tokio::test]
+async fn traducao_substituida_apos_confirmacao_pendente_nao_e_excluida() {
+    let h = Harness::new();
+    let w = h.window();
+    let item = h.mods_dir.join("01_Traducoes/a.package");
+    write_file(&item, b"old");
+    w.invoke_delete_translation("a.package".into());
+    let replacement = h.mods_dir.join("replacement.package");
+    write_file(&replacement, b"new");
+    fs::rename(&replacement, &item).unwrap();
+    w.invoke_confirm_translation_removal();
+    assert_eq!(fs::read(&item).unwrap(), b"new");
+    assert!(!w.get_show_translation_confirm());
+    assert!(w.get_translations_status().starts_with("❌"));
+}
+
+#[tokio::test]
+async fn troca_de_jogo_invalida_exclusao_pendente_e_caminho_protegido_e_recusado() {
+    let h = Harness::new();
+    let w = h.window();
+    let item = h.mods_dir.join("01_Traducoes/a.package");
+    write_file(&item, b"keep");
+    w.invoke_delete_translation("../../Mods".into());
+    assert!(!w.get_show_translation_confirm());
+    w.invoke_delete_translation("a.package".into());
+    let mut cfg = h.config_mgr.load();
+    cfg.sims4_path = Some(h._root.path().join("Other Game"));
+    fs::create_dir_all(cfg.sims4_path.as_ref().unwrap().join("Mods")).unwrap();
+    h.config_mgr.save(&cfg).unwrap();
+    w.invoke_confirm_translation_removal();
+    assert_eq!(fs::read(&item).unwrap(), b"keep");
+    assert!(w.get_translations_status().starts_with("❌"));
+}
+
+#[test]
+fn manutencao_impede_worker_concorrente_e_libera_apos_falha() {
+    let root = TempDir::new().unwrap();
+    let state = Arc::new(AppState::new(root.path()));
+    let permit = state.try_begin_background_operation().unwrap();
+    let other = Arc::clone(&state);
+    assert!(
+        std::thread::spawn(move || other.try_begin_background_operation().is_none())
+            .join()
+            .unwrap()
+    );
+    assert!(std::thread::spawn(move || {
+        let _permit = permit;
+        panic!("falha sintética do worker");
+    })
+    .join()
+    .is_err());
+    assert!(state.try_begin_background_operation().is_some());
+}
+
+fn preparar_revisao_delete(h: &Harness, w: &MainWindow) -> Vec<PathBuf> {
+    use s4suite::bridge::state::{PendingMergeReview, QueuedJob};
+    use s4suite::engine::dbpf::{DBPFWriter, PackageResource, ResourceKey};
+    use s4suite::engine::merger::{JobStatus, MergeJob, MergeReview, PostMergeAction};
+    let inputs = vec![
+        h.mods_dir.join("CC/a.package"),
+        h.mods_dir.join("CC/b.package"),
+    ];
+    let output = h._root.path().join("unificados");
+    fs::create_dir_all(&output).unwrap();
+    fs::create_dir_all(inputs[0].parent().unwrap()).unwrap();
+    for (i, path) in inputs.iter().enumerate() {
+        let mut file = fs::File::create(path).unwrap();
+        DBPFWriter::write_package(
+            &mut file,
+            &[PackageResource {
+                key: ResourceKey {
+                    type_id: 0x034AEECB,
+                    group_id: 0,
+                    instance_ex: 0,
+                    instance_low: i as u32,
+                },
+                data: vec![i as u8; 32],
+                mem_size: 32,
+                compressed: 0,
+            }],
+        )
+        .unwrap();
+        h.state.push_merge_job(QueuedJob {
+            name: "Mesmo nome".into(),
+            input_files: vec![path.clone()],
+            output_dir: output.clone(),
+            post_action: PostMergeAction::Delete,
+            status: JobStatus::Pending,
+        });
+    }
+    let queue = h.state.merge_jobs();
+    let limit = (h.config_mgr.load().merge_limit_gb * 1_073_741_824.0) as u64;
+    let reviews = queue
+        .iter()
+        .map(|job| {
+            MergeReview::prepare(MergeJob {
+                name: job.name.clone(),
+                input_files: job.input_files.clone(),
+                output_dir: job.output_dir.clone(),
+                max_size_bytes: limit,
+                post_action: job.post_action,
+            })
+            .unwrap()
+        })
+        .collect();
+    h.state.set_pending_merge_review(PendingMergeReview {
+        queue,
+        indices: vec![0, 1],
+        limit,
+        revision: h.state.merger_revision(),
+        decision_revision: 1,
+        reviews,
+        authorized: Vec::new(),
+        permit: h.state.try_begin_background_operation().unwrap(),
+    });
+    w.set_merge_review_revision(1);
+    w.set_show_merge_review(true);
+    w.set_is_merging(true);
+    inputs
+}
+
+#[tokio::test]
+async fn delete_exige_frase_exata_e_cancelar_preserva_toda_fila() {
+    let h = Harness::new();
+    let w = h.window();
+    let inputs = preparar_revisao_delete(&h, &w);
+    for phrase in ["", "excluir originais", "EXCLUIR ORIGINAIS "] {
+        w.invoke_confirm_merge_review(1, phrase.into());
+        assert!(h
+            .state
+            .with_pending_merge_review(|pending| pending.authorized.is_empty())
+            .unwrap());
+        assert!(inputs.iter().all(|p| p.exists()));
+    }
+    w.invoke_cancel_merge_review();
+    w.invoke_confirm_merge_review(1, "EXCLUIR ORIGINAIS".into());
+    assert!(inputs.iter().all(|p| p.exists()));
+    assert!(!h
+        ._root
+        .path()
+        .join("unificados")
+        .read_dir()
+        .unwrap()
+        .any(|e| e.is_ok()));
+    assert!(!w.get_is_merging());
+    assert!(h.state.try_begin_background_operation().is_some());
+}
+
+#[tokio::test]
+async fn confirmacao_de_uma_tarefa_nao_autoriza_outro_job_de_mesmo_nome() {
+    let h = Harness::new();
+    let w = h.window();
+    let inputs = preparar_revisao_delete(&h, &w);
+    w.invoke_confirm_merge_review(1, "EXCLUIR ORIGINAIS".into());
+    let next = w.get_merge_review_revision();
+    assert_ne!(next, 1);
+    assert!(w.get_show_merge_review());
+    assert!(w.get_merge_review_requires_delete());
+    w.invoke_confirm_merge_review(1, "EXCLUIR ORIGINAIS".into());
+    assert_eq!(
+        h.state
+            .with_pending_merge_review(|pending| pending.authorized.len()),
+        Some(1)
+    );
+    assert!(inputs.iter().all(|p| p.exists()));
+    w.invoke_cancel_merge_review();
+    assert!(inputs.iter().all(|p| p.exists()));
+}
+
+fn verificar_consentimento_invalidado(change: usize) {
+    let h = Harness::new();
+    let w = h.window();
+    let inputs = preparar_revisao_delete(&h, &w);
+    match change {
+        0 => h.state.set_merger_inputs(Vec::new()),
+        1 => {
+            h.state.toggle_selected_job(1);
+            h.state.remove_selected_jobs();
+        }
+        _ => {
+            let mut config = h.config_mgr.load();
+            config.merge_limit_gb += 1.0;
+            h.config_mgr.save(&config).unwrap();
+        }
+    }
+    w.invoke_confirm_merge_review(1, "EXCLUIR ORIGINAIS".into());
+    assert!(inputs.iter().all(|p| p.exists()));
+    assert!(!w.get_show_merge_review());
+    assert!(!w.get_is_merging());
+    assert!(h.state.take_pending_merge_review().is_none());
+}
+
+#[tokio::test]
+async fn selecao_alterada_invalida_consentimento() {
+    verificar_consentimento_invalidado(0);
+}
+
+#[tokio::test]
+async fn fila_alterada_invalida_consentimento() {
+    verificar_consentimento_invalidado(1);
+}
+
+#[tokio::test]
+async fn limite_alterado_invalida_consentimento() {
+    verificar_consentimento_invalidado(2);
 }

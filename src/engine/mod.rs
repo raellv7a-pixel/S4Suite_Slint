@@ -1,3 +1,5 @@
+pub mod backup;
+pub mod cache;
 pub mod dbpf;
 pub mod disabled;
 pub mod installer;

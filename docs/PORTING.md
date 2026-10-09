@@ -120,20 +120,29 @@ depende do `DisabledManager`, então inverter a ordem evitaria um TODO.
 
 ### Etapa 3 — Merger ✅ concluída
 
-`on_start_merge` era uma simulação: dormia e abria o diálogo sem nunca chamar
-`merge_sims4_packages()`. `post_merge_action` só trocava o texto do status —
-"Arquivos originais apagados" aparecia sem que nada fosse apagado.
+O fluxo corrente usa exclusivamente a fila. Os callbacks órfãos `start_merge`
+e `post_merge_action` foram removidos: a antiga pós-ação reconstruía a seleção
+atual, em vez de usar os arquivos efetivamente revisados e processados.
 
 - [x] Origem, destino e lista de packages persistidos no `AppState`.
 - [x] Merge DBPF real em `spawn_blocking`, com barra de progresso alimentada
       pelo callback do engine.
-- [x] Botão de iniciar só habilita com origem e destino definidos.
-- [x] `engine::merger::apply_post_merge_action()`: keep / disable / backup /
-      delete implementados de verdade.
-- [x] `common_ancestor()` define a raiz de segurança — nada fora da pasta de
-      origem é apagado ou renomeado, mesmo que entre na lista.
-- [x] Backup só remove os originais **depois** que o zip fecha com sucesso.
-- [x] 10 testes em `tests/merger_flow.rs`.
+- [x] `MergeReview::prepare()` analisa as entradas de cada tarefa em background:
+      tokens conservadores, tuning/XML e scripts no diretório imediato são
+      indícios apresentados com motivos, não provas de incompatibilidade.
+- [x] `approve()` produz `AuthorizedMergeJob`, não clonável e vinculado ao job,
+      caminhos, identidades e SHA-256 das entradas/scripts. `run_merge_queue()`
+      aceita somente esses tokens e revalida antes do merge e da pós-ação.
+- [x] Delete exige `EXCLUIR ORIGINAIS` literalmente para cada tarefa. O diálogo
+      limpa a frase e troca o nonce por tarefa; eventos de outra revisão são
+      recusados. Mudanças na fila, seleção, destino ou limite invalidam a revisão.
+- [x] Keep / Disable / Backup / Delete preservados; a pós-ação interna nunca
+      roda após merge parcial, malsucedido ou com fontes/destino alterados.
+- [x] Falhas de abertura/leitura e payload ausente/truncado/zlib inválido entram
+      no relatório, sem modificar a precedência TGI nem recomprimir recursos.
+- [x] Backup dos originais usa streaming, verificação de conteúdo e temporário
+      sem sobrescrita; só remove originais após publicação válida.
+- [x] Regressões em `tests/merger_flow.rs` e `tests/bridge_wiring.rs`.
 
 A lógica pós-merge vive no `engine/`, não no `bridge/`: é regra de negócio e
 precisa ser testável sem event loop (a regra de ouro no topo deste documento).
@@ -208,9 +217,13 @@ caminho, sem passar pela camada de segurança.
 - [x] A detecção de conflito varre `Mods` inteiro, mas só o que é **novo**
       aterrissa em `01_Traducoes`: uma tradução guardada fora da pasta é
       atualizada no lugar, em vez de virar uma segunda cópia carregando no jogo.
-- [x] `remove_translation` resolve o nome contra a listagem real e remove via
-      `core::safety` — `"../../algo"` não sai mais de `Mods`.
-- [x] 12 testes em `tests/translations_flow.rs`.
+- [x] `prepare_translation_removal()` resolve uma entrada exata e captura raízes,
+      identidade e árvore do item sem escrever no disco. A UI guarda essa
+      operação e apresenta confirmação permanente com nome/cancelar/excluir.
+- [x] Confirmar revalida configuração, raízes e conteúdo; cancelamento ou alvo
+      alterado não apagam nada. `remove_translation()` permanece para consumidores
+      imediatos de engine, com o escopo adicional validado.
+- [x] Regressões em `tests/translations_flow.rs` e `tests/bridge_wiring.rs`.
 
 ### Etapa 8 — Organizador completo ✅ concluída
 
@@ -262,21 +275,29 @@ limpeza de lixo e nas duplicatas uma pasta na lista só poderia ser engano.
 
 ### Etapa 10 — Installer e dashboard ✅ concluída
 
-- [x] `detect_mutually_exclusive` porta o `s4installer.py:234`: pasta marcada
-      como `options`/`choose`/`pick` vira uma escolha em vez de instalar todas
-      as variantes juntas. A marca precisa estar num componente do caminho —
-      senão `description.package` viraria opção.
-- [x] Escolhida a variante, as demais saem do relatório e as contagens do resumo
-      são recalculadas, senão o diálogo seguinte prometeria instalar todas.
-- [x] `collect_dependencies` reúne as bibliotecas exigidas e as mostra no
-      resumo. `detect_dependencies` existia no engine e nunca chegava à tela.
-      Só os primeiros 500 KB de cada package são lidos: as marcas ficam nos
-      metadados, e varrer centenas de arquivos inteiros custaria minutos.
+- [x] Smart Mod Installer V4: `detect_mutually_exclusive` retorna grupos de
+      **possíveis** variantes por fonte e pasta interna. Apenas marcadores
+      explícitos (`Options`, `Exclusive`, `Choose One`, `Pick One`, `Select One`,
+      `Only One`, com espaços, `_` ou `-`) acionam a sugestão. Nome do ZIP,
+      nome do arquivo e substrings como `Optional` não bastam; a heurística
+      não comprova incompatibilidade.
+- [x] Cada grupo oferece **Instalar todos** (padrão), **Escolher apenas um** ou
+      **Seleção manual de múltiplos arquivos**. Fontes homônimas recebem raízes
+      de staging distintas. Seleções vazias não avançam; arquivos comuns e
+      outros grupos permanecem intactos.
+- [x] Após resolver todos os grupos, a fila e as contagens refletem somente os
+      arquivos selecionados. Dependências são lidas em background e filtradas
+      pela seleção; falhas de preparação continuam no resumo. A confirmação
+      final permanece obrigatória antes de gravar, sem alterar segurança,
+      backups ou rollback do instalador.
 - [x] `engine/stats.rs` faz uma varredura única em vez de três, e passou a usar
       `walk_user_mods` — staging e backups são cópias do que já está contado, e
       incluí-los mostrava quase o dobro do espaço ocupado.
 - [x] Cards de scripts, tamanho e tray abrem a lista por trás do número.
-- [x] 17 testes de installer e 6 de stats.
+- [x] 25 testes de installer e 6 de stats. Regressões do V4 cobrem roupas,
+      múltiplos ZIPs, fontes homônimas, escolhas independentes, seleção manual
+      e atualização com backup. Smoke gráfico com arquivos sintéticos confirmou
+      os três modos, o resumo prévio, os payloads instalados e a limpeza do staging.
 
 ### Etapa 11 — Validação de todos os motores ✅ concluída
 
@@ -307,6 +328,37 @@ limpeza de lixo e nas duplicatas uma pasta na lista só poderia ser engano.
       de binário, 18 MB de AppImage. `panic = "abort"` fica de fora de
       propósito — as tarefas em `spawn_blocking` isolam falhas por arquivo, e
       sem unwind um package corrompido derrubaria o app inteiro.
+
+## Estabilização P0/P1 — arquivos e manutenção
+
+- `core::safety` protege todas as raízes autorizadas, inclusive Mods e raízes
+  sobrepostas, e exige caminhos existentes reais. Canonicalização permissiva
+  permanece somente para usos não destrutivos. Links/reparse no alvo ou ancestrais,
+  caminhos vazios, tipo incorreto e escopo externo são recusados. Subpastas e
+  arquivos internos continuam removíveis; links filhos de uma pasta real são
+  desvinculados sem seguir seus destinos.
+- Os consumidores de remoção foram revistos. ReShade não restaura uma DLL sobre
+  um alvo cuja exclusão foi recusada e propaga falhas de remoção/restauração.
+- `engine::cache::clean_game_cache()` exige uma raiz de jogo real com Mods real.
+  Só remove os arquivos `localthumbcache.package`/`spotlight_thumbnails.package`
+  e diretórios `cache`/`cachestr`. Retorna removidos, ausentes e falhas independentes;
+  o dashboard mostra as contagens e os detalhes de erros sem esconder sucesso parcial.
+- `engine::backup::create_zip_archive()` preserva estrutura/diretórios vazios e
+  copia em fluxo. Erros de percurso/leitura/escrita, mudanças na origem ou ZIP
+  inválido abortam. Usa temporário no destino, finish/flush/sync, releitura com CRC
+  e `persist_noclobber`; destino existente é preservado e só o temporário próprio
+  é removido em falha. Destino dentro da origem e links são recusados.
+- Cache, backup e merger compartilham uma permissão RAII de processamento em
+  background para impedir operações conflitantes; navegação permanece disponível.
+- Novas mensagens e diálogos seguem MD3 e PT/EN/ES. Regressões usam somente
+  diretórios temporários e dados sintéticos em `safety_flow`, `cache_flow`,
+  `backup_flow`, `translations_flow`, `merger_flow` e testes do bridge.
+
+**Limite de segurança:** validação por caminhos com `std::fs` e fingerprints
+repetidos não equivale a uma transação atômica contra substituição hostil de
+ancestrais entre syscalls. Não altere a árvore externamente durante as operações;
+faça backup dos saves com o jogo fechado. Isolamento forte exigiria snapshots
+ou operações relativas a descritores/handles, sem seguir links.
 
 ## O que falta
 

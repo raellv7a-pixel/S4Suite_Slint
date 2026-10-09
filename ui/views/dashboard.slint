@@ -17,6 +17,8 @@ export component DashboardView inherits Rectangle {
     in property <string> total_mods_size: "0 MB";
     in property <string> total_tray_count: "0";
     in property <string> status_message: "Pronto";
+    in property <bool> is_busy: false;
+    in property <string> operation_details;
 
     callback clear_cache_clicked();
     callback backup_saves_clicked();
@@ -133,11 +135,13 @@ export component DashboardView inherits Rectangle {
                     Button {
                         text: I18n.tr("Limpar Cache do Jogo");
                         icon_str: Ic.brush;
+                        enabled: !root.is_busy;
                         clicked => { root.clear_cache_clicked(); }
                     }
                     Button {
                         text: I18n.tr("Backup de Saves");
                         icon_str: Ic.shield;
+                        enabled: !root.is_busy;
                         clicked => { root.backup_saves_clicked(); }
                     }
                     Button {
@@ -147,6 +151,11 @@ export component DashboardView inherits Rectangle {
                         clicked => { root.refresh_stats_clicked(); }
                     }
                     Rectangle { horizontal-stretch: 1; }
+                }
+                if root.is_busy : Text {
+                    text: I18n.tr("Processando manutenção em background...");
+                    color: M3.primary;
+                    font-size: Type.body_m;
                 }
             }
         }
@@ -181,6 +190,17 @@ export component DashboardView inherits Rectangle {
         }
 
         StatusBar { text: root.status_message; }
+        if root.operation_details != "" : ScrollView {
+            height: 110px;
+            viewport-width: self.width;
+            Text {
+                width: parent.width;
+                text: root.operation_details;
+                wrap: word-wrap;
+                font-size: Type.body_m;
+                color: M3.error;
+            }
+        }
 
         Rectangle { vertical-stretch: 1; }
 
