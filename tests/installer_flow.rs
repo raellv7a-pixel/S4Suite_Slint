@@ -422,3 +422,159 @@ fn dependencia_e_encontrada_dentro_de_recurso_comprimido() {
         vec!["Lot51 Core Library"]
     );
 }
+
+// --- Testes de regressão P0: estabilização do instalador ---
+
+#[test]
+fn conteudo_diferente_com_mesmo_tamanho_e_identificado_como_atualizacao_e_instalado() {
+    let fx = Fixture::new();
+    // Cria dois conteúdos com exatamente o mesmo número de bytes
+    let conteudo_antigo = b"DBPF_VERSION_1_CONTEUDO_ANTIGO_COM_EXATAMENTE_64_BYTES_DE_TAMANHO!".to_vec();
+    let conteudo_novo   = b"DBPF_VERSION_2_CONTEUDO_NOVO___COM_EXATAMENTE_64_BYTES_DE_TAMANHO!".to_vec();
+    assert_eq!(conteudo_antigo.len(), conteudo_novo.len());
+    assert_ne!(conteudo_antigo, conteudo_novo);
+
+    let instalado = fx.mods_dir.join("MeusMods/update_mod.package");
+    write_file(&instalado, &conteudo_antigo);
+
+    let archive = fx.downloads.join("update_mod.zip");
+    make_zip(&archive, &[("update_mod.package", conteudo_novo.clone())]);
+
+    prepare_staging(&[archive], &fx.staging()).unwrap();
+    let report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
+
+    // Mesmo com o mesmo tamanho em bytes, não pode ser classificado como ExactMatch
+    assert_eq!(report.exact_matches, 0, "conteúdo diferente não pode ser ExactMatch mesmo com tamanho igual");
+    assert_eq!(report.updates, 1, "deve ser reconhecido como atualização");
+    assert_eq!(report.staged_files[0].conflict, ConflictType::SizeDiff);
+    assert_eq!(report.staged_files[0].destination(&fx.mods_dir, MANAGED_BASE_DIR), instalado);
+
+    let (installed, skipped) =
+        execute_installation(&report, &fx.mods_dir, MANAGED_BASE_DIR, &[fx.mods_dir.clone()]).unwrap();
+
+    assert_eq!(installed, 1);
+    assert_eq!(skipped, 0);
+    assert_eq!(fs::read(&instalado).unwrap(), conteudo_novo, "o arquivo instalado deve ter o novo conteúdo");
+
+    // Verifica que o backup do conteúdo anterior foi salvo intacto
+    let backups: Vec<_> = fs::read_dir(fx.mods_dir.join(".s4suite_backups"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(backups.len(), 1);
+    assert_eq!(fs::read(backups[0].path()).unwrap(), conteudo_antigo);
+}
+
+#[test]
+fn nomes_repetidos_em_mods_diferentes_nao_sobrescrevem_outros_autores() {
+    let fx = Fixture::new();
+
+    // Dois mods existentes de autores diferentes com o mesmo nome genérico de arquivo
+    let mod_autor_a = fx.mods_dir.join("AutorA_Roupas/item.package");
+    let mod_autor_b = fx.mods_dir.join("AutorB_Cabelos/item.package");
+    write_file(&mod_autor_a, b"conteudo_exclusivo_do_autor_a");
+    write_file(&mod_autor_b, b"conteudo_exclusivo_do_autor_b");
+
+    // Agora instalamos um terceiro mod não relacionado que também contém item.package
+    let archive = fx.downloads.join("AutorC_Moveis.zip");
+    make_zip(&archive, &[("item.package", b"conteudo_novo_do_autor_c".to_vec())]);
+
+    prepare_staging(&[archive], &fx.staging()).unwrap();
+    let report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
+
+    // Não deve sobrescrever AutorA nem AutorB
+    assert_eq!(report.updates, 0, "não deve assumir atualização de mod não relacionado");
+    assert_eq!(report.exact_matches, 0);
+    assert_eq!(report.new_files, 1, "deve ser classificado como novo arquivo isolado");
+    assert_eq!(report.staged_files[0].conflict, ConflictType::NewFile);
+
+    let esperado_dest = fx.managed().join("AutorC_Moveis/item.package");
+    assert_eq!(report.staged_files[0].destination(&fx.mods_dir, MANAGED_BASE_DIR), esperado_dest);
+
+    let (installed, skipped) =
+        execute_installation(&report, &fx.mods_dir, MANAGED_BASE_DIR, &[fx.mods_dir.clone()]).unwrap();
+    assert_eq!(installed, 1);
+    assert_eq!(skipped, 0);
+
+    // Todos os 3 mods devem coexistir intactos
+    assert_eq!(fs::read(&mod_autor_a).unwrap(), b"conteudo_exclusivo_do_autor_a");
+    assert_eq!(fs::read(&mod_autor_b).unwrap(), b"conteudo_exclusivo_do_autor_b");
+    assert_eq!(fs::read(&esperado_dest).unwrap(), b"conteudo_novo_do_autor_c");
+}
+
+#[test]
+fn falha_de_copia_executa_rollback_sem_arquivos_parciais_e_restaura_originais() {
+    let fx = Fixture::new();
+
+    // Mod original já instalado na pasta do pacote
+    let mod_antigo = fx.managed().join("PacoteMisto/mod_antigo.package");
+    write_file(&mod_antigo, b"versao_original_intacta");
+
+    // Pacote que atualiza mod_antigo e tenta instalar um segundo arquivo em subpasta
+    let archive = fx.downloads.join("PacoteMisto.zip");
+    make_zip(
+        &archive,
+        &[
+            ("mod_antigo.package", b"versao_atualizada_que_deve_ser_revertida".to_vec()),
+            ("z_bloqueado/arquivo.package", b"arquivo_que_vai_falhar".to_vec()),
+        ],
+    );
+
+    prepare_staging(&[archive], &fx.staging()).unwrap();
+    let mut report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
+    // Garante que o arquivo mod_antigo seja processado antes do arquivo que falhará
+    report.staged_files.sort_by(|a, b| b.filename.cmp(&a.filename));
+    // Provoca falha simulada criando um arquivo onde a pasta 'z_bloqueado' deveria ser criada
+    let pasta_bloqueada = fx.managed().join("PacoteMisto/z_bloqueado");
+    write_file(&pasta_bloqueada, b"arquivo_bloqueando_criacao_de_diretorio");
+
+    // A instalação deve falhar no segundo arquivo e executar rollback atômico
+    let resultado = execute_installation(&report, &fx.mods_dir, MANAGED_BASE_DIR, &[fx.mods_dir.clone()]);
+    assert!(resultado.is_err(), "instalação deveria falhar e acionar rollback");
+
+    // O arquivo mod_antigo deve ter sido restaurado com seu conteúdo original
+    assert_eq!(
+        fs::read(&mod_antigo).unwrap(),
+        b"versao_original_intacta",
+        "rollback deve restaurar o arquivo original intacto"
+    );
+
+    // Nenhum arquivo temporário .s4tmp deve sobrar
+    for entry in walkdir::WalkDir::new(&fx.mods_dir).into_iter().filter_map(|e| e.ok()) {
+        let fname = entry.file_name().to_string_lossy();
+        assert!(!fname.ends_with(".s4tmp"), "não deve deixar arquivos temporários residuais: {}", entry.path().display());
+    }
+
+    // O backup gerado deve permanecer preservado em .s4suite_backups
+    let backups: Vec<_> = fs::read_dir(fx.mods_dir.join(".s4suite_backups"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(backups.len(), 1, "o backup de segurança deve ser preservado para contingência");
+}
+
+#[test]
+fn interrupcao_recuperavel_preserva_integridade_e_permite_reinstalacao() {
+    let fx = Fixture::new();
+
+    let archive = fx.downloads.join("ModRecuperavel.zip");
+    make_zip(&archive, &[("recup/item.package", b"conteudo_recuperavel".to_vec())]);
+
+    // Simula primeira extração para staging
+    prepare_staging(&[archive.clone()], &fx.staging()).unwrap();
+    assert!(fx.staging().join("ModRecuperavel/recup/item.package").exists());
+
+    // Simula interrupção e limpeza segura de staging
+    s4suite::engine::installer::clear_staging(&fx.staging()).unwrap();
+    assert!(!fx.staging().exists(), "staging deve ser limpo completamente");
+
+    // Segunda tentativa do fluxo completo
+    prepare_staging(&[archive], &fx.staging()).unwrap();
+    let report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
+    let (installed, skipped) =
+        execute_installation(&report, &fx.mods_dir, MANAGED_BASE_DIR, &[fx.mods_dir.clone()]).unwrap();
+
+    assert_eq!(installed, 1);
+    assert_eq!(skipped, 0);
+    assert!(fx.managed().join("ModRecuperavel/recup/item.package").exists());
+}

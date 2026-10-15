@@ -1,7 +1,7 @@
 use crate::core::safety::{safe_remove_file, unique_dest_path};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
-use std::io;
+use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use walkdir::WalkDir;
@@ -23,6 +23,8 @@ pub enum InstallerError {
     ExtractionFailed(String),
     #[error("Erro de I/O: {0}")]
     Io(#[from] io::Error),
+    #[error("Falha durante o rollback da instalação: {0}")]
+    RollbackFailed(String),
 }
 
 /// Normaliza o nome de um mod para servir de identidade de pasta.
@@ -307,6 +309,12 @@ impl StagedFile {
     }
 }
 
+#[derive(Debug, Clone)]
+struct ExistingCandidate {
+    path: PathBuf,
+    size: u64,
+}
+
 pub struct ConflictReport {
     pub staged_files: Vec<StagedFile>,
     pub exact_matches: usize,
@@ -326,12 +334,16 @@ pub fn calculate_conflicts(
     // O staging e os backups moram dentro de Mods. Sem excluí-los aqui, os
     // arquivos recém-extraídos apareceriam como "já instalados" e toda a fila
     // seria classificada como ExactMatch.
-    let mut existing_map: HashMap<String, (PathBuf, u64)> = HashMap::new();
+
+    let mut existing_map: HashMap<String, Vec<ExistingCandidate>> = HashMap::new();
     for entry in crate::engine::walk_user_mods(mods_dir, usize::MAX) {
         if entry.path().is_file() {
             let fname = entry.file_name().to_string_lossy().to_string();
             let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-            existing_map.insert(fname, (entry.path().to_path_buf(), size));
+            existing_map.entry(fname).or_default().push(ExistingCandidate {
+                path: entry.path().to_path_buf(),
+                size,
+            });
         }
     }
 
@@ -356,21 +368,39 @@ pub fn calculate_conflicts(
             })
             .unwrap_or_else(|| "mod".to_string());
 
-        let (conflict, existing_dest) = match existing_map.get(&filename) {
-            Some((dest, existing_size)) if *existing_size == size => {
-                exact_matches += 1;
-                (ConflictType::ExactMatch, Some(dest.clone()))
-            }
-            Some((dest, _)) => {
-                updates += 1;
-                (ConflictType::SizeDiff, Some(dest.clone()))
+        let candidates = existing_map.get(&filename).map(|v| v.as_slice()).unwrap_or(&[]);
+
+        // Localiza candidato legítimo para atualização evitando substituir mods não relacionados
+        let matched_dest = find_matching_existing_file(
+            &rel_path,
+            &mod_root,
+            &filename,
+            candidates,
+            mods_dir,
+            MANAGED_BASE_DIR,
+        );
+
+        let (conflict, existing_dest) = match matched_dest {
+            Some(cand) => {
+                let is_identical = if cand.size == size {
+                    files_are_identical(path, &cand.path).unwrap_or(false)
+                } else {
+                    false
+                };
+
+                if is_identical {
+                    exact_matches += 1;
+                    (ConflictType::ExactMatch, Some(cand.path.clone()))
+                } else {
+                    updates += 1;
+                    (ConflictType::SizeDiff, Some(cand.path.clone()))
+                }
             }
             None => {
                 new_files += 1;
                 (ConflictType::NewFile, None)
             }
         };
-
         staged_files.push(StagedFile {
             src_path: path.to_path_buf(),
             rel_path,
@@ -492,6 +522,113 @@ pub fn collect_dependencies(staged: &[StagedFile]) -> Vec<String> {
     encontradas
 }
 
+/// Copia de forma atômica usando um arquivo temporário no mesmo diretório de destino.
+/// Garante que interrupções ou erros não deixem arquivos parciais corrompidos no destino.
+pub fn atomic_copy(src: &Path, dest: &Path) -> io::Result<()> {
+    let parent = dest.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "Destino sem pasta pai")
+    })?;
+    fs::create_dir_all(parent)?;
+    let filename = dest.file_name().unwrap_or_default().to_string_lossy();
+    let tmp_dest = unique_dest_path(parent, &format!(".{}.s4tmp", filename));
+
+    if let Err(e) = fs::copy(src, &tmp_dest) {
+        let _ = fs::remove_file(&tmp_dest);
+        return Err(e);
+    }
+
+    if let Err(e) = fs::rename(&tmp_dest, dest) {
+        let _ = fs::remove_file(&tmp_dest);
+        return Err(e);
+    }
+
+    Ok(())
+}
+
+/// Compara byte a byte o conteúdo de dois arquivos.
+pub fn files_are_identical(a: &Path, b: &Path) -> io::Result<bool> {
+    let meta_a = fs::metadata(a)?;
+    let meta_b = fs::metadata(b)?;
+    if meta_a.len() != meta_b.len() {
+        return Ok(false);
+    }
+    if meta_a.len() == 0 {
+        return Ok(true);
+    }
+    let mut file_a = File::open(a)?;
+    let mut file_b = File::open(b)?;
+    let mut buf_a = [0u8; 64 * 1024];
+    let mut buf_b = [0u8; 64 * 1024];
+    loop {
+        let n_a = file_a.read(&mut buf_a)?;
+        let n_b = file_b.read(&mut buf_b)?;
+        if n_a != n_b || buf_a[..n_a] != buf_b[..n_b] {
+            return Ok(false);
+        }
+        if n_a == 0 {
+            return Ok(true);
+        }
+    }
+}
+
+fn find_matching_existing_file<'a>(
+    rel_path: &Path,
+    mod_root: &str,
+    filename: &str,
+    candidates: &'a [ExistingCandidate],
+    mods_dir: &Path,
+    managed_base: &str,
+) -> Option<&'a ExistingCandidate> {
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let is_script = filename.to_lowercase().ends_with(".ts4script");
+    let expected_dest = if is_script {
+        mods_dir.join(managed_base).join(filename)
+    } else {
+        mods_dir.join(managed_base).join(rel_path)
+    };
+
+    // 1. Caminho exato de destino já existente
+    if let Some(exact) = candidates.iter().find(|c| c.path == expected_dest) {
+        return Some(exact);
+    }
+
+    // 2. Caminho relativo coincide dentro de alguma subpasta de Mods
+    if !is_script {
+        if let Some(rel_match) = candidates.iter().find(|c| c.path.ends_with(rel_path)) {
+            return Some(rel_match);
+        }
+    }
+
+    // 3. A pasta pai do candidato tem o mesmo nome da identidade do mod (mod_root)
+    if let Some(parent_match) = candidates.iter().find(|c| {
+        c.path
+            .parent()
+            .and_then(|p| p.file_name())
+            .map(|name| name.to_string_lossy() == mod_root)
+            .unwrap_or(false)
+    }) {
+        return Some(parent_match);
+    }
+
+    // 4. Caso o mod consista de um único arquivo principal cujo stem coincida com o mod_root
+    //    (ex: alpha.package originado de alpha.zip / alpha.package avulso)
+    //    E exista EXATAMENTE um candidato em toda a pasta Mods.
+    let file_stem = Path::new(filename)
+        .file_stem()
+        .map(|s| s.to_string_lossy())
+        .unwrap_or_default();
+    if candidates.len() == 1 && file_stem.eq_ignore_ascii_case(mod_root) {
+        return Some(&candidates[0]);
+    }
+
+    // Se nenhum critério de identidade confirmou que é o mesmo mod,
+    // trata como arquivo novo para impedir a substituição de mods de outros autores.
+    None
+}
+
 pub fn execute_installation(
     report: &ConflictReport,
     mods_dir: &Path,
@@ -504,11 +641,13 @@ pub fn execute_installation(
     let mut installed_count = 0;
     let mut skipped_count = 0;
     let mut backup_copies: Vec<(PathBuf, PathBuf)> = Vec::new();
-    let mut new_destinations: Vec<PathBuf> = Vec::new();
+    let mut backed_up_targets: HashSet<PathBuf> = HashSet::new();
+    let mut newly_created_files: Vec<PathBuf> = Vec::new();
+    let mut updated_files: Vec<PathBuf> = Vec::new();
 
     let mut execute = || -> Result<(), io::Error> {
         for file in &report.staged_files {
-            // Byte-por-byte já presente: copiar de novo só gasta I/O.
+            // Byte-por-byte idêntico já presente: copiar de novo só gasta I/O.
             if file.conflict == ConflictType::ExactMatch {
                 skipped_count += 1;
                 continue;
@@ -516,33 +655,72 @@ pub fn execute_installation(
 
             let target_dest = file.destination(mods_dir, managed_base);
 
+            // Se o arquivo já existe no destino, faça backup atômico antes de sobrescrever
             if target_dest.exists() {
-                let backup_file = unique_dest_path(&backup_dir, &file.filename);
-                fs::copy(&target_dest, &backup_file)?;
-                backup_copies.push((target_dest.clone(), backup_file));
+                if backed_up_targets.insert(target_dest.clone()) {
+                    let backup_file = unique_dest_path(&backup_dir, &file.filename);
+                    atomic_copy(&target_dest, &backup_file)?;
+                    backup_copies.push((target_dest.clone(), backup_file));
+                }
+                updated_files.push(target_dest.clone());
+            } else {
+                newly_created_files.push(target_dest.clone());
             }
 
-            if let Some(parent) = target_dest.parent() {
-                fs::create_dir_all(parent)?;
-            }
-
-            fs::copy(&file.src_path, &target_dest)?;
-            new_destinations.push(target_dest);
+            // Instalação atômica via arquivo temporário para evitar arquivos parciais
+            atomic_copy(&file.src_path, &target_dest)?;
             installed_count += 1;
         }
         Ok(())
     };
 
     if let Err(e) = execute() {
-        // Rollback
-        for dest in new_destinations {
-            let _ = safe_remove_file(&dest, allowed_roots);
+        // Rollback robusto: não engole erros silenciosamente e restaura arquivos de forma atômica
+        let mut rollback_errors = Vec::new();
+
+        // 1. Remove apenas os arquivos verdadeiramente novos criados nesta instalação
+        for dest in newly_created_files {
+            if dest.exists() {
+                if let Err(err) = safe_remove_file(&dest, allowed_roots) {
+                    rollback_errors.push(format!(
+                        "falha ao remover arquivo novo {}: {}",
+                        dest.display(),
+                        err
+                    ));
+                }
+            }
         }
+
+        // 2. Restaura os arquivos anteriores a partir do backup
         for (target_dest, backup_file) in backup_copies {
-            let _ = fs::copy(&backup_file, &target_dest);
+            if backup_file.exists() {
+                if let Err(err) = atomic_copy(&backup_file, &target_dest) {
+                    rollback_errors.push(format!(
+                        "falha ao restaurar {} de {}: {}",
+                        target_dest.display(),
+                        backup_file.display(),
+                        err
+                    ));
+                }
+            } else {
+                rollback_errors.push(format!(
+                    "backup ausente para restauração de {}",
+                    target_dest.display()
+                ));
+            }
         }
+
+        if !rollback_errors.is_empty() {
+            return Err(InstallerError::RollbackFailed(format!(
+                "Erro na instalação: {}. Erros adicionais no rollback: {}",
+                e,
+                rollback_errors.join("; ")
+            )));
+        }
+
         return Err(InstallerError::Io(e));
     }
 
     Ok((installed_count, skipped_count))
 }
+
