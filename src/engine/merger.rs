@@ -111,74 +111,138 @@ where
     let mut current_chunk_resources: Vec<PackageResource> = Vec::new();
     let mut current_chunk_bytes = 0u64;
     let mut output_packages = Vec::new();
+    let mut pending_chunks: Vec<(PathBuf, PathBuf)> = Vec::new();
 
     let safe_limit = ((task.max_size_bytes as f64) * 0.90) as u64;
 
     // Cache opened files to avoid reopening repeatedly
     let mut file_cache: std::collections::HashMap<PathBuf, BufReader<File>> = std::collections::HashMap::new();
 
-    for (res_idx, key) in sorted_keys.iter().enumerate() {
-        if res_idx % 100 == 0 || res_idx == sorted_keys.len() - 1 {
-            progress_cb(res_idx + 1, sorted_keys.len(), &format!("Processando Recursos: {}/{}", res_idx + 1, sorted_keys.len()));
-        }
-
-        let (src_path, offset, size, mem_size, compressed) = &global_resources[key];
-
-        if !file_cache.contains_key(src_path) {
-            if let Ok(f) = File::open(src_path) {
-                file_cache.insert(src_path.clone(), BufReader::with_capacity(4 * 1024 * 1024, f));
+    let write_result = (|| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        for (res_idx, key) in sorted_keys.iter().enumerate() {
+            if res_idx % 100 == 0 || res_idx == sorted_keys.len() - 1 {
+                progress_cb(res_idx + 1, sorted_keys.len(), &format!("Processando Recursos: {}/{}", res_idx + 1, sorted_keys.len()));
             }
-        }
 
-        let mut data = vec![0u8; *size as usize];
-        if let Some(reader) = file_cache.get_mut(src_path) {
-            if reader.seek(SeekFrom::Start(*offset as u64)).is_ok() {
-                let _ = reader.read_exact(&mut data);
+            let (src_path, offset, size, mem_size, compressed) = &global_resources[key];
+
+            if !file_cache.contains_key(src_path) {
+                match File::open(src_path) {
+                    Ok(f) => {
+                        file_cache.insert(src_path.clone(), BufReader::with_capacity(4 * 1024 * 1024, f));
+                    }
+                    Err(e) => {
+                        let err_msg = format!("falha ao abrir arquivo fonte: {}", e);
+                        if !failed_files.iter().any(|(p, _)| p == &src_path.display().to_string()) {
+                            failed_files.push((src_path.display().to_string(), err_msg));
+                            if success_count > 0 {
+                                success_count -= 1;
+                            }
+                        }
+                        continue;
+                    }
+                }
             }
+
+            let mut data = vec![0u8; *size as usize];
+            let mut read_failed = false;
+            if let Some(reader) = file_cache.get_mut(src_path) {
+                if let Err(e) = reader.seek(SeekFrom::Start(*offset as u64)) {
+                    let err_msg = format!("falha no seek do recurso {}: {}", key, e);
+                    if !failed_files.iter().any(|(p, _)| p == &src_path.display().to_string()) {
+                        failed_files.push((src_path.display().to_string(), err_msg));
+                        if success_count > 0 {
+                            success_count -= 1;
+                        }
+                    }
+                    read_failed = true;
+                } else if let Err(e) = reader.read_exact(&mut data) {
+                    let err_msg = format!("falha na leitura do recurso {}: arquivo truncado ou erro de I/O ({})", key, e);
+                    if !failed_files.iter().any(|(p, _)| p == &src_path.display().to_string()) {
+                        failed_files.push((src_path.display().to_string(), err_msg));
+                        if success_count > 0 {
+                            success_count -= 1;
+                        }
+                    }
+                    read_failed = true;
+                }
+            } else {
+                read_failed = true;
+            }
+
+            if read_failed {
+                continue;
+            }
+
+            let res_len = data.len() as u64;
+            if current_chunk_bytes + res_len > safe_limit && !current_chunk_resources.is_empty() {
+                let part_name = format!("{}_Part{:03}.package", stem, chunk_index);
+                let tmp_name = format!(".{}_Part{:03}.package.s4tmp", stem, chunk_index);
+                let part_path = task.output_dir.join(&part_name);
+                let tmp_path = task.output_dir.join(&tmp_name);
+
+                write_package_chunk(&tmp_path, &current_chunk_resources)?;
+                validate_package_chunk(&tmp_path, current_chunk_resources.len())?;
+                pending_chunks.push((tmp_path, part_path));
+
+                chunk_index += 1;
+                current_chunk_resources.clear();
+                current_chunk_bytes = 0;
+            }
+
+            current_chunk_resources.push(PackageResource {
+                key: *key,
+                data,
+                mem_size: *mem_size,
+                compressed: *compressed,
+            });
+            current_chunk_bytes += res_len;
         }
 
-        let res_len = data.len() as u64;
-        if current_chunk_bytes + res_len > safe_limit && !current_chunk_resources.is_empty() {
+        if !current_chunk_resources.is_empty() {
             let part_name = format!("{}_Part{:03}.package", stem, chunk_index);
+            let tmp_name = format!(".{}_Part{:03}.package.s4tmp", stem, chunk_index);
             let part_path = task.output_dir.join(&part_name);
-            write_package_chunk(&part_path, &current_chunk_resources)?;
-            output_packages.push(part_path.display().to_string());
+            let tmp_path = task.output_dir.join(&tmp_name);
 
-            chunk_index += 1;
-            current_chunk_resources.clear();
-            current_chunk_bytes = 0;
+            write_package_chunk(&tmp_path, &current_chunk_resources)?;
+            validate_package_chunk(&tmp_path, current_chunk_resources.len())?;
+            pending_chunks.push((tmp_path, part_path));
         }
 
-        current_chunk_resources.push(PackageResource {
-            key: *key,
-            data,
-            mem_size: *mem_size,
-            compressed: *compressed,
-        });
-        current_chunk_bytes += res_len;
+        Ok(())
+    })();
+
+    if let Err(e) = write_result {
+        // Limpa arquivos temporários não publicados em caso de erro
+        for (tmp_path, _) in &pending_chunks {
+            let _ = fs::remove_file(tmp_path);
+        }
+        return Err(e);
     }
 
-    if !current_chunk_resources.is_empty() {
-        let part_name = format!("{}_Part{:03}.package", stem, chunk_index);
-        let part_path = task.output_dir.join(&part_name);
-        write_package_chunk(&part_path, &current_chunk_resources)?;
-        output_packages.push(part_path.display().to_string());
+    // Publica atomicamente todas as partes validadas
+    for (tmp_path, final_path) in pending_chunks {
+        fs::rename(&tmp_path, &final_path)?;
+        output_packages.push(final_path.display().to_string());
     }
 
     let report = MergeReport {
-        success: failed_files.is_empty(),
-        partial: !failed_files.is_empty() && success_count > 0,
+        success: failed_files.is_empty() && success_count == total_files && !output_packages.is_empty(),
+        partial: !failed_files.is_empty() && success_count > 0 && !output_packages.is_empty(),
         total_files_found: total_files,
         success_count,
         failed_files,
         output_packages,
     };
 
-    // O relatório acompanha as partes: um `merge_report.json` fixo era
-    // sobrescrito pela tarefa seguinte, apagando o registro da anterior.
+    // O relatório acompanha as partes gravado de forma atômica
     let report_path = task.output_dir.join(format!("{}_report.json", stem));
     if let Ok(json) = serde_json::to_string_pretty(&report) {
-        let _ = fs::write(report_path, json);
+        let tmp_report = task.output_dir.join(format!(".{}_report.json.s4tmp", stem));
+        if fs::write(&tmp_report, json).is_ok() {
+            let _ = fs::rename(&tmp_report, &report_path);
+        }
     }
 
     Ok(report)
@@ -267,12 +331,12 @@ where
         });
 
         let outcome = match result {
-            Ok(report) if report.success => {
+            Ok(report) if report.success && report.failed_files.is_empty() && !report.partial && !report.output_packages.is_empty() => {
                 let post = common_ancestor(&job.input_files).map(|root| {
                     apply_post_merge_action(job.post_action, &job.input_files, &root, disabled_mgr)
                 });
                 let status = match &post {
-                    Some(p) if p.failed > 0 => JobStatus::Partial,
+                    Some(p) if p.failed > 0 || p.error.is_some() => JobStatus::Partial,
                     _ => JobStatus::Done,
                 };
                 JobOutcome {
@@ -429,24 +493,101 @@ pub fn common_ancestor(paths: &[PathBuf]) -> Option<PathBuf> {
 /// Compacta uma lista específica de arquivos, preservando o caminho relativo
 /// a `base_dir`.
 fn create_zip_from_files(files: &[PathBuf], base_dir: &Path, zip_path: &Path) -> io::Result<()> {
-    let file = File::create(zip_path)?;
-    let mut zip = zip::ZipWriter::new(file);
-    let options =
-        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let parent = zip_path.parent().unwrap_or(base_dir);
+    let tmp_zip = parent.join(format!(
+        ".{}.s4tmp",
+        zip_path.file_name().unwrap_or_default().to_string_lossy()
+    ));
 
-    for path in files {
-        if !path.is_file() {
-            continue;
+    let res = (|| -> io::Result<()> {
+        let file = File::create(&tmp_zip)?;
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        for path in files {
+            if !path.exists() || !path.is_file() {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("Arquivo original não encontrado para backup: {}", path.display()),
+                ));
+            }
+            let name = path.strip_prefix(base_dir).unwrap_or(path);
+            zip.start_file(name.to_string_lossy().to_string(), options)?;
+            let mut f = File::open(path)?;
+            let mut buffer = Vec::new();
+            f.read_to_end(&mut buffer)?;
+            zip.write_all(&buffer)?;
         }
-        let name = path.strip_prefix(base_dir).unwrap_or(path);
-        zip.start_file(name.to_string_lossy().to_string(), options)?;
-        let mut f = File::open(path)?;
-        let mut buffer = Vec::new();
-        f.read_to_end(&mut buffer)?;
-        zip.write_all(&buffer)?;
+
+        zip.finish()?;
+        Ok(())
+    })();
+
+    if let Err(e) = res {
+        let _ = fs::remove_file(&tmp_zip);
+        return Err(e);
     }
 
-    zip.finish()?;
+    // Valida o zip gerado antes de renomear para o destino final
+    let val_res = (|| -> io::Result<()> {
+        let f = File::open(&tmp_zip)?;
+        let mut archive = zip::ZipArchive::new(f).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+        let expected_count = files.iter().filter(|p| p.is_file()).count();
+        if archive.len() != expected_count {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Inconsistência no arquivo de backup: esperado {} arquivos, encontrado {}", expected_count, archive.len()),
+            ));
+        }
+        for i in 0..archive.len() {
+            let mut entry = archive.by_index(i).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+            let mut buf = Vec::new();
+            entry.read_to_end(&mut buf)?;
+        }
+        Ok(())
+    })();
+
+    if let Err(e) = val_res {
+        let _ = fs::remove_file(&tmp_zip);
+        return Err(e);
+    }
+
+    fs::rename(&tmp_zip, zip_path)?;
+    Ok(())
+}
+
+fn validate_package_chunk(
+    part_path: &Path,
+    expected_count: usize,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut file = File::open(part_path)?;
+    let (header, index) = DBPFReader::read_index(&mut file)?;
+
+    if header.major != 2 {
+        return Err(format!("Cabeçalho DBPF inválido: versão major {}", header.major).into());
+    }
+    if index.len() != expected_count {
+        return Err(format!(
+            "Inconsistência de recursos na parte gerada: esperado {} recursos, encontrado {}",
+            expected_count,
+            index.len()
+        )
+        .into());
+    }
+
+    let file_len = file.seek(SeekFrom::End(0))?;
+    for entry in &index {
+        let end_offset = entry.location_offset as u64 + entry.file_size as u64;
+        if end_offset > file_len {
+            return Err(format!(
+                "Recurso {} corrompido: offset {} + tamanho {} excede tamanho do arquivo {}",
+                entry.key, entry.location_offset, entry.file_size, file_len
+            )
+            .into());
+        }
+    }
+
     Ok(())
 }
 
@@ -458,6 +599,7 @@ fn write_package_chunk(part_path: &Path, resources: &[PackageResource]) -> Resul
     inner.sync_all()?;
     Ok(())
 }
+
 
 fn chrono_like_timestamp() -> String {
     let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();

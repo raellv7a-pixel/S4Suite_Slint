@@ -487,3 +487,151 @@ fn merge_repetido_do_mesmo_grupo_nao_apaga_o_anterior() {
     assert!(fx.output_dir.join("Cabelos_Merged_2_Part001.package").exists());
     assert!(segundo.output_packages[0].contains("Cabelos_Merged_2"));
 }
+
+// --- Testes de regressão P0: estabilização do Merger DBPF ---
+
+#[test]
+fn package_truncado_na_leitura_de_payload_nao_gera_merge_com_sucesso_e_protege_originais() {
+    let fx = Fixture::new();
+    let bom = fx.input_dir.join("bom.package");
+    write_package(&bom, &[1, 2], 500);
+
+    // Cria um package com índice válido, mas trunca o arquivo no meio para simular download incompleto
+    let truncado = fx.input_dir.join("truncado.package");
+    write_package(&truncado, &[10, 11], 2000);
+    let tamanho_original = fs::metadata(&truncado).unwrap().len();
+    // Corta o arquivo pela metade (o índice DBPF no início ainda existe, mas os dados finais faltam)
+    let f = fs::OpenOptions::new().write(true).open(&truncado).unwrap();
+    f.set_len(tamanho_original / 2).unwrap();
+    drop(f);
+
+    let jobs = vec![MergeJob {
+        name: "Protecao".to_string(),
+        input_files: vec![bom.clone(), truncado.clone()],
+        output_dir: fx.output_dir.clone(),
+        max_size_bytes: 1_000_000_000,
+        post_action: PostMergeAction::Delete,
+    }];
+
+    let outcomes = run_merge_queue(&jobs, &fx.manager(), |_, _| {}, |_, _, _, _| {});
+
+    assert_ne!(outcomes[0].status, JobStatus::Done, "merge com arquivo truncado não pode dar Done");
+    assert!(outcomes[0].post.is_none(), "pós-ação destrutiva NUNCA pode rodar se houver falha de leitura");
+
+    let report = outcomes[0].report.as_ref().expect("deve haver relatório gerado");
+    assert!(!report.success, "merge com payload truncado não pode ter success = true");
+    assert!(!report.failed_files.is_empty(), "arquivo truncado deve ser registrado em failed_files");
+
+    // Ambos os originais DEVEM permanecer intactos no disco
+    assert!(bom.exists(), "arquivo bom original não pode ser apagado se o merge foi incompleto");
+    assert!(truncado.exists(), "arquivo truncado não pode ser apagado");
+
+    // Nenhum arquivo temporário .s4tmp deve permanecer
+    for entry in walkdir::WalkDir::new(&fx.output_dir).into_iter().filter_map(|e| e.ok()) {
+        let fname = entry.file_name().to_string_lossy();
+        assert!(!fname.ends_with(".s4tmp"), "não deve deixar arquivos temporários: {}", entry.path().display());
+    }
+}
+
+#[test]
+fn falha_de_leitura_durante_extracao_de_recurso_rejeita_sucesso_total() {
+    let fx = Fixture::new();
+    let a = fx.input_dir.join("valido.package");
+    write_package(&a, &[1], 500);
+
+    // Cria arquivo corrupto
+    let b = fx.input_dir.join("quebrado.package");
+    fs::write(&b, b"DBPF_cabecalho_falso_com_bytes_corrompidos_sem_indice_valido").unwrap();
+
+    let task = MergeTask {
+        input_files: vec![a.clone(), b.clone()],
+        output_dir: fx.output_dir.clone(),
+        max_size_bytes: 1_000_000_000,
+        name: Some("TesteLeitura".to_string()),
+    };
+
+    let report = merge_sims4_packages(&task, |_, _, _| {}).unwrap();
+
+    assert!(!report.success, "falha de leitura deve impedir success = true");
+    assert!(report.partial, "deve ser marcado como parcial");
+    assert_eq!(report.failed_files.len(), 1);
+    assert_eq!(report.success_count, 1);
+
+    // As partes geradas devem conter apenas recursos verificados
+    for part in &report.output_packages {
+        let mut f = File::open(part).unwrap();
+        let (header, index) = DBPFReader::read_index(&mut f).unwrap();
+        assert_eq!(header.major, 2);
+        assert_eq!(index.len(), 1, "só o recurso do arquivo válido deve estar presente");
+    }
+}
+
+#[test]
+fn multiplas_partes_com_validacao_atomica_e_sem_residuos_temporarios() {
+    let fx = Fixture::new();
+    // 9 recursos de 50 KB cada = 450 KB total. Com limite de 100 KB (90 KB seguro),
+    // deve dividir em pelo menos 5 partes.
+    let pkg = fx.input_dir.join("multiplo.package");
+    write_package(&pkg, &[1, 2, 3, 4, 5, 6, 7, 8, 9], 50 * 1024);
+
+    let task = MergeTask {
+        input_files: vec![pkg],
+        output_dir: fx.output_dir.clone(),
+        max_size_bytes: 100 * 1024,
+        name: Some("MultiPartes".to_string()),
+    };
+
+    let report = merge_sims4_packages(&task, |_, _, _| {}).unwrap();
+
+    assert!(report.success);
+    assert!(report.output_packages.len() >= 5);
+
+    let mut total_recursos = 0;
+    for part in &report.output_packages {
+        let part_path = PathBuf::from(part);
+        assert!(part_path.exists());
+        let mut f = File::open(&part_path).unwrap();
+        let (header, index) = DBPFReader::read_index(&mut f).unwrap();
+        assert_eq!(header.major, 2);
+        total_recursos += index.len();
+    }
+    assert_eq!(total_recursos, 9, "todos os 9 recursos devem estar preservados");
+
+    // Nenhum arquivo temporário residual .s4tmp na pasta de saída
+    let temporarios: Vec<_> = fs::read_dir(&fx.output_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().contains(".s4tmp"))
+        .collect();
+    assert!(temporarios.is_empty(), "não devem sobrar arquivos .s4tmp na saída");
+}
+
+#[test]
+fn interrupcao_recuperavel_no_merge_limpa_temporarios_e_preserva_estado() {
+    let fx = Fixture::new();
+    let a = fx.input_dir.join("recup_a.package");
+    let b = fx.input_dir.join("recup_b.package");
+    write_package(&a, &[1], 200);
+    write_package(&b, &[2], 200);
+
+    // Executa merge completo
+    let task = MergeTask {
+        input_files: vec![a.clone(), b.clone()],
+        output_dir: fx.output_dir.clone(),
+        max_size_bytes: 1024 * 1024 * 1024,
+        name: Some("Recuperavel".to_string()),
+    };
+
+    let report = merge_sims4_packages(&task, |_, _, _| {}).unwrap();
+    assert!(report.success);
+    assert_eq!(report.output_packages.len(), 1);
+
+    // Os originais continuam preservados
+    assert!(a.exists());
+    assert!(b.exists());
+
+    // Nova unificação no mesmo diretório funciona sem colisão
+    let report2 = merge_sims4_packages(&task, |_, _, _| {}).unwrap();
+    assert!(report2.success);
+    assert!(report2.output_packages[0].contains("Recuperavel_Merged_2"));
+}
