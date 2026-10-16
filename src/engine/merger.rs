@@ -48,6 +48,18 @@ pub fn merge_sims4_packages<F>(
 where
     F: Fn(usize, usize, &str) + Send + Sync,
 {
+    merge_sims4_packages_with(task, progress_cb, |_, _| Ok(()))
+}
+
+fn merge_sims4_packages_with<F, H>(
+    task: &MergeTask,
+    progress_cb: F,
+    after_parts_hook: H,
+) -> Result<MergeReport, Box<dyn std::error::Error + Send + Sync>>
+where
+    F: Fn(usize, usize, &str) + Send + Sync,
+    H: FnOnce(&Path, &AnchoredDir) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+{
     let output_dir = AnchoredDir::create(&task.output_dir)?;
     let workspace = tempfile::Builder::new()
         .prefix(".s4merge-")
@@ -288,48 +300,58 @@ where
         output_packages,
         original_snapshots,
     };
-    let report_name = format!("{}_report.json", stem);
-    let tmp_report = workspace.path().join(&report_name);
-    let json = serde_json::to_vec_pretty(&report)?;
-    fs::write(&tmp_report, json)?;
-    let report_publish_res = workspace_dir.publish_noreplace(
-        OsStr::new(&report_name),
-        &output_dir,
-        OsStr::new(&report_name),
-    );
-    if let Err(error) = report_publish_res {
-        // Rollback das partes DBPF já publicadas: evita que partes órfãs ativas
-        // sobrevivam no diretório de saída sem relatório JSON correspondente.
-        let mut rollback_failures = Vec::new();
-        for (_, final_path) in pending_chunks.iter().rev() {
-            if let Some(name) = final_path.file_name() {
-                let recovery_name = format!("rollback-part-{}", name.to_string_lossy());
-                if let Err(rb_err) =
-                    output_dir.publish_noreplace(name, &workspace_dir, OsStr::new(&recovery_name))
-                {
-                    rollback_failures.push(format!("{}: {rb_err}", final_path.display()));
+    let report_step = (|| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        after_parts_hook(&task.output_dir, &output_dir)?;
+        let report_name = format!("{}_report.json", stem);
+        let tmp_report = workspace.path().join(&report_name);
+        let json = serde_json::to_vec_pretty(&report)?;
+        fs::write(&tmp_report, json)?;
+        workspace_dir.publish_noreplace(
+            OsStr::new(&report_name),
+            &output_dir,
+            OsStr::new(&report_name),
+        )?;
+        output_dir.sync_all()?;
+        Ok(())
+    })();
+
+    if let Err(error) = report_step {
+        let published_refs: Vec<(&Path, fs::Metadata, [u8; 32])> = outputs
+            .iter()
+            .map(|(path, hash, meta)| (path.as_path(), meta.clone(), *hash))
+            .collect();
+        let rollback_res = rollback_published_parts(&published_refs, &workspace_dir, &output_dir);
+        match rollback_res {
+            Ok(()) => {
+                let close_res = workspace.close();
+                match close_res {
+                    Ok(()) => {
+                        return Err(format!(
+                            "Falha na publicação do relatório JSON ({error}); partes publicadas sofreram rollback com sucesso"
+                        )
+                        .into());
+                    }
+                    Err(cleanup_err) => {
+                        return Err(format!(
+                            "Falha na publicação do relatório JSON ({error}); partes sofreram rollback mas limpeza do workspace falhou: {cleanup_err}"
+                        )
+                        .into());
+                    }
                 }
             }
-        }
-        if rollback_failures.is_empty() {
-            let _ = workspace.close();
-            return Err(format!(
-                "Falha na publicação do relatório ({error}); partes publicadas sofreram rollback com sucesso"
-            )
-            .into());
-        } else {
-            let recovery = workspace.keep();
-            return Err(format!(
-                "Falha na publicação do relatório ({error}); rollback parcial das partes falhou: {}; arquivos preservados em {}",
-                rollback_failures.join("; "),
-                recovery.display()
-            )
-            .into());
+            Err(failures) => {
+                let recovery = workspace.keep();
+                return Err(format!(
+                    "Falha na publicação do relatório JSON ({error}); rollback das partes falhou: {}; arquivos preservados em {}",
+                    failures.join("; "),
+                    recovery.display()
+                )
+                .into());
+            }
         }
     }
-    output_dir.sync_all()?;
-    workspace.close()?;
 
+    workspace.close()?;
     Ok(report)
 }
 
@@ -410,6 +432,64 @@ fn snapshot_original_with(
     ))
 }
 
+fn rollback_published_parts(
+    published: &[(&Path, fs::Metadata, [u8; 32])],
+    workspace: &AnchoredDir,
+    output: &AnchoredDir,
+) -> Result<(), Vec<String>> {
+    let mut failures = Vec::new();
+    for (rollback_index, (path, metadata, hash)) in published.iter().enumerate().rev() {
+        let name = path.file_name().expect("validated name");
+        let recovery_name = format!("rollback-{rollback_index}");
+        let recovery_name = OsStr::new(&recovery_name);
+        let rollback = (|| -> io::Result<()> {
+            // Confere se a entrada acessível pelo caminho ainda é comprovadamente a nossa parte publicada
+            let is_intact_output = (|| -> io::Result<bool> {
+                let mut current = match output.open_regular(name) {
+                    Ok(f) => f,
+                    Err(_) => return Ok(false),
+                };
+                let current_meta = current.metadata()?;
+                if !same_file_identity(metadata, &current_meta) {
+                    return Ok(false);
+                }
+                if hash_reader(&mut current)? != *hash {
+                    return Ok(false);
+                }
+                Ok(true)
+            })()?;
+
+            if !is_intact_output {
+                return Err(io::Error::other(
+                    "Arquivo publicado foi substituído ou removido; rollback recusado para proteger dados externos",
+                ));
+            }
+
+            output.publish_noreplace(name, workspace, recovery_name)?;
+            let verified = (|| -> io::Result<bool> {
+                let mut recovered = workspace.open_regular(recovery_name)?;
+                Ok(same_file_identity(metadata, &recovered.metadata()?)
+                    && hash_reader(&mut recovered)? == *hash)
+            })();
+            if !matches!(verified, Ok(true)) {
+                let _ = workspace.publish_noreplace(recovery_name, output, name);
+                return Err(io::Error::other(
+                    "Conteúdo divergente detectado após mover para workspace; descartabilidade recusada",
+                ));
+            }
+            workspace.remove_file(recovery_name)
+        })();
+        if let Err(rollback_error) = rollback {
+            failures.push(format!("{}: {rollback_error}", path.display()));
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures)
+    }
+}
+
 /// The hook is private and allows deterministic publication/rollback faults in unit tests.
 fn publish_chunks(
     chunks: &[(PathBuf, PathBuf)],
@@ -441,37 +521,18 @@ fn publish_chunks(
             Ok(())
         })();
         if let Err(error) = result {
-            let mut failures = Vec::new();
-            for (rollback_index, (path, metadata, hash)) in published.iter().enumerate().rev() {
-                let name = path.file_name().expect("validated name");
-                let recovery_name = format!("rollback-{rollback_index}");
-                let recovery_name = OsStr::new(&recovery_name);
-                let rollback = (|| -> io::Result<()> {
-                    output.publish_noreplace(name, workspace, recovery_name)?;
-                    let verified = (|| -> io::Result<bool> {
-                        let mut recovered = workspace.open_regular(recovery_name)?;
-                        Ok(same_file_identity(metadata, &recovered.metadata()?)
-                            && hash_reader(&mut recovered)? == *hash)
-                    })();
-                    if !matches!(verified, Ok(true)) {
-                        workspace.publish_noreplace(recovery_name, output, name)?;
-                        return Err(io::Error::other(
-                            "Arquivo publicado mudou; rollback recusado",
-                        ));
-                    }
-                    workspace.remove_file(recovery_name)
-                })();
-                if let Err(rollback_error) = rollback {
-                    failures.push(format!("{}: {rollback_error}", path.display()));
+            match rollback_published_parts(&published, workspace, output) {
+                Ok(()) => return Err((error, false)),
+                Err(failures) => {
+                    return Err((
+                        io::Error::other(format!(
+                            "{error}; rollback falhou: {}",
+                            failures.join("; ")
+                        )),
+                        true,
+                    ));
                 }
             }
-            if failures.is_empty() {
-                return Err((error, false));
-            }
-            return Err((
-                io::Error::other(format!("{error}; rollback falhou: {}", failures.join("; "))),
-                true,
-            ));
         }
     }
     Ok(published.into_iter().map(|(_, _, hash)| hash).collect())
@@ -1499,7 +1560,7 @@ mod tests {
             "merge deve falhar se o relatório não puder ser publicado"
         );
         let err_msg = res.unwrap_err().to_string();
-        assert!(err_msg.contains("Falha na publicação do relatório"));
+        assert!(err_msg.contains("relatório JSON"));
         assert_eq!(
             fs::read(&collision).unwrap(),
             b"colisao_concorrente_no_relatorio",
@@ -1514,6 +1575,86 @@ mod tests {
             active_parts.is_empty(),
             "nenhuma parte DBPF deve sobrar ativa no diretório se o relatório falhou: {active_parts:?}"
         );
+    }
+
+    #[test]
+    fn p0_report_failure_with_replaced_published_part_preserves_external_file_and_directory() {
+        for replace_with_dir in [false, true] {
+            let fx = post_fixture();
+            let (temp, source, _, _) = fx;
+            let out_dir = temp
+                .path()
+                .join(format!("output_rep_replace_{replace_with_dir}"));
+            fs::create_dir_all(&out_dir).unwrap();
+            let task = MergeTask {
+                input_files: vec![source.clone()],
+                output_dir: out_dir.clone(),
+                max_size_bytes: 1_000_000,
+                name: Some("RepReplace".into()),
+            };
+            let external_file_bytes = b"CONTEUDO_EXTERNO_QUE_NUNCA_PODE_SER_DESTRUIDO";
+            let external_dir_file_bytes = b"DADOS_DENTRO_DO_DIRETORIO_SUBSTITUTO";
+
+            let res = merge_sims4_packages_with(
+                &task,
+                |_, _, _| {},
+                |output_path, _| {
+                    let part_name = "RepReplace_Merged_Part001.package";
+                    let part_path = output_path.join(part_name);
+                    assert!(
+                        part_path.exists(),
+                        "parte 1 deve ter sido publicada antes do gancho de relatório"
+                    );
+                    fs::remove_file(&part_path)?;
+
+                    if replace_with_dir {
+                        fs::create_dir(&part_path)?;
+                        fs::write(part_path.join("interno.txt"), external_dir_file_bytes)?;
+                    } else {
+                        fs::write(&part_path, external_file_bytes)?;
+                    }
+
+                    // Injeta a falha simulada na gravação/criação do relatório JSON
+                    Err(io::Error::other("falha_injetada_na_criacao_do_relatorio").into())
+                },
+            );
+
+            assert!(
+                res.is_err(),
+                "merge deve falhar devido à falha de relatório"
+            );
+            let err_msg = res.unwrap_err().to_string();
+            assert!(
+                err_msg.contains("rollback das partes falhou")
+                    || err_msg.contains("arquivos preservados em"),
+                "erro DEVE reportar falha de rollback e caminho preservado: {err_msg}"
+            );
+
+            let part_path = out_dir.join("RepReplace_Merged_Part001.package");
+            assert!(
+                part_path.exists(),
+                "o arquivo ou diretório substituto DEVE ser preservado intacto"
+            );
+
+            if replace_with_dir {
+                assert!(
+                    part_path.is_dir(),
+                    "o diretório substituto deve permanecer como diretório"
+                );
+                let inner = part_path.join("interno.txt");
+                assert_eq!(fs::read(&inner).unwrap(), external_dir_file_bytes);
+            } else {
+                assert!(
+                    part_path.is_file(),
+                    "o arquivo substituto deve permanecer como arquivo"
+                );
+                assert_eq!(fs::read(&part_path).unwrap(), external_file_bytes);
+                assert_eq!(
+                    hash_file(&part_path),
+                    <[u8; 32]>::from(Sha256::digest(external_file_bytes))
+                );
+            }
+        }
     }
 
     #[test]
