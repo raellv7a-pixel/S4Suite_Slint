@@ -221,10 +221,36 @@ where
         return Err(e);
     }
 
-    // Publica atomicamente todas as partes validadas
-    for (tmp_path, final_path) in pending_chunks {
-        fs::rename(&tmp_path, &final_path)?;
-        output_packages.push(final_path.display().to_string());
+    // Publica atomicamente todas as partes validadas com rollback se alguma falhar
+    let mut published = Vec::new();
+    let mut publish_err = None;
+    let mut chunks_iter = pending_chunks.into_iter();
+
+    while let Some((tmp_path, final_path)) = chunks_iter.next() {
+        match fs::rename(&tmp_path, &final_path) {
+            Ok(()) => {
+                output_packages.push(final_path.display().to_string());
+                published.push(final_path);
+            }
+            Err(e) => {
+                let _ = fs::remove_file(&tmp_path);
+                publish_err = Some(e);
+                break;
+            }
+        }
+    }
+
+    if let Some(e) = publish_err {
+        // Limpa todas as partes temporárias restantes que não chegaram a ser renomeadas
+        for (tmp_path, _) in chunks_iter {
+            let _ = fs::remove_file(&tmp_path);
+        }
+        // Rollback: se uma parte falhou ao renomear, remove as já publicadas para não deixar merge parcial
+        for pub_path in published {
+            let _ = fs::remove_file(&pub_path);
+        }
+        output_packages.clear();
+        return Err(Box::new(e));
     }
 
     let report = MergeReport {
@@ -333,7 +359,7 @@ where
         let outcome = match result {
             Ok(report) if report.success && report.failed_files.is_empty() && !report.partial && !report.output_packages.is_empty() => {
                 let post = common_ancestor(&job.input_files).map(|root| {
-                    apply_post_merge_action(job.post_action, &job.input_files, &root, disabled_mgr)
+                    apply_post_merge_action_validated(job.post_action, &report, &job.input_files, &root, disabled_mgr)
                 });
                 let status = match &post {
                     Some(p) if p.failed > 0 || p.error.is_some() => JobStatus::Partial,
@@ -407,6 +433,23 @@ pub struct PostMergeOutcome {
 ///
 /// `input_root` é a raiz de segurança: nada fora dela é apagado ou renomeado,
 /// por mais que a lista de originais diga o contrário.
+/// Executa a ação pós-merge somente após verificar que o relatório é de sucesso integral.
+pub fn apply_post_merge_action_validated(
+    action: PostMergeAction,
+    report: &MergeReport,
+    originals: &[PathBuf],
+    input_root: &Path,
+    disabled_mgr: &DisabledManager,
+) -> PostMergeOutcome {
+    if !report.success || report.partial || !report.failed_files.is_empty() || report.output_packages.is_empty() {
+        return PostMergeOutcome {
+            error: Some("Ação pós-merge bloqueada por segurança: o merge não foi 100% concluído com sucesso.".to_string()),
+            ..Default::default()
+        };
+    }
+    apply_post_merge_action(action, originals, input_root, disabled_mgr)
+}
+
 pub fn apply_post_merge_action(
     action: PostMergeAction,
     originals: &[PathBuf],
@@ -440,7 +483,8 @@ pub fn apply_post_merge_action(
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            let zip_path = input_root.join(format!("originais_pre_merge_{}.zip", stamp));
+            let zip_name = format!("originais_pre_merge_{}.zip", stamp);
+            let zip_path = crate::core::safety::unique_dest_path(input_root, &zip_name);
 
             if let Err(e) = create_zip_from_files(originals, input_root, &zip_path) {
                 // O zip é a única cópia de segurança: sem ele, não apagamos nada.

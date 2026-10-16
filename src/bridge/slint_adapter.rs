@@ -9,8 +9,8 @@ use crate::engine::installer::{
     execute_installation, prepare_staging, ConflictType, MANAGED_BASE_DIR, STAGING_DIR_NAME,
 };
 use crate::engine::merger::{
-    apply_post_merge_action, common_ancestor, merge_sims4_packages, run_merge_queue, JobStatus,
-    MergeJob, MergeTask, PostMergeAction,
+    apply_post_merge_action_validated, common_ancestor, merge_sims4_packages, run_merge_queue,
+    JobStatus, MergeJob, MergeTask, PostMergeAction,
 };
 use crate::engine::organizer::{
     auto_fix_script_depth, check_script_depth, create_folder, detect_duplicates, filter_tree,
@@ -1432,7 +1432,12 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
 
         let max_size_gb = cfg_clone.load().merge_limit_gb;
         // Mesmo nome que a fila usaria: o da pasta de onde os packages vieram.
-        let nome = common_ancestor(&inputs).map(|root| file_label(&root));
+        let Some(input_root) = common_ancestor(&inputs) else {
+            return;
+        };
+        let nome = Some(file_label(&input_root));
+        let inputs_snapshot = inputs.clone();
+        let root_snapshot = input_root.clone();
         let task = MergeTask {
             input_files: inputs,
             output_dir,
@@ -1448,6 +1453,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
 
         let weak_async = weak_clone.clone();
         let weak_progress = weak_clone.clone();
+        let state_merge = Arc::clone(&state_clone);
         tokio::task::spawn_blocking(move || {
             let result = merge_sims4_packages(&task, move |current, total, label| {
                 let fraction = if total == 0 { 0.0 } else { current as f32 / total as f32 };
@@ -1467,15 +1473,13 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                 w.set_merge_progress(0.0);
 
                 match result {
-                    Ok(report) if !report.output_packages.is_empty() => {
-                        let mut msg = format!(
+                    Ok(report) if report.success && !report.partial && report.failed_files.is_empty() && !report.output_packages.is_empty() => {
+                        state_merge.set_pending_post_merge(report.clone(), inputs_snapshot, root_snapshot);
+                        let msg = format!(
                             "✅ {} package(s) unificados em {} parte(s).",
                             report.success_count,
                             report.output_packages.len()
                         );
-                        if report.partial {
-                            msg.push_str(&format!(" ⚠️ {} arquivo(s) falharam e foram ignorados.", report.failed_files.len()));
-                        }
                         w.set_merge_status(SharedString::from(msg));
                         w.set_post_merge_message(SharedString::from(format!(
                             "Foram geradas {} parte(s) otimizadas. Os {} arquivos originais continuam na pasta de origem — mantê-los junto das partes unificadas duplica o conteúdo dentro do jogo.",
@@ -1484,16 +1488,27 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                         )));
                         w.set_show_post_merge_dialog(true);
                     }
+                    Ok(report) if report.partial => {
+                        state_merge.clear_pending_post_merge();
+                        let msg = format!(
+                            "⚠️ Merge parcial: {} parte(s) geradas, mas {} arquivo(s) falharam. Originais mantidos intactos por segurança.",
+                            report.output_packages.len(),
+                            report.failed_files.len()
+                        );
+                        w.set_merge_status(SharedString::from(msg));
+                    }
                     Ok(report) => {
+                        state_merge.clear_pending_post_merge();
                         w.set_merge_status(SharedString::from(format!(
                             "❌ Nenhum recurso pôde ser lido ({} arquivo(s) com falha).",
                             report.failed_files.len()
                         )));
                     }
                     Err(e) => {
+                        state_merge.clear_pending_post_merge();
                         w.set_merge_status(SharedString::from(format!("❌ Falha na unificação: {}", e)));
                     }
-                }
+                };
             });
         });
     });
@@ -1504,11 +1519,14 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let weak_clone = weak_win.clone();
     window.on_post_merge_action(move |action| {
         let choice = PostMergeAction::parse(action.as_str());
-        let originals = state_clone.merger_inputs();
 
         if let Some(w) = weak_clone.upgrade() {
             w.set_show_post_merge_dialog(false);
         }
+
+        let Some((report, originals, input_root)) = state_clone.take_pending_post_merge() else {
+            return;
+        };
 
         if choice == PostMergeAction::Keep {
             state_clone.clear_merger();
@@ -1520,12 +1538,6 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             return;
         }
 
-        // A pasta de origem é a raiz de segurança: nada fora dela pode ser
-        // tocado, mesmo que o manifesto ou a lista digam o contrário.
-        let Some(input_root) = common_ancestor(&originals) else {
-            return;
-        };
-
         if let Some(w) = weak_clone.upgrade() {
             w.set_merge_status(SharedString::from("⏳ Processando arquivos originais..."));
         }
@@ -1533,8 +1545,13 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         let weak_async = weak_clone.clone();
         let state_async = Arc::clone(&state_clone);
         tokio::task::spawn_blocking(move || {
-            let outcome =
-                apply_post_merge_action(choice, &originals, &input_root, state_async.disabled_manager());
+            let outcome = apply_post_merge_action_validated(
+                choice,
+                &report,
+                &originals,
+                &input_root,
+                state_async.disabled_manager(),
+            );
             state_async.clear_merger();
 
             let msg = if let Some(err) = &outcome.error {

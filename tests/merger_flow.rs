@@ -3,8 +3,9 @@
 use s4suite::engine::dbpf::{DBPFReader, DBPFWriter, PackageResource, ResourceKey};
 use s4suite::engine::disabled::DisabledManager;
 use s4suite::engine::merger::{
-    apply_post_merge_action, common_ancestor, merge_sims4_packages, run_merge_queue, JobStatus,
-    MergeJob, MergeTask, PostMergeAction,
+    apply_post_merge_action, apply_post_merge_action_validated, common_ancestor,
+    merge_sims4_packages, run_merge_queue, JobStatus, MergeJob, MergeReport, MergeTask,
+    PostMergeAction,
 };
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
@@ -634,4 +635,110 @@ fn interrupcao_recuperavel_no_merge_limpa_temporarios_e_preserva_estado() {
     let report2 = merge_sims4_packages(&task, |_, _, _| {}).unwrap();
     assert!(report2.success);
     assert!(report2.output_packages[0].contains("Recuperavel_Merged_2"));
+}
+
+#[test]
+fn pos_merge_recusado_se_relatorio_for_parcial_ou_com_falhas() {
+    let fx = Fixture::new();
+    let f1 = fx.input_dir.join("a.package");
+    write_package(&f1, &[1], 100);
+    let originais = vec![f1.clone()];
+
+    // Relatório simulando merge com falha parcial
+    let report_parcial = MergeReport {
+        success: false,
+        partial: true,
+        total_files_found: 2,
+        success_count: 1,
+        failed_files: vec![("b.package".to_string(), "erro I/O".to_string())],
+        output_packages: vec!["Part001.package".to_string()],
+    };
+
+    let outcome = apply_post_merge_action_validated(
+        PostMergeAction::Delete,
+        &report_parcial,
+        &originais,
+        &fx.input_dir,
+        &fx.manager(),
+    );
+
+    assert!(outcome.error.is_some(), "pós-ação deve ser bloqueada em relatório parcial");
+    assert!(outcome.error.unwrap().contains("bloqueada"));
+    assert!(f1.exists(), "original não pode ser apagado se relatório for parcial");
+}
+
+#[test]
+fn backups_consecutivos_no_mesmo_segundo_nao_colidem() {
+    let fx = Fixture::new();
+    let f1 = fx.input_dir.join("orig1.package");
+    let f2 = fx.input_dir.join("orig2.package");
+    write_package(&f1, &[1], 200);
+    write_package(&f2, &[2], 200);
+
+    // Primeiro backup
+    let out1 = apply_post_merge_action(
+        PostMergeAction::Backup,
+        &[f1.clone()],
+        &fx.input_dir,
+        &fx.manager(),
+    );
+    assert!(out1.error.is_none());
+    let zip1 = out1.backup_path.expect("primeiro zip deve existir");
+    assert!(zip1.exists());
+
+    // Segundo backup no mesmo diretório (potencial mesmo segundo)
+    let out2 = apply_post_merge_action(
+        PostMergeAction::Backup,
+        &[f2.clone()],
+        &fx.input_dir,
+        &fx.manager(),
+    );
+    assert!(out2.error.is_none());
+    let zip2 = out2.backup_path.expect("segundo zip deve existir");
+    assert!(zip2.exists());
+
+    // Os dois zips não podem se sobrescrever
+    assert_ne!(zip1, zip2, "backups no mesmo segundo devem receber nomes únicos e não colidir");
+}
+
+#[test]
+fn falha_na_publicacao_de_parte_executa_rollback_completo() {
+    let fx = Fixture::new();
+    // 4 recursos de 80 KB = 320 KB total. Com limite de 100 KB, força 4 partes
+    let p = fx.input_dir.join("multi.package");
+    write_package(&p, &[1, 2, 3, 4], 80 * 1024);
+
+    // Provoca falha na publicação da Part002 criando um diretório com o mesmo nome da Part002
+    // No Linux, rename de arquivo sobre diretório falha com EISDIR
+    let fake_part2 = fx.output_dir.join("FalhaPub_Merged_Part002.package");
+    fs::create_dir_all(&fake_part2).unwrap();
+
+    let task = MergeTask {
+        input_files: vec![p],
+        output_dir: fx.output_dir.clone(),
+        max_size_bytes: 100 * 1024,
+        name: Some("FalhaPub".to_string()),
+    };
+
+    let res = merge_sims4_packages(&task, |_, _, _| {});
+    assert!(res.is_err(), "deve falhar ao tentar renomear sobre diretório");
+
+    // Nenhuma parte .package do merge FalhaPub deve sobrar publicada
+    let publicadas: Vec<_> = fs::read_dir(&fx.output_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let n = e.file_name().to_string_lossy().to_string();
+            n.starts_with("FalhaPub_Merged") && n.ends_with(".package") && e.file_type().unwrap().is_file()
+        })
+        .collect();
+    assert!(publicadas.is_empty(), "Part001 já publicada deve sofrer rollback e ser removida: {:?}", publicadas);
+
+    // Nenhum arquivo temporário .s4tmp deve permanecer
+    let temporarios: Vec<_> = fs::read_dir(&fx.output_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().contains(".s4tmp"))
+        .collect();
+    assert!(temporarios.is_empty(), "todos os .s4tmp devem ser removidos no rollback");
 }

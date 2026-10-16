@@ -89,6 +89,8 @@ pub struct AppState {
     selected_jobs: Mutex<Vec<usize>>,
     /// Destino dos originais depois de unificar.
     merge_post_action: Mutex<PostMergeAction>,
+    /// Snapshot exato do relatório, originais e raiz comum do último merge concluído com sucesso.
+    pending_post_merge: Mutex<Option<(crate::engine::merger::MergeReport, Vec<PathBuf>, PathBuf)>>,
 
     /// Zips e arquivos de tray escolhidos para importar.
     tray_sources: Mutex<Vec<PathBuf>>,
@@ -118,6 +120,7 @@ impl AppState {
             merge_jobs: Mutex::new(Vec::new()),
             selected_jobs: Mutex::new(Vec::new()),
             merge_post_action: Mutex::new(PostMergeAction::Keep),
+            pending_post_merge: Mutex::new(None),
             tray_sources: Mutex::new(Vec::new()),
             tray_candidates: Mutex::new(Vec::new()),
             selected_tray: Mutex::new(Vec::new()),
@@ -263,6 +266,26 @@ impl AppState {
     pub fn clear_merger(&self) {
         self.merger_inputs.lock().clear();
         *self.merger_output.lock() = None;
+        self.clear_pending_post_merge();
+    }
+
+    pub fn set_pending_post_merge(
+        &self,
+        report: crate::engine::merger::MergeReport,
+        originals: Vec<PathBuf>,
+        input_root: PathBuf,
+    ) {
+        *self.pending_post_merge.lock() = Some((report, originals, input_root));
+    }
+
+    pub fn take_pending_post_merge(
+        &self,
+    ) -> Option<(crate::engine::merger::MergeReport, Vec<PathBuf>, PathBuf)> {
+        self.pending_post_merge.lock().take()
+    }
+
+    pub fn clear_pending_post_merge(&self) {
+        *self.pending_post_merge.lock() = None;
     }
 
     // --- Fila do merger ---
