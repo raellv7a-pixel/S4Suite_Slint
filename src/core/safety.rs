@@ -1,4 +1,5 @@
-use std::fs;
+use std::ffi::OsStr;
+use std::fs::{self, File};
 use std::io;
 use std::path::{Component, Path, PathBuf};
 #[derive(Debug, thiserror::Error)]
@@ -22,9 +23,9 @@ pub fn normalize_path(path: &Path) -> PathBuf {
             Component::RootDir => normalized.push(Component::RootDir.as_os_str()),
             Component::CurDir => {}
             Component::ParentDir => {
-                if let Some(Component::Normal(_)) = normalized.components().last() {
+                if let Some(Component::Normal(_)) = normalized.components().next_back() {
                     normalized.pop();
-                } else if normalized.components().last() == Some(Component::RootDir) {
+                } else if normalized.components().next_back() == Some(Component::RootDir) {
                     // Já está na raiz do sistema de arquivos, não faz nada
                 } else {
                     normalized.push(Component::ParentDir.as_os_str());
@@ -169,7 +170,11 @@ pub fn is_safe_to_delete(target: &Path, allowed_roots: &[PathBuf]) -> Result<Pat
         if !symlink_inside {
             return Err(SafetyError::OutsideAllowedScope(
                 target.display().to_string(),
-                allowed_roots.iter().map(|r| r.display().to_string()).collect::<Vec<_>>().join(", "),
+                allowed_roots
+                    .iter()
+                    .map(|r| r.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
             ));
         }
 
@@ -191,7 +196,11 @@ pub fn is_safe_to_delete(target: &Path, allowed_roots: &[PathBuf]) -> Result<Pat
     if !allowed {
         return Err(SafetyError::OutsideAllowedScope(
             target_str.to_string(),
-            allowed_roots.iter().map(|r| r.display().to_string()).collect::<Vec<_>>().join(", "),
+            allowed_roots
+                .iter()
+                .map(|r| r.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
         ));
     }
 
@@ -199,33 +208,509 @@ pub fn is_safe_to_delete(target: &Path, allowed_roots: &[PathBuf]) -> Result<Pat
 }
 
 pub fn safe_remove_file(target: &Path, allowed_roots: &[PathBuf]) -> Result<(), SafetyError> {
-    let safe_target = is_safe_to_delete(target, allowed_roots)?;
-    let is_symlink = fs::symlink_metadata(target)
-        .or_else(|_| fs::symlink_metadata(&safe_target))
-        .map(|m| m.file_type().is_symlink())
-        .unwrap_or(false);
-    if is_symlink {
-        fs::remove_file(target)?;
-    } else if safe_target.is_file() {
-        fs::remove_file(&safe_target)?;
-    }
+    is_safe_to_delete(target, allowed_roots)?;
+    let (parent, name) = anchored_scoped_parent(target, allowed_roots)?;
+    // unlinkat never follows the final symlink and reports wrong types/errors.
+    parent.remove_file(&name)?;
     Ok(())
 }
 
 pub fn safe_remove_dir_all(target: &Path, allowed_roots: &[PathBuf]) -> Result<(), SafetyError> {
-    let safe_target = is_safe_to_delete(target, allowed_roots)?;
-    let is_symlink = fs::symlink_metadata(target)
-        .or_else(|_| fs::symlink_metadata(&safe_target))
-        .map(|m| m.file_type().is_symlink())
-        .unwrap_or(false);
-    if is_symlink {
-        // Se for um link simbólico para diretório, remove apenas o link, nunca o destino
-        fs::remove_file(target)?;
-    } else if safe_target.is_dir() {
-        fs::remove_dir_all(&safe_target)?;
+    is_safe_to_delete(target, allowed_roots)?;
+    let (parent, name) = anchored_scoped_parent(target, allowed_roots)?;
+    parent.remove_tree(&name)?;
+    Ok(())
+}
+
+fn anchored_scoped_parent(
+    target: &Path,
+    allowed_roots: &[PathBuf],
+) -> Result<(AnchoredDir, std::ffi::OsString), SafetyError> {
+    let absolute = absolute_without_parent(target)?;
+    let inside = allowed_roots.iter().any(|root| {
+        absolute_without_parent(root)
+            .map(|root| absolute != root && absolute.starts_with(root))
+            .unwrap_or(false)
+    });
+    if !inside {
+        return Err(SafetyError::OutsideAllowedScope(
+            target.display().to_string(),
+            "raiz lexical autorizada".to_string(),
+        ));
+    }
+    let name = absolute
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Caminho sem nome final"))?
+        .to_os_string();
+    Ok((AnchoredDir::open(absolute.parent().unwrap())?, name))
+}
+
+fn absolute_without_parent(path: &Path) -> io::Result<PathBuf> {
+    if path.components().any(|c| matches!(c, Component::ParentDir)) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "Componente '..' bloqueado",
+        ));
+    }
+    Ok(if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    })
+}
+
+/// Diretório mantido aberto; no Linux cada ancestral é aberto com NOFOLLOW.
+/// Os métodos aceitam apenas um nome, nunca caminhos relativos compostos.
+pub(crate) struct AnchoredDir {
+    file: File,
+}
+
+impl AnchoredDir {
+    pub(crate) fn open(path: &Path) -> io::Result<Self> {
+        Self::open_path(path, false)
+    }
+
+    pub(crate) fn create(path: &Path) -> io::Result<Self> {
+        Self::open_path(path, true)
+    }
+
+    pub(crate) fn try_clone(&self) -> io::Result<Self> {
+        Ok(Self {
+            file: self.file.try_clone()?,
+        })
+    }
+
+    pub(crate) fn sync_all(&self) -> io::Result<()> {
+        self.file.sync_all()
+    }
+
+    fn open_path(path: &Path, create: bool) -> io::Result<Self> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::{AsRawFd, FromRawFd};
+            let absolute = absolute_without_parent(path)?;
+            let mut current = Self {
+                file: File::open("/")?,
+            };
+            for component in absolute.components() {
+                if let Component::Normal(name) = component {
+                    let name = single_name(name)?;
+                    if create {
+                        let result = unsafe {
+                            libc::mkdirat(current.file.as_raw_fd(), name.as_ptr(), 0o755)
+                        };
+                        if result != 0 {
+                            let error = io::Error::last_os_error();
+                            if error.kind() != io::ErrorKind::AlreadyExists {
+                                return Err(error);
+                            }
+                        }
+                    }
+                    let fd = unsafe {
+                        libc::openat(
+                            current.file.as_raw_fd(),
+                            name.as_ptr(),
+                            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                        )
+                    };
+                    if fd < 0 {
+                        return Err(anchor_error());
+                    }
+                    current = Self {
+                        file: unsafe { File::from_raw_fd(fd) },
+                    };
+                }
+            }
+            Ok(current)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (path, create);
+            Err(unsupported_anchoring())
+        }
+    }
+
+    pub(crate) fn create_child(&self, name: impl AsRef<OsStr>) -> io::Result<Self> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::AsRawFd;
+            let encoded = single_name(name.as_ref())?;
+            if unsafe { libc::mkdirat(self.file.as_raw_fd(), encoded.as_ptr(), 0o755) } != 0 {
+                let error = io::Error::last_os_error();
+                if error.kind() != io::ErrorKind::AlreadyExists {
+                    return Err(error);
+                }
+            }
+            self.child(name)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = name;
+            Err(unsupported_anchoring())
+        }
+    }
+
+    pub(crate) fn child(&self, name: impl AsRef<OsStr>) -> io::Result<Self> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::{AsRawFd, FromRawFd};
+            let name = single_name(name.as_ref())?;
+            let fd = unsafe {
+                libc::openat(
+                    self.file.as_raw_fd(),
+                    name.as_ptr(),
+                    libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                )
+            };
+            if fd < 0 {
+                return Err(anchor_error());
+            }
+            Ok(Self {
+                file: unsafe { File::from_raw_fd(fd) },
+            })
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = name;
+            Err(unsupported_anchoring())
+        }
+    }
+
+    /// Apenas para APIs que precisam de um caminho; mantenha este handle vivo.
+    pub(crate) fn path(&self) -> PathBuf {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::AsRawFd;
+            PathBuf::from(format!("/proc/self/fd/{}", self.file.as_raw_fd()))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            unreachable!("AnchoredDir não é construído sem suporte a anchoring")
+        }
+    }
+
+    /// Caminho para ferramentas filhas: `self` no /proc pertenceria ao filho,
+    /// cujos descritores CLOEXEC já estariam fechados. O handle pai fica vivo.
+    pub(crate) fn child_process_path(&self) -> PathBuf {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::AsRawFd;
+            PathBuf::from(format!(
+                "/proc/{}/fd/{}",
+                std::process::id(),
+                self.file.as_raw_fd()
+            ))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            unreachable!("AnchoredDir não é construído sem suporte a anchoring")
+        }
+    }
+
+    pub(crate) fn open_regular(&self, name: impl AsRef<OsStr>) -> io::Result<File> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::{AsRawFd, FromRawFd};
+            let name = single_name(name.as_ref())?;
+            let fd = unsafe {
+                libc::openat(
+                    self.file.as_raw_fd(),
+                    name.as_ptr(),
+                    libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK,
+                )
+            };
+            if fd < 0 {
+                return Err(anchor_error());
+            }
+            let file = unsafe { File::from_raw_fd(fd) };
+            if !file.metadata()?.is_file() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Fonte não é arquivo regular",
+                ));
+            }
+            Ok(file)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = name;
+            Err(unsupported_anchoring())
+        }
+    }
+
+    pub(crate) fn create_new(&self, name: impl AsRef<OsStr>) -> io::Result<File> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::{AsRawFd, FromRawFd};
+            let name = single_name(name.as_ref())?;
+            let fd = unsafe {
+                libc::openat(
+                    self.file.as_raw_fd(),
+                    name.as_ptr(),
+                    libc::O_WRONLY
+                        | libc::O_CREAT
+                        | libc::O_EXCL
+                        | libc::O_NOFOLLOW
+                        | libc::O_CLOEXEC,
+                    0o600,
+                )
+            };
+            if fd < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(unsafe { File::from_raw_fd(fd) })
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = name;
+            Err(unsupported_anchoring())
+        }
+    }
+
+    /// Publica arquivo ou diretório sem substituir nenhuma entrada existente.
+    /// ENOSYS/EINVAL/filesystems sem RENAME_NOREPLACE falham fechados.
+    pub(crate) fn publish_noreplace(
+        &self,
+        src_name: impl AsRef<OsStr>,
+        dest: &Self,
+        dest_name: impl AsRef<OsStr>,
+    ) -> io::Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::AsRawFd;
+            let src = single_name(src_name.as_ref())?;
+            let dest_name = single_name(dest_name.as_ref())?;
+            let result = unsafe {
+                libc::renameat2(
+                    self.file.as_raw_fd(),
+                    src.as_ptr(),
+                    dest.file.as_raw_fd(),
+                    dest_name.as_ptr(),
+                    libc::RENAME_NOREPLACE,
+                )
+            };
+            if result != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (src_name, dest, dest_name);
+            Err(unsupported_anchoring())
+        }
+    }
+
+    pub(crate) fn remove_file(&self, name: impl AsRef<OsStr>) -> io::Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::AsRawFd;
+            let name = single_name(name.as_ref())?;
+            if unsafe { libc::unlinkat(self.file.as_raw_fd(), name.as_ptr(), 0) } != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = name;
+            Err(unsupported_anchoring())
+        }
+    }
+
+    pub(crate) fn remove_tree(&self, name: impl AsRef<OsStr>) -> io::Result<()> {
+        let name = name.as_ref();
+        validate_single_name(name)?;
+        let path = self.path().join(name);
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            self.remove_file(name)
+        } else if metadata.is_dir() {
+            // std's Unix implementation walks the tree with descriptor-relative
+            // operations and does not follow symlinks encountered during removal.
+            fs::remove_dir_all(path)
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Alvo não é diretório",
+            ))
+        }
+    }
+
+    /// Serializa operações da aplicação no mesmo diretório (não é lock de
+    /// segurança contra processos externos que ignoram flock).
+    pub(crate) fn lock_exclusive(&self) -> io::Result<DirectoryLock> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::AsRawFd;
+            // Open a separate description so clones cannot accidentally share
+            // ownership of the same flock and unlock another operation.
+            let file = File::open(self.path())?;
+            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(DirectoryLock(file))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            Err(unsupported_anchoring())
+        }
+    }
+}
+
+pub(crate) struct DirectoryLock(File);
+
+impl Drop for DirectoryLock {
+    fn drop(&mut self) {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::AsRawFd;
+            unsafe {
+                libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
+            }
+        }
+    }
+}
+
+fn validate_single_name(name: &OsStr) -> io::Result<()> {
+    let mut components = Path::new(name).components();
+    if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Esperado um único nome de arquivo",
+        ));
     }
     Ok(())
 }
+
+#[cfg(target_os = "linux")]
+fn single_name(name: &OsStr) -> io::Result<std::ffi::CString> {
+    use std::os::unix::ffi::OsStrExt;
+    validate_single_name(name)?;
+    std::ffi::CString::new(name.as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Nome contém NUL"))
+}
+
+#[cfg(target_os = "linux")]
+fn anchor_error() -> io::Error {
+    let error = io::Error::last_os_error();
+    if matches!(
+        error.raw_os_error(),
+        Some(libc::ELOOP) | Some(libc::ENOTDIR)
+    ) {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("Ancestral/link ou tipo inseguro: {error}"),
+        )
+    } else {
+        error
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn unsupported_anchoring() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::Unsupported,
+        "Operação requer anchoring e publicação no-replace seguros",
+    )
+}
+
+#[allow(dead_code)]
+/// Move sem substituir; não usa check-then-rename nem fallback com overwrite.
+pub(crate) fn publish_noreplace(src: &Path, dest: &Path) -> io::Result<()> {
+    let src_parent = src
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Fonte sem pai"))?;
+    let dest_parent = dest
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Destino sem pai"))?;
+    let src_name = src
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Fonte sem nome"))?;
+    let dest_name = dest
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Destino sem nome"))?;
+    AnchoredDir::open(src_parent)?.publish_noreplace(
+        src_name,
+        &AnchoredDir::open(dest_parent)?,
+        dest_name,
+    )
+}
+
+/// Leases Linux bloqueiam escritores já abertos e detectam solicitações de
+/// escrita durante a captura. Sem suporte, operações destrutivas falham fechadas.
+pub(crate) struct ReadLease {
+    pub(crate) file: File,
+}
+
+impl ReadLease {
+    #[cfg(target_os = "linux")]
+    pub(crate) fn acquire(file: File) -> io::Result<Self> {
+        use std::os::fd::AsRawFd;
+        // F_SETSIG é por open-file-description. SIGURG é ignorado por padrão,
+        // diferentemente de SIGIO, que poderia terminar a aplicação.
+        const F_SETSIG: libc::c_int = 10;
+        let fd = file.as_raw_fd();
+        unsafe {
+            if libc::fcntl(fd, libc::F_SETOWN, libc::getpid()) == -1
+                || libc::fcntl(fd, F_SETSIG, libc::SIGURG) == -1
+                || libc::fcntl(fd, libc::F_SETLEASE, libc::F_RDLCK) == -1
+            {
+                let error = io::Error::last_os_error();
+                return Err(io::Error::new(error.kind(), format!(
+                    "Não foi possível garantir estabilidade por lease Linux; arquivo preservado (escritor aberto ou filesystem sem suporte): {error}")));
+            }
+        }
+        Ok(Self { file })
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub(crate) fn acquire(_file: File) -> io::Result<Self> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Exclusão segura exige file leases Linux",
+        ))
+    }
+
+    pub(crate) fn check(&self) -> io::Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::AsRawFd;
+            if unsafe { libc::fcntl(self.file.as_raw_fd(), libc::F_GETLEASE) } == libc::F_RDLCK {
+                return Ok(());
+            }
+        }
+        Err(io::Error::other(
+            "Escritor concorrente ou lease revogada; originais preservados",
+        ))
+    }
+}
+
+impl Drop for ReadLease {
+    fn drop(&mut self) {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::AsRawFd;
+            unsafe {
+                libc::fcntl(self.file.as_raw_fd(), libc::F_SETLEASE, libc::F_UNLCK);
+            }
+        }
+    }
+}
+
+pub(crate) fn same_file_identity(a: &fs::Metadata, b: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        a.dev() == b.dev() && a.ino() == b.ino()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (a, b);
+        false
+    }
+}
+
 /// Verifica se o caminho existe no sistema de arquivos, seja como arquivo regular, diretório
 /// ou link simbólico (mesmo que quebrado/órfão).
 pub fn path_exists_or_symlink(path: &Path) -> bool {
@@ -251,15 +736,22 @@ pub fn unique_dest_path(dest_dir: &Path, filename: &str) -> PathBuf {
     let clean_filename = Path::new(filename)
         .file_name()
         .and_then(|s| s.to_str())
-        .unwrap_or(filename);
+        .unwrap_or("file");
     let base_path = dest_dir.join(clean_filename);
     if !path_exists_or_symlink(&base_path) {
         return base_path;
     }
 
-    let stem = base_path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+    let stem = base_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("file");
     let ext = base_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    let dot_ext = if ext.is_empty() { String::new() } else { format!(".{}", ext) };
+    let dot_ext = if ext.is_empty() {
+        String::new()
+    } else {
+        format!(".{}", ext)
+    };
 
     let mut counter = 1;
     loop {
@@ -310,8 +802,14 @@ mod tests {
         fs::write(&ext_file, b"conteudo_externo").unwrap();
 
         let res = is_safe_to_delete(&ext_file, &[mods_dir.clone()]);
-        assert!(res.is_err(), "arquivo fora de allowed_roots deve ser recusado");
-        assert!(matches!(res.unwrap_err(), SafetyError::OutsideAllowedScope(_, _)));
+        assert!(
+            res.is_err(),
+            "arquivo fora de allowed_roots deve ser recusado"
+        );
+        assert!(matches!(
+            res.unwrap_err(),
+            SafetyError::OutsideAllowedScope(_, _)
+        ));
 
         let del_res = safe_remove_file(&ext_file, &[mods_dir.clone()]);
         assert!(del_res.is_err());
@@ -353,14 +851,27 @@ mod tests {
             assert!(link_path.exists());
             // Remoção segura do symlink
             let res = safe_remove_file(&link_path, &[mods_dir.clone()]);
-            assert!(res.is_ok(), "deve permitir remover o symlink dentro de Mods: {:?}", res.err());
+            assert!(
+                res.is_ok(),
+                "deve permitir remover o symlink dentro de Mods: {:?}",
+                res.err()
+            );
 
             // O link em Mods foi apagado
-            assert!(fs::symlink_metadata(&link_path).is_err(), "o symlink deveria ter sido removido");
+            assert!(
+                fs::symlink_metadata(&link_path).is_err(),
+                "o symlink deveria ter sido removido"
+            );
 
             // O arquivo de destino externo DEVE continuar existindo e intacto!
-            assert!(target_file.exists(), "o arquivo de destino externo NUNCA deve ser apagado através de symlink");
-            assert_eq!(fs::read(&target_file).unwrap(), b"DADOS_CONFIDENCIAIS_INVIOLAVEIS");
+            assert!(
+                target_file.exists(),
+                "o arquivo de destino externo NUNCA deve ser apagado através de symlink"
+            );
+            assert_eq!(
+                fs::read(&target_file).unwrap(),
+                b"DADOS_CONFIDENCIAIS_INVIOLAVEIS"
+            );
         }
     }
 
@@ -384,9 +895,18 @@ mod tests {
             let res = safe_remove_dir_all(&link_dir, &[mods_dir.clone()]);
             assert!(res.is_ok(), "deve permitir remover o link para pasta");
 
-            assert!(fs::symlink_metadata(&link_dir).is_err(), "link deve ter sido removido");
-            assert!(secret_dir.exists(), "diretório externo deve permanecer intacto");
-            assert!(secret_file.exists(), "conteúdo do diretório externo deve permanecer intacto");
+            assert!(
+                fs::symlink_metadata(&link_dir).is_err(),
+                "link deve ter sido removido"
+            );
+            assert!(
+                secret_dir.exists(),
+                "diretório externo deve permanecer intacto"
+            );
+            assert!(
+                secret_file.exists(),
+                "conteúdo do diretório externo deve permanecer intacto"
+            );
         }
     }
 
@@ -442,10 +962,124 @@ mod tests {
             std::os::unix::fs::symlink(&alvo, &link).unwrap();
 
             let arquivo_no_link = link.join("sub/arquivo.txt");
-            assert!(has_symlink_ancestor(&arquivo_no_link), "deve acusar symlink no ancestral LinkFolder");
+            assert!(
+                has_symlink_ancestor(&arquivo_no_link),
+                "deve acusar symlink no ancestral LinkFolder"
+            );
 
             let arquivo_normal = base.join("normal/arquivo.txt");
-            assert!(!has_symlink_ancestor(&arquivo_normal), "pasta normal não deve acusar symlink");
+            assert!(
+                !has_symlink_ancestor(&arquivo_normal),
+                "pasta normal não deve acusar symlink"
+            );
         }
+    }
+    #[test]
+    fn p0_remove_file_informa_tipo_incorreto() {
+        let root = tempdir().unwrap();
+        let folder = root.path().join("folder");
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("sentinel"), b"preserved bytes").unwrap();
+        let result = safe_remove_file(&folder, &[root.path().to_path_buf()]);
+        assert!(
+            result.is_err(),
+            "diretório tratado como arquivo removido: {result:?}"
+        );
+        assert_eq!(
+            fs::read(folder.join("sentinel")).unwrap(),
+            b"preserved bytes"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn p0_remove_file_recusa_ancestral_symlink_mesmo_dentro_do_escopo() {
+        let root = tempdir().unwrap();
+        let folder = root.path().join("folder");
+        fs::create_dir(&folder).unwrap();
+        let sentinel = folder.join("sentinel");
+        fs::write(&sentinel, b"preserved bytes").unwrap();
+        let link = root.path().join("link");
+        std::os::unix::fs::symlink(&folder, &link).unwrap();
+        let result = safe_remove_file(&link.join("sentinel"), &[root.path().to_path_buf()]);
+        let actual = fs::read(&sentinel);
+        assert!(
+            result.is_err(),
+            "remoção por symlink aceita: {result:?}; bytes={actual:?}"
+        );
+        assert_eq!(actual.unwrap(), b"preserved bytes");
+    }
+    #[test]
+    fn p0_unique_dest_path_mantem_nomes_especiais_dentro_da_pasta() {
+        let root = tempdir().unwrap();
+        let dest = root.path().join("dest");
+        // O diretório ainda não existe: nenhum exists() pode ocultar traversal
+        // fazendo o helper cair no ramo de sufixo para colisões.
+        for name in ["/", "..", ".", ""] {
+            let candidate = unique_dest_path(&dest, name);
+            let normalized = normalize_path(&candidate);
+            assert!(
+                normalized != dest && normalized.starts_with(&dest),
+                "nome {name:?} escapou: {} -> {}",
+                candidate.display(),
+                normalized.display()
+            );
+            assert!(
+                matches!(candidate.components().last(), Some(Component::Normal(_))),
+                "nome final inválido: {}",
+                candidate.display()
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn p0_anchor_mantem_publicacao_no_diretorio_capturado() {
+        let root = tempdir().unwrap();
+        let live = root.path().join("live");
+        let moved = root.path().join("moved");
+        let external = root.path().join("external");
+        fs::create_dir(&live).unwrap();
+        fs::create_dir(&external).unwrap();
+        let anchor = AnchoredDir::open(&live).unwrap();
+        let workspace = tempfile::tempdir_in(anchor.path()).unwrap();
+        let private = anchor.child(workspace.path().file_name().unwrap()).unwrap();
+        fs::write(private.path().join("payload"), b"complete bytes").unwrap();
+        fs::rename(&live, &moved).unwrap();
+        std::os::unix::fs::symlink(&external, &live).unwrap();
+        private
+            .publish_noreplace("payload", &anchor, "result")
+            .unwrap();
+        workspace.close().unwrap();
+        assert_eq!(fs::read(moved.join("result")).unwrap(), b"complete bytes");
+        assert!(
+            !external.join("result").exists(),
+            "publicação escapou da âncora"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn p0_publish_noreplace_preserva_arquivo_e_diretorio_ocupados() {
+        let root = tempdir().unwrap();
+        let source = root.path().join("source");
+        let destination = root.path().join("destination");
+        fs::write(&source, b"new bytes").unwrap();
+        fs::write(&destination, b"original bytes").unwrap();
+        let result = publish_noreplace(&source, &destination);
+        assert!(result.is_err(), "sobrescrita aceita: {result:?}");
+        assert_eq!(fs::read(&source).unwrap(), b"new bytes");
+        assert_eq!(fs::read(&destination).unwrap(), b"original bytes");
+        let source_dir = root.path().join("source-dir");
+        let dest_dir = root.path().join("dest-dir");
+        fs::create_dir(&source_dir).unwrap();
+        fs::create_dir(&dest_dir).unwrap();
+        fs::write(dest_dir.join("sentinel"), b"directory bytes").unwrap();
+        assert!(publish_noreplace(&source_dir, &dest_dir).is_err());
+        assert_eq!(
+            fs::read(dest_dir.join("sentinel")).unwrap(),
+            b"directory bytes"
+        );
+        assert!(source_dir.is_dir());
     }
 }
