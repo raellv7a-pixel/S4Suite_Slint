@@ -1,12 +1,14 @@
 use crate::core::safety::{
-    is_path_inside, safe_remove_dir_all, safe_remove_file, unique_dest_path, SafetyError,
+    is_path_inside, safe_remove_dir_all, safe_remove_file, same_file_identity, unique_dest_path,
+    AnchoredDir, ReadLease, SafetyError,
 };
 use crate::engine::tray::{fast_md5, full_sha256};
 use crate::engine::walk_user_mods;
 use std::collections::HashMap;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// Caracteres que não podem entrar num nome de arquivo ou pasta. Mesma lista do
 /// `organizer_tab.py`: o app roda no Linux, mas a pasta `Mods` costuma ser
@@ -15,7 +17,9 @@ pub const FORBIDDEN_NAME_CHARS: [char; 9] = ['/', '\\', ':', '*', '?', '"', '<',
 
 #[derive(Debug, thiserror::Error)]
 pub enum OrganizerError {
-    #[error("Escolha um nome válido: '{0}' não sobrou nada depois de remover os caracteres proibidos")]
+    #[error(
+        "Escolha um nome válido: '{0}' não sobrou nada depois de remover os caracteres proibidos"
+    )]
     InvalidName(String),
     #[error("Já existe um item chamado '{0}' nesta pasta")]
     AlreadyExists(String),
@@ -31,7 +35,10 @@ pub enum OrganizerError {
 
 /// Limpa um nome digitado pelo usuário. `None` quando não sobra nada de útil.
 pub fn sanitize_entry_name(raw: &str) -> Option<String> {
-    let clean: String = raw.chars().filter(|c| !FORBIDDEN_NAME_CHARS.contains(c)).collect();
+    let clean: String = raw
+        .chars()
+        .filter(|c| !FORBIDDEN_NAME_CHARS.contains(c))
+        .collect();
     let trimmed = clean.trim().trim_matches('.').trim();
     if trimmed.is_empty() {
         None
@@ -41,8 +48,10 @@ pub fn sanitize_entry_name(raw: &str) -> Option<String> {
 }
 
 fn is_mods_root(path: &Path, mods_dir: &Path) -> bool {
-    match (crate::core::safety::canonical_path(path), crate::core::safety::canonical_path(mods_dir))
-    {
+    match (
+        crate::core::safety::canonical_path(path),
+        crate::core::safety::canonical_path(mods_dir),
+    ) {
         (Some(a), Some(b)) => a == b,
         _ => false,
     }
@@ -69,6 +78,42 @@ fn validate_target(path: &Path, mods_dir: &Path, allow_root: bool) -> Result<(),
     Ok(())
 }
 
+fn scoped_dir(
+    root: &AnchoredDir,
+    mods_dir: &Path,
+    path: &Path,
+    create: bool,
+) -> io::Result<AnchoredDir> {
+    let relative = path
+        .strip_prefix(mods_dir)
+        .map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "Caminho fora de Mods"))?;
+    let mut current = root.try_clone()?;
+    for component in relative.components() {
+        let Component::Normal(name) = component else {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "Componente de caminho inseguro",
+            ));
+        };
+        current = if create {
+            current.create_child(name)?
+        } else {
+            current.child(name)?
+        };
+    }
+    Ok(current)
+}
+
+fn scoped_parent(root: &AnchoredDir, mods_dir: &Path, path: &Path) -> io::Result<AnchoredDir> {
+    scoped_dir(
+        root,
+        mods_dir,
+        path.parent()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Caminho sem pasta pai"))?,
+        false,
+    )
+}
+
 /// Cria uma subpasta dentro de `Mods`.
 pub fn create_folder(
     parent: &Path,
@@ -85,7 +130,10 @@ pub fn create_folder(
         return Err(OrganizerError::AlreadyExists(name));
     }
 
-    fs::create_dir_all(&new_dir)?;
+    let root = AnchoredDir::open(mods_dir)?;
+    let _lock = root.lock_exclusive()?;
+    let parent = scoped_dir(&root, mods_dir, parent, false)?;
+    fs::create_dir(parent.path().join(&name))?;
     Ok(new_dir)
 }
 
@@ -104,11 +152,16 @@ pub fn rename_item(
     if dest == path {
         return Ok(dest);
     }
-    if dest.exists() {
-        return Err(OrganizerError::AlreadyExists(name));
+    let root = AnchoredDir::open(mods_dir)?;
+    let _lock = root.lock_exclusive()?;
+    let parent = scoped_parent(&root, mods_dir, path)?;
+    match parent.publish_noreplace(path.file_name().unwrap_or_default(), &parent, &name) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+            return Err(OrganizerError::AlreadyExists(name));
+        }
+        Err(e) => return Err(e.into()),
     }
-
-    fs::rename(path, &dest)?;
     Ok(dest)
 }
 
@@ -138,7 +191,9 @@ pub fn transfer_items(
     mods_dir: &Path,
 ) -> Result<TransferOutcome, OrganizerError> {
     validate_target(dest_folder, mods_dir, true)?;
-    fs::create_dir_all(dest_folder)?;
+    let root = AnchoredDir::open(mods_dir)?;
+    let _lock = root.lock_exclusive()?;
+    let destination = scoped_dir(&root, mods_dir, dest_folder, true)?;
 
     let mut outcome = TransferOutcome::default();
 
@@ -152,27 +207,28 @@ pub fn transfer_items(
         // caminho: o `fs::rename` falha, mas o `copy` recursivo entraria em
         // laço criando cópias dentro de cópias.
         if src.is_dir() && (dest_folder == src.as_path() || is_path_inside(dest_folder, src)) {
-            outcome
-                .failures
-                .push((src.clone(), OrganizerError::DestinationInsideSource(
-                    dest_folder.display().to_string(),
-                )
-                .to_string()));
+            outcome.failures.push((
+                src.clone(),
+                OrganizerError::DestinationInsideSource(dest_folder.display().to_string())
+                    .to_string(),
+            ));
             continue;
         }
 
-        let filename = src.file_name().unwrap_or_default().to_string_lossy().to_string();
-        let dest = unique_dest_path(dest_folder, &filename);
-
-        let result = match mode {
-            TransferMode::Copy => copy_recursive(src, &dest),
-            TransferMode::Move => move_entry(src, &dest, mods_dir),
-        };
+        let filename = src.file_name().unwrap_or_default();
+        let result = scoped_parent(&root, mods_dir, src).and_then(|parent| match mode {
+            TransferMode::Copy => copy_entry(&parent, filename, &destination),
+            TransferMode::Move => move_entry(&parent, filename, &destination, src),
+        });
 
         match result {
-            Ok(()) => {
+            Ok(name) => {
                 outcome.done += 1;
-                collect_script_depth_warnings(&dest, mods_dir, &mut outcome.script_warnings);
+                collect_script_depth_warnings(
+                    &dest_folder.join(name),
+                    mods_dir,
+                    &mut outcome.script_warnings,
+                );
             }
             Err(e) => outcome.failures.push((src.clone(), e.to_string())),
         }
@@ -181,67 +237,165 @@ pub fn transfer_items(
     Ok(outcome)
 }
 
-/// `fs::rename` só funciona dentro do mesmo sistema de arquivos. A pasta `Mods`
-/// costuma estar num disco separado do resto, então caímos para copiar-e-apagar
-/// quando ele recusa.
-fn move_entry(src: &Path, dest: &Path, mods_dir: &Path) -> io::Result<()> {
-    match fs::rename(src, dest) {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            if let Err(e) = copy_recursive(src, dest) {
-                // Se a cópia falhar, limpa o destino parcial e preserva a origem intacta
-                if dest.is_dir() {
-                    let _ = fs::remove_dir_all(dest);
-                } else {
-                    let _ = fs::remove_file(dest);
-                }
-                return Err(e);
-            }
-            let allowed_roots = [mods_dir.to_path_buf()];
-            let is_symlink = fs::symlink_metadata(src)
-                .map(|m| m.file_type().is_symlink())
-                .unwrap_or(false);
-            if is_symlink {
-                safe_remove_file(src, &allowed_roots)
-                    .map_err(|e| io::Error::new(io::ErrorKind::PermissionDenied, e.to_string()))?;
-            } else if src.is_dir() {
-                safe_remove_dir_all(src, &allowed_roots)
-                    .map_err(|e| io::Error::new(io::ErrorKind::PermissionDenied, e.to_string()))?;
-            } else {
-                safe_remove_file(src, &allowed_roots)
-                    .map_err(|e| io::Error::new(io::ErrorKind::PermissionDenied, e.to_string()))?;
-            }
-            Ok(())
+/// A publicação nunca substitui uma entrada, mesmo que ela apareça depois da
+/// escolha do nome. Uma árvore copiada só fica visível quando está completa.
+fn publish_unique(
+    source: &AnchoredDir,
+    source_name: &OsStr,
+    destination: &AnchoredDir,
+    filename: &OsStr,
+) -> io::Result<OsString> {
+    loop {
+        let candidate = unique_dest_path(&destination.path(), &filename.to_string_lossy());
+        let name = candidate.file_name().unwrap_or_default();
+        match source.publish_noreplace(source_name, destination, name) {
+            Ok(()) => return Ok(name.to_owned()),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
         }
     }
 }
 
-fn copy_recursive(src: &Path, dest: &Path) -> io::Result<()> {
-    let is_symlink = fs::symlink_metadata(src)
-        .map(|m| m.file_type().is_symlink())
-        .unwrap_or(false);
-    if is_symlink {
+fn copy_recursive(
+    source: &AnchoredDir,
+    name: &OsStr,
+    destination: &AnchoredDir,
+    destination_name: &OsStr,
+    leases: &mut Vec<ReadLease>,
+) -> io::Result<()> {
+    let metadata = fs::symlink_metadata(source.path().join(name))?;
+    if metadata.file_type().is_symlink() {
+        let target = fs::read_link(source.path().join(name))?;
         #[cfg(unix)]
         {
-            let target = fs::read_link(src)?;
-            if let Some(parent) = dest.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            let _ = fs::remove_file(dest);
-            return std::os::unix::fs::symlink(&target, dest);
+            std::os::unix::fs::symlink(&target, destination.path().join(destination_name))?;
+            return Ok(());
         }
+        #[cfg(not(unix))]
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Cópia de symlink indisponível",
+        ));
     }
-    if src.is_file() {
-        crate::engine::installer::atomic_copy(src, dest)?;
+    if metadata.is_file() {
+        let lease = ReadLease::acquire(source.open_regular(name)?)?;
+        let mut input = &lease.file;
+        let mut output = destination.create_new(destination_name)?;
+        io::copy(&mut input, &mut output)?;
+        output.set_permissions(lease.file.metadata()?.permissions())?;
+        output.sync_all()?;
+        lease.check()?;
+        leases.push(lease);
         return Ok(());
     }
-
-    fs::create_dir_all(dest)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        copy_recursive(&entry.path(), &dest.join(entry.file_name()))?;
+    if !metadata.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Entrada não regular na pasta de origem",
+        ));
+    }
+    let source_dir = source.child(name)?;
+    let destination_dir = destination.create_child(destination_name)?;
+    for entry in fs::read_dir(source_dir.path())? {
+        let name = entry?.file_name();
+        copy_recursive(&source_dir, &name, &destination_dir, &name, leases)?;
     }
     Ok(())
+}
+
+fn copy_entry(
+    source: &AnchoredDir,
+    name: &OsStr,
+    destination: &AnchoredDir,
+) -> io::Result<OsString> {
+    let temporary = tempfile::Builder::new()
+        .prefix(".s4suite-copy-")
+        .tempdir_in(destination.path())?;
+    let staging = destination.child(temporary.path().file_name().unwrap())?;
+    let mut leases = Vec::new();
+    copy_recursive(source, name, &staging, OsStr::new("item"), &mut leases)?;
+    for lease in &leases {
+        lease.check()?;
+    }
+    publish_unique(&staging, OsStr::new("item"), destination, name)
+}
+
+fn move_entry(
+    source: &AnchoredDir,
+    name: &OsStr,
+    destination: &AnchoredDir,
+    original: &Path,
+) -> io::Result<OsString> {
+    match publish_unique(source, name, destination, name) {
+        Ok(name) => return Ok(name),
+        Err(e) if e.raw_os_error() == Some(libc::EXDEV) => {}
+        Err(e) => return Err(e),
+    }
+    if !fs::symlink_metadata(source.path().join(name))?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Mover árvores ou symlinks entre sistemas de arquivos não é seguro; origem mantida",
+        ));
+    }
+
+    // Entre sistemas de arquivos, retiramos a origem para uma quarentena
+    // privada antes de copiar. Não apagamos um caminho que possa ter recebido
+    // novos dados enquanto a cópia estava em andamento.
+    let quarantine = tempfile::Builder::new()
+        .prefix(".s4suite-move-")
+        .tempdir_in(source.path())?;
+    let quarantine_name = quarantine.path().file_name().unwrap().to_owned();
+    let held = source.child(&quarantine_name)?;
+    source.publish_noreplace(name, &held, "item")?;
+    let result = (|| {
+        let temporary = tempfile::Builder::new()
+            .prefix(".s4suite-copy-")
+            .tempdir_in(destination.path())?;
+        let staging = destination.child(temporary.path().file_name().unwrap())?;
+        let lease = ReadLease::acquire(held.open_regular("item")?)?;
+        let mut input = &lease.file;
+        let mut output = staging.create_new("item")?;
+        io::copy(&mut input, &mut output)?;
+        output.set_permissions(lease.file.metadata()?.permissions())?;
+        output.sync_all()?;
+        lease.check()?;
+        let published = publish_unique(&staging, OsStr::new("item"), destination, name)?;
+        lease.check()?;
+        if !same_file_identity(
+            &held.open_regular("item")?.metadata()?,
+            &lease.file.metadata()?,
+        ) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Origem substituída na quarentena",
+            ));
+        }
+        held.remove_file("item")?;
+        Ok(published)
+    })();
+    match result {
+        Ok(name) => Ok(name),
+        Err(error) => match held.publish_noreplace("item", source, name) {
+            Ok(()) => Err(error),
+            Err(restore) => {
+                let preserved = original
+                    .parent()
+                    .unwrap_or(Path::new(""))
+                    .join(&quarantine_name)
+                    .join("item");
+                let _ = quarantine.keep();
+                Err(io::Error::new(
+                    error.kind(),
+                    format!(
+                        "{}; restauração recusada: {}. Origem preservada em {}",
+                        error,
+                        restore,
+                        preserved.display()
+                    ),
+                ))
+            }
+        },
+    }
 }
 
 /// Lista os `.ts4script` que ficaram fundos demais em `path`.
@@ -259,10 +413,17 @@ pub fn collect_script_depth_warnings(path: &Path, mods_dir: &Path, out: &mut Vec
     };
 
     for file in candidates {
-        if !file.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("ts4script")).unwrap_or(false) {
+        if !file
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("ts4script"))
+            .unwrap_or(false)
+        {
             continue;
         }
-        let Ok(rel) = file.strip_prefix(mods_dir) else { continue };
+        let Ok(rel) = file.strip_prefix(mods_dir) else {
+            continue;
+        };
         // rel inclui o próprio arquivo: profundidade 2 é Mods/Sub/x.ts4script.
         if rel.components().count() > 2 {
             out.push(file);
@@ -362,7 +523,10 @@ pub fn filter_tree(nodes: &[ModNode], query: &str) -> Vec<ModNode> {
     }
 
     let mut keep: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
-    for node in nodes.iter().filter(|n| n.name.to_lowercase().contains(&needle)) {
+    for node in nodes
+        .iter()
+        .filter(|n| n.name.to_lowercase().contains(&needle))
+    {
         keep.insert(node.path.clone());
         let mut cursor = node.path.parent();
         while let Some(parent) = cursor {
@@ -373,7 +537,11 @@ pub fn filter_tree(nodes: &[ModNode], query: &str) -> Vec<ModNode> {
         }
     }
 
-    nodes.iter().filter(|n| keep.contains(&n.path)).cloned().collect()
+    nodes
+        .iter()
+        .filter(|n| keep.contains(&n.path))
+        .cloned()
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -418,19 +586,30 @@ pub fn auto_fix_script_depth(
     issues: &[ScriptDepthIssue],
     mods_dir: &Path,
 ) -> Result<usize, io::Error> {
-    let target_folder = mods_dir.join("00_Scripts_Corrigidos");
-    fs::create_dir_all(&target_folder)?;
-
-    let mut moved_count = 0;
-    for issue in issues {
-        if issue.file_path.exists() {
-            let dest = unique_dest_path(&target_folder, &issue.filename);
-            fs::rename(&issue.file_path, &dest)?;
-            moved_count += 1;
-        }
+    let sources: Vec<_> = issues.iter().map(|issue| issue.file_path.clone()).collect();
+    if sources.is_empty() {
+        return Ok(0);
     }
-
-    Ok(moved_count)
+    let outcome = transfer_items(
+        &sources,
+        &mods_dir.join("00_Scripts_Corrigidos"),
+        TransferMode::Move,
+        mods_dir,
+    )
+    .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error.to_string()))?;
+    if !outcome.failures.is_empty() {
+        return Err(io::Error::other(format!(
+            "{} script(s) movidos; falhas: {}",
+            outcome.done,
+            outcome
+                .failures
+                .iter()
+                .map(|(path, error)| format!("{}: {}", path.display(), error))
+                .collect::<Vec<_>>()
+                .join("; "),
+        )));
+    }
+    Ok(outcome.done)
 }
 
 #[derive(Debug, Clone)]
@@ -445,7 +624,14 @@ pub fn detect_duplicates(mods_dir: &Path) -> Vec<DuplicateGroup> {
 
     for entry in walk_user_mods(mods_dir, usize::MAX) {
         let path = entry.path();
-        if path.is_file() && path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase() == "package" {
+        if path.is_file()
+            && path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase()
+                == "package"
+        {
             if let Ok(hash) = fast_md5(path) {
                 fast_map.entry(hash).or_default().push(path.to_path_buf());
             }
@@ -492,7 +678,11 @@ impl DuplicateGroup {
     /// As cópias redundantes — tudo menos o `keeper`.
     pub fn redundant(&self) -> Vec<PathBuf> {
         let keeper = self.keeper().clone();
-        self.file_paths.iter().filter(|p| **p != keeper).cloned().collect()
+        self.file_paths
+            .iter()
+            .filter(|p| **p != keeper)
+            .cloned()
+            .collect()
     }
 }
 
@@ -502,6 +692,135 @@ pub struct RemovalOutcome {
     pub removed: usize,
     pub freed_bytes: u64,
     pub failures: Vec<(PathBuf, String)>,
+}
+
+/// Revalida tanto a cópia mantida quanto os bytes de cada redundante. Uma
+/// confirmação antiga nunca autoriza excluir um arquivo novo no mesmo nome.
+pub fn remove_duplicates(groups: &[DuplicateGroup], mods_dir: &Path) -> RemovalOutcome {
+    let mut outcome = RemovalOutcome::default();
+    let root = match AnchoredDir::open(mods_dir) {
+        Ok(root) => root,
+        Err(error) => {
+            for group in groups.iter().filter(|group| group.file_paths.len() > 1) {
+                outcome.failures.extend(
+                    group
+                        .redundant()
+                        .into_iter()
+                        .map(|path| (path, error.to_string())),
+                );
+            }
+            return outcome;
+        }
+    };
+    let _lock = match root.lock_exclusive() {
+        Ok(lock) => lock,
+        Err(error) => {
+            for group in groups.iter().filter(|group| group.file_paths.len() > 1) {
+                outcome.failures.extend(
+                    group
+                        .redundant()
+                        .into_iter()
+                        .map(|path| (path, error.to_string())),
+                );
+            }
+            return outcome;
+        }
+    };
+    for group in groups.iter().filter(|group| group.file_paths.len() > 1) {
+        let keeper_path = group.keeper();
+        let keeper = (|| {
+            let parent = scoped_parent(&root, mods_dir, keeper_path)?;
+            let lease = ReadLease::acquire(
+                parent.open_regular(keeper_path.file_name().unwrap_or_default())?,
+            )?;
+            if crate::engine::tray::sha256_reader(&lease.file)? != group.sha256_hash {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Cópia mantida foi modificada",
+                ));
+            }
+            lease.check()?;
+            Ok((parent, lease))
+        })();
+        let (keeper_parent, keeper_lease) = match keeper {
+            Ok(keeper) => keeper,
+            Err(error) => {
+                outcome.failures.extend(
+                    group
+                        .redundant()
+                        .into_iter()
+                        .map(|path| (path, error.to_string())),
+                );
+                continue;
+            }
+        };
+        for path in group.redundant() {
+            let result = (|| {
+                let parent = scoped_parent(&root, mods_dir, &path)?;
+                let temporary = tempfile::Builder::new()
+                    .prefix(".s4suite-duplicate-")
+                    .tempdir_in(parent.path())?;
+                let temporary_name = temporary.path().file_name().unwrap().to_owned();
+                let held = parent.child(&temporary_name)?;
+                let name = path.file_name().unwrap_or_default();
+                parent.publish_noreplace(name, &held, "item")?;
+                let remove = (|| {
+                    let lease = ReadLease::acquire(held.open_regular("item")?)?;
+                    let metadata = lease.file.metadata()?;
+                    if crate::engine::tray::sha256_reader(&lease.file)? != group.sha256_hash {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "Duplicata modificada depois da análise",
+                        ));
+                    }
+                    lease.check()?;
+                    keeper_lease.check()?;
+                    if !same_file_identity(
+                        &keeper_parent
+                            .open_regular(keeper_path.file_name().unwrap_or_default())?
+                            .metadata()?,
+                        &keeper_lease.file.metadata()?,
+                    ) || !same_file_identity(&held.open_regular("item")?.metadata()?, &metadata)
+                    {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "Arquivo substituído depois da análise",
+                        ));
+                    }
+                    held.remove_file("item")?;
+                    Ok(metadata.len())
+                })();
+                match remove {
+                    Ok(size) => Ok(size),
+                    Err(error) => match held.publish_noreplace("item", &parent, name) {
+                        Ok(()) => Err(error),
+                        Err(restore) => {
+                            let preserved =
+                                path.parent().unwrap().join(temporary_name).join("item");
+                            let _ = temporary.keep();
+                            Err(io::Error::new(
+                                error.kind(),
+                                format!(
+                                    "{}; restauração recusada: {}. Arquivo preservado em {}",
+                                    error,
+                                    restore,
+                                    preserved.display()
+                                ),
+                            ))
+                        }
+                    },
+                }
+            })();
+            match result {
+                Ok(size) => {
+                    outcome.removed += 1;
+                    outcome.freed_bytes += size;
+                }
+                Err(error) => outcome.failures.push((path, error.to_string())),
+            }
+        }
+    }
+    outcome
 }
 
 /// Apaga os arquivos indicados, sempre por [`safe_remove_file`], que recusa
@@ -531,7 +850,11 @@ pub fn find_junk_files(mods_dir: &Path) -> Vec<PathBuf> {
     for entry in walk_user_mods(mods_dir, usize::MAX) {
         let path = entry.path();
         if path.is_file() {
-            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
             if junk_exts.contains(&ext.as_str()) {
                 junk.push(path.to_path_buf());
             }
@@ -550,7 +873,10 @@ mod tests {
     fn test_script_depth_fixer() {
         let dir = tempdir().unwrap();
         let mods_dir = dir.path().join("Mods");
-        let deep_folder = mods_dir.join("Category").join("SubCategory").join("DeepFolder");
+        let deep_folder = mods_dir
+            .join("Category")
+            .join("SubCategory")
+            .join("DeepFolder");
         fs::create_dir_all(&deep_folder).unwrap();
 
         let script_file = deep_folder.join("nested_mod.ts4script");
@@ -562,7 +888,9 @@ mod tests {
         let fixed = auto_fix_script_depth(&issues, &mods_dir).unwrap();
         assert_eq!(fixed, 1);
 
-        let corrected_file = mods_dir.join("00_Scripts_Corrigidos").join("nested_mod.ts4script");
+        let corrected_file = mods_dir
+            .join("00_Scripts_Corrigidos")
+            .join("nested_mod.ts4script");
         assert!(corrected_file.exists());
     }
 }

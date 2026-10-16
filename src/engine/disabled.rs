@@ -1,9 +1,12 @@
 use crate::core::safety::{is_path_inside, unique_dest_path};
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs::{self, File};
+use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+
+static MANIFEST_TRANSACTION: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DisabledModEntry {
@@ -36,18 +39,16 @@ impl DisabledManager {
     }
 
     pub fn save_manifest(&self, data: &HashMap<String, DisabledModEntry>) -> Result<(), io::Error> {
-        if let Some(parent) = self.manifest_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let tmp_path = self.manifest_path.with_extension("json.tmp");
-        {
-            let mut file = File::create(&tmp_path)?;
-            let json = serde_json::to_string_pretty(data)?;
-            file.write_all(json.as_bytes())?;
-            file.flush()?;
-            file.sync_all()?;
-        }
-        fs::rename(tmp_path, &self.manifest_path)?;
+        let parent = self.manifest_path.parent().unwrap_or(Path::new("."));
+        fs::create_dir_all(parent)?;
+        let mut tmp_file = tempfile::Builder::new()
+            .prefix(".disabled_mods_manifest-")
+            .tempfile_in(parent)?;
+        let json = serde_json::to_string_pretty(data)?;
+        tmp_file.write_all(json.as_bytes())?;
+        tmp_file.flush()?;
+        tmp_file.as_file().sync_all()?;
+        tmp_file.persist(&self.manifest_path).map_err(|e| e.error)?;
         Ok(())
     }
 
@@ -63,7 +64,9 @@ impl DisabledManager {
             return Err("Arquivo de mod não existe".into());
         }
 
-        if !is_path_inside(path, mods_dir) && dunce::canonicalize(path)? != dunce::canonicalize(mods_dir)? {
+        if !is_path_inside(path, mods_dir)
+            && dunce::canonicalize(path)? != dunce::canonicalize(mods_dir)?
+        {
             return Err("Operação bloqueada: mod fora da pasta Mods".into());
         }
 
@@ -73,25 +76,37 @@ impl DisabledManager {
         } else {
             format!("{}.disabled", fname)
         };
-
         let parent = path.parent().unwrap_or(mods_dir);
         let dest_disabled_path = unique_dest_path(parent, &disabled_name);
 
-        fs::rename(path, &dest_disabled_path)?;
+        let parent_dir = crate::core::safety::AnchoredDir::open(parent)?;
+        let src_name = path.file_name().ok_or("Arquivo sem nome")?;
+        let dest_name = dest_disabled_path.file_name().ok_or("Destino sem nome")?;
+        parent_dir.publish_noreplace(src_name, &parent_dir, dest_name)?;
 
+        self.record_disabled(path, &dest_disabled_path, reason, note)?;
+        Ok(dest_disabled_path)
+    }
+
+    pub(crate) fn record_disabled(
+        &self,
+        original: &Path,
+        disabled: &Path,
+        reason: &str,
+        note: &str,
+    ) -> io::Result<()> {
+        let _transaction = MANIFEST_TRANSACTION.lock();
         let mut manifest = self.load_manifest();
         let entry = DisabledModEntry {
-            disabled_path: dest_disabled_path.display().to_string(),
-            original_path: path.display().to_string(),
+            disabled_path: disabled.display().to_string(),
+            original_path: original.display().to_string(),
             disabled_at: chrono_like_now(),
             reason: reason.to_string(),
             note: note.to_string(),
         };
 
-        manifest.insert(dest_disabled_path.display().to_string(), entry);
-        self.save_manifest(&manifest)?;
-
-        Ok(dest_disabled_path)
+        manifest.insert(disabled.display().to_string(), entry);
+        self.save_manifest(&manifest)
     }
 
     pub fn enable_mod(
@@ -99,8 +114,15 @@ impl DisabledManager {
         disabled_path: &Path,
         mods_dir: &Path,
     ) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
-        if !disabled_path.exists() {
+        let _transaction = MANIFEST_TRANSACTION.lock();
+        if !disabled_path.exists() || !disabled_path.is_file() {
             return Err("Arquivo .disabled não foi encontrado".into());
+        }
+
+        if !is_path_inside(disabled_path, mods_dir)
+            && dunce::canonicalize(disabled_path)? != dunce::canonicalize(mods_dir)?
+        {
+            return Err("Operação bloqueada: mod desativado fora da pasta Mods".into());
         }
 
         let mut manifest = self.load_manifest();
@@ -109,14 +131,38 @@ impl DisabledManager {
         let original_target = if let Some(entry) = manifest.get(&path_str) {
             PathBuf::from(&entry.original_path)
         } else {
-            let fname = disabled_path.file_name().unwrap_or_default().to_string_lossy();
+            let fname = disabled_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy();
             let clean_name = fname.trim_end_matches(".disabled");
             disabled_path.parent().unwrap_or(mods_dir).join(clean_name)
         };
 
-        let target_dest = unique_dest_path(original_target.parent().unwrap_or(mods_dir), original_target.file_name().unwrap_or_default().to_str().unwrap_or("mod.package"));
+        if !is_path_inside(&original_target, mods_dir)
+            && dunce::canonicalize(&original_target)? != dunce::canonicalize(mods_dir)?
+        {
+            return Err("Operação bloqueada: destino original fora da pasta Mods".into());
+        }
 
-        fs::rename(disabled_path, &target_dest)?;
+        let target_parent = original_target.parent().unwrap_or(mods_dir);
+        let target_dest = unique_dest_path(
+            target_parent,
+            original_target
+                .file_name()
+                .unwrap_or_default()
+                .to_str()
+                .unwrap_or("mod.package"),
+        );
+
+        let src_parent_dir =
+            crate::core::safety::AnchoredDir::open(disabled_path.parent().unwrap_or(mods_dir))?;
+        let dest_parent_dir = crate::core::safety::AnchoredDir::open(target_parent)?;
+        let src_name = disabled_path
+            .file_name()
+            .ok_or("Arquivo de origem sem nome")?;
+        let dest_name = target_dest.file_name().ok_or("Destino sem nome")?;
+        src_parent_dir.publish_noreplace(src_name, &dest_parent_dir, dest_name)?;
 
         manifest.remove(&path_str);
         self.save_manifest(&manifest)?;
@@ -166,7 +212,9 @@ impl DisabledManager {
             items.push(DisabledMod {
                 path: path.to_path_buf(),
                 name: fname.trim_end_matches(".disabled").to_string(),
-                reason: record.map(|e| e.reason.clone()).unwrap_or_else(|| "manual".to_string()),
+                reason: record
+                    .map(|e| e.reason.clone())
+                    .unwrap_or_else(|| "manual".to_string()),
                 note: record.map(|e| e.note.clone()).unwrap_or_default(),
                 missing: false,
             });
@@ -179,7 +227,11 @@ impl DisabledManager {
             let path = PathBuf::from(key);
             let name = path
                 .file_name()
-                .map(|n| n.to_string_lossy().trim_end_matches(".disabled").to_string())
+                .map(|n| {
+                    n.to_string_lossy()
+                        .trim_end_matches(".disabled")
+                        .to_string()
+                })
                 .unwrap_or_else(|| key.clone());
             items.push(DisabledMod {
                 path,
@@ -190,12 +242,13 @@ impl DisabledManager {
             });
         }
 
-        items.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        items.sort_by_key(|a| a.name.to_lowercase());
         items
     }
 
     /// Remove do manifesto as entradas cujo arquivo não existe mais.
     pub fn prune_missing(&self) -> Result<usize, io::Error> {
+        let _transaction = MANIFEST_TRANSACTION.lock();
         let mut manifest = self.load_manifest();
         let before = manifest.len();
         manifest.retain(|key, _| Path::new(key).exists());
@@ -208,7 +261,9 @@ impl DisabledManager {
 }
 
 fn chrono_like_now() -> String {
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
     format!("{}", now.as_secs())
 }
 
@@ -229,7 +284,13 @@ mod tests {
 
         let mgr = DisabledManager::new(&config_dir);
         let disabled_path = mgr
-            .disable_mod(&mod_file, &mods_dir, "manual", "testing", &[mods_dir.clone()])
+            .disable_mod(
+                &mod_file,
+                &mods_dir,
+                "manual",
+                "testing",
+                &[mods_dir.clone()],
+            )
             .unwrap();
 
         assert!(disabled_path.exists());
