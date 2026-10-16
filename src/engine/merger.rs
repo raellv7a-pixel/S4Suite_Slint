@@ -1,11 +1,15 @@
+use crate::core::safety::{same_file_identity, AnchoredDir, ReadLease};
 use crate::engine::dbpf::{DBPFReader, DBPFWriter, PackageResource, ResourceKey};
 use crate::engine::disabled::DisabledManager;
-use crate::engine::organizer::{remove_files, RemovalOutcome};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::SystemTime;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,7 +21,16 @@ pub struct MergeReport {
     pub failed_files: Vec<(String, String)>,
     pub output_packages: Vec<String>,
     #[serde(skip, default)]
-    pub original_snapshots: Vec<(PathBuf, u64, Option<SystemTime>)>,
+    pub original_snapshots: Vec<OriginalSnapshot>,
+}
+
+/// In-memory evidence only: deserializing a report never authorizes destruction.
+#[derive(Debug, Clone)]
+pub struct OriginalSnapshot {
+    path: PathBuf,
+    metadata: fs::Metadata,
+    sha256: [u8; 32],
+    outputs: Arc<Vec<(PathBuf, [u8; 32])>>,
 }
 pub struct MergeTask {
     pub input_files: Vec<PathBuf>,
@@ -35,7 +48,12 @@ pub fn merge_sims4_packages<F>(
 where
     F: Fn(usize, usize, &str) + Send + Sync,
 {
-    fs::create_dir_all(&task.output_dir)?;
+    let output_dir = AnchoredDir::create(&task.output_dir)?;
+    let workspace = tempfile::Builder::new()
+        .prefix(".s4merge-")
+        .tempdir_in(output_dir.path())?;
+    let workspace_dir =
+        output_dir.child(workspace.path().file_name().ok_or("invalid workspace")?)?;
 
     let total_files = task.input_files.len();
     if total_files == 0 {
@@ -51,26 +69,32 @@ where
     }
 
     let mut original_snapshots = Vec::new();
-    for fpath in &task.input_files {
-        if let Ok(meta) = fs::metadata(fpath) {
-            original_snapshots.push((fpath.clone(), meta.len(), meta.modified().ok()));
-        }
-    }
+    let mut file_cache: HashMap<PathBuf, BufReader<File>> = HashMap::new();
+    let mut seen_inputs = HashSet::new();
     // O prefixo é resolvido **antes** de escrever qualquer parte: duas tarefas
     // da fila que terminam no mesmo segundo produziam o mesmo nome, e a segunda
     // gravava por cima da primeira — com os originais já consumidos pela
     // pós-ação, o conteúdo da primeira ia embora sem nenhum erro na tela.
-    let stem = unique_output_stem(&task.output_dir, task.name.as_deref());
-    let mut global_resources: IndexMap<ResourceKey, (PathBuf, u32, u32, u32, u16)> = IndexMap::new();
+    let stem = unique_output_stem(&output_dir.path(), task.name.as_deref());
+    let mut global_resources: IndexMap<ResourceKey, (PathBuf, u32, u32, u32, u16)> =
+        IndexMap::new();
     let mut failed_files = Vec::new();
-    let mut success_count = 0;
+    let mut success_count: usize = 0;
 
     for (idx, fpath) in task.input_files.iter().enumerate() {
         let fname = fpath.file_name().unwrap_or_default().to_string_lossy();
-        progress_cb(idx + 1, total_files, &format!("Lendo Metadados: {}/{} ({})", idx + 1, total_files, fname));
+        progress_cb(
+            idx + 1,
+            total_files,
+            &format!("Lendo Metadados: {}/{} ({})", idx + 1, total_files, fname),
+        );
 
-        match File::open(fpath) {
-            Ok(file) => {
+        if !seen_inputs.insert(crate::core::safety::normalize_path(fpath)) {
+            failed_files.push((fpath.display().to_string(), "Entrada duplicada".into()));
+            continue;
+        }
+        match snapshot_original(fpath) {
+            Ok((snapshot, file)) => {
                 let mut reader = BufReader::with_capacity(512 * 1024, file);
                 match DBPFReader::read_index(&mut reader) {
                     Ok((_header, index)) => {
@@ -88,6 +112,8 @@ where
                             );
                         }
                         success_count += 1;
+                        original_snapshots.push(snapshot);
+                        file_cache.insert(fpath.clone(), reader);
                     }
                     Err(e) => {
                         failed_files.push((fpath.display().to_string(), e.to_string()));
@@ -123,54 +149,46 @@ where
 
     let safe_limit = ((task.max_size_bytes as f64) * 0.90) as u64;
 
-    // Cache opened files to avoid reopening repeatedly
-    let mut file_cache: std::collections::HashMap<PathBuf, BufReader<File>> = std::collections::HashMap::new();
-
     let write_result = (|| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         for (res_idx, key) in sorted_keys.iter().enumerate() {
             if res_idx % 100 == 0 || res_idx == sorted_keys.len() - 1 {
-                progress_cb(res_idx + 1, sorted_keys.len(), &format!("Processando Recursos: {}/{}", res_idx + 1, sorted_keys.len()));
+                progress_cb(
+                    res_idx + 1,
+                    sorted_keys.len(),
+                    &format!(
+                        "Processando Recursos: {}/{}",
+                        res_idx + 1,
+                        sorted_keys.len()
+                    ),
+                );
             }
 
             let (src_path, offset, size, mem_size, compressed) = &global_resources[key];
-
-            if !file_cache.contains_key(src_path) {
-                match File::open(src_path) {
-                    Ok(f) => {
-                        file_cache.insert(src_path.clone(), BufReader::with_capacity(4 * 1024 * 1024, f));
-                    }
-                    Err(e) => {
-                        let err_msg = format!("falha ao abrir arquivo fonte: {}", e);
-                        if !failed_files.iter().any(|(p, _)| p == &src_path.display().to_string()) {
-                            failed_files.push((src_path.display().to_string(), err_msg));
-                            if success_count > 0 {
-                                success_count -= 1;
-                            }
-                        }
-                        continue;
-                    }
-                }
-            }
 
             let mut data = vec![0u8; *size as usize];
             let mut read_failed = false;
             if let Some(reader) = file_cache.get_mut(src_path) {
                 if let Err(e) = reader.seek(SeekFrom::Start(*offset as u64)) {
                     let err_msg = format!("falha no seek do recurso {}: {}", key, e);
-                    if !failed_files.iter().any(|(p, _)| p == &src_path.display().to_string()) {
+                    if !failed_files
+                        .iter()
+                        .any(|(p, _)| p == &src_path.display().to_string())
+                    {
                         failed_files.push((src_path.display().to_string(), err_msg));
-                        if success_count > 0 {
-                            success_count -= 1;
-                        }
+                        success_count = success_count.saturating_sub(1);
                     }
                     read_failed = true;
                 } else if let Err(e) = reader.read_exact(&mut data) {
-                    let err_msg = format!("falha na leitura do recurso {}: arquivo truncado ou erro de I/O ({})", key, e);
-                    if !failed_files.iter().any(|(p, _)| p == &src_path.display().to_string()) {
+                    let err_msg = format!(
+                        "falha na leitura do recurso {}: arquivo truncado ou erro de I/O ({})",
+                        key, e
+                    );
+                    if !failed_files
+                        .iter()
+                        .any(|(p, _)| p == &src_path.display().to_string())
+                    {
                         failed_files.push((src_path.display().to_string(), err_msg));
-                        if success_count > 0 {
-                            success_count -= 1;
-                        }
+                        success_count = success_count.saturating_sub(1);
                     }
                     read_failed = true;
                 }
@@ -186,17 +204,11 @@ where
             if current_chunk_bytes + res_len > safe_limit && !current_chunk_resources.is_empty() {
                 let part_name = format!("{}_Part{:03}.package", stem, chunk_index);
                 let tmp_name = format!(".{}_Part{:03}.package.s4tmp", stem, chunk_index);
-                let part_path = task.output_dir.join(&part_name);
-                let tmp_path = task.output_dir.join(&tmp_name);
+                let part_path = output_dir.path().join(&part_name);
+                let tmp_path = workspace.path().join(&tmp_name);
 
-                if let Err(e) = write_package_chunk(&tmp_path, &current_chunk_resources) {
-                    let _ = fs::remove_file(&tmp_path);
-                    return Err(e);
-                }
-                if let Err(e) = validate_package_chunk(&tmp_path, current_chunk_resources.len()) {
-                    let _ = fs::remove_file(&tmp_path);
-                    return Err(e);
-                }
+                write_package_chunk(&tmp_path, &current_chunk_resources)?;
+                validate_package_chunk(&tmp_path, current_chunk_resources.len())?;
                 pending_chunks.push((tmp_path, part_path));
 
                 chunk_index += 1;
@@ -216,17 +228,11 @@ where
         if !current_chunk_resources.is_empty() {
             let part_name = format!("{}_Part{:03}.package", stem, chunk_index);
             let tmp_name = format!(".{}_Part{:03}.package.s4tmp", stem, chunk_index);
-            let part_path = task.output_dir.join(&part_name);
-            let tmp_path = task.output_dir.join(&tmp_name);
+            let part_path = output_dir.path().join(&part_name);
+            let tmp_path = workspace.path().join(&tmp_name);
 
-            if let Err(e) = write_package_chunk(&tmp_path, &current_chunk_resources) {
-                let _ = fs::remove_file(&tmp_path);
-                return Err(e);
-            }
-            if let Err(e) = validate_package_chunk(&tmp_path, current_chunk_resources.len()) {
-                let _ = fs::remove_file(&tmp_path);
-                return Err(e);
-            }
+            write_package_chunk(&tmp_path, &current_chunk_resources)?;
+            validate_package_chunk(&tmp_path, current_chunk_resources.len())?;
             pending_chunks.push((tmp_path, part_path));
         }
 
@@ -234,54 +240,45 @@ where
     })();
 
     if let Err(e) = write_result {
-        // Limpa arquivos temporários não publicados em caso de erro
-        for (tmp_path, _) in &pending_chunks {
-            let _ = fs::remove_file(tmp_path);
-        }
-        return Err(e);
+        return match workspace.close() {
+            Ok(()) => Err(e),
+            Err(cleanup) => Err(format!("{e}; limpeza do workspace falhou: {cleanup}").into()),
+        };
     }
 
-    // Publica atomicamente todas as partes validadas com rollback se alguma falhar
-    let mut published = Vec::new();
-    let mut publish_err = None;
-    let mut chunks_iter = pending_chunks.into_iter();
-    while let Some((tmp_path, final_path)) = chunks_iter.next() {
-        if crate::core::safety::path_exists_or_symlink(&final_path) {
-            let _ = fs::remove_file(&tmp_path);
-            publish_err = Some(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                format!("Destino de publicação já existe: {}", final_path.display()),
-            ));
-            break;
-        }
-        match fs::rename(&tmp_path, &final_path) {
-            Ok(()) => {
-                output_packages.push(final_path.display().to_string());
-                published.push(final_path);
+    let hashes = match publish_chunks(&pending_chunks, &workspace_dir, &output_dir, |_, _| Ok(())) {
+        Ok(hashes) => hashes,
+        Err((error, preserve_workspace)) => {
+            if preserve_workspace {
+                let recovery = workspace.keep();
+                return Err(
+                    format!("{error}; arquivos preservados em {}", recovery.display()).into(),
+                );
             }
-            Err(e) => {
-                let _ = fs::remove_file(&tmp_path);
-                publish_err = Some(e);
-                break;
-            }
+            return match workspace.close() {
+                Ok(()) => Err(error.into()),
+                Err(cleanup) => {
+                    Err(format!("{error}; limpeza do workspace falhou: {cleanup}").into())
+                }
+            };
         }
+    };
+    let mut outputs = Vec::new();
+    for ((_, final_path), hash) in pending_chunks.iter().zip(hashes) {
+        let name = final_path.file_name().ok_or("invalid output name")?;
+        let path = task.output_dir.join(name);
+        outputs.push((path.clone(), hash));
+        output_packages.push(path.display().to_string());
     }
-
-    if let Some(e) = publish_err {
-        // Limpa todas as partes temporárias restantes que não chegaram a ser renomeadas
-        for (tmp_path, _) in chunks_iter {
-            let _ = fs::remove_file(&tmp_path);
-        }
-        // Rollback: se uma parte falhou ao renomear, remove as já publicadas para não deixar merge parcial
-        for pub_path in published {
-            let _ = fs::remove_file(&pub_path);
-        }
-        output_packages.clear();
-        return Err(Box::new(e));
+    let outputs = Arc::new(outputs);
+    for snapshot in &mut original_snapshots {
+        snapshot.outputs = Arc::clone(&outputs);
     }
 
     let report = MergeReport {
-        success: failed_files.is_empty() && success_count == total_files && !output_packages.is_empty(),
+        success: failed_files.is_empty()
+            && success_count == total_files
+            && !output_packages.is_empty(),
         partial: !failed_files.is_empty() && success_count > 0 && !output_packages.is_empty(),
         total_files_found: total_files,
         success_count,
@@ -289,16 +286,163 @@ where
         output_packages,
         original_snapshots,
     };
-    // O relatório acompanha as partes gravado de forma atômica
-    let report_path = task.output_dir.join(format!("{}_report.json", stem));
-    if let Ok(json) = serde_json::to_string_pretty(&report) {
-        let tmp_report = task.output_dir.join(format!(".{}_report.json.s4tmp", stem));
-        if fs::write(&tmp_report, json).is_ok() {
-            let _ = fs::rename(&tmp_report, &report_path);
-        }
-    }
+    let report_name = format!("{}_report.json", stem);
+    let tmp_report = workspace.path().join(&report_name);
+    let json = serde_json::to_vec_pretty(&report)?;
+    fs::write(&tmp_report, json)?;
+    workspace_dir.publish_noreplace(
+        OsStr::new(&report_name),
+        &output_dir,
+        OsStr::new(&report_name),
+    )?;
+    output_dir.sync_all()?;
+    workspace.close()?;
 
     Ok(report)
+}
+
+fn hash_reader(reader: &mut impl Read) -> io::Result<[u8; 32]> {
+    let mut hash = Sha256::new();
+    let mut buffer = [0u8; 128 * 1024];
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            return Ok(hash.finalize().into());
+        }
+        hash.update(&buffer[..count]);
+    }
+}
+
+fn unchanged_metadata(a: &fs::Metadata, b: &fs::Metadata) -> bool {
+    if !same_file_identity(a, b) || a.len() != b.len() || a.modified().ok() != b.modified().ok() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        a.ctime() == b.ctime() && a.ctime_nsec() == b.ctime_nsec()
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
+fn open_original(path: &Path) -> io::Result<(AnchoredDir, File)> {
+    let parent = AnchoredDir::open(path.parent().unwrap_or(Path::new(".")))?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::other("Original sem nome"))?;
+    let file = parent.open_regular(name)?;
+    Ok((parent, file))
+}
+
+fn snapshot_original(path: &Path) -> io::Result<(OriginalSnapshot, File)> {
+    snapshot_original_with(path, || Ok(()))
+}
+
+fn snapshot_original_with(
+    path: &Path,
+    after_copy: impl FnOnce() -> io::Result<()>,
+) -> io::Result<(OriginalSnapshot, File)> {
+    let (_parent, mut source) = open_original(path)?;
+    let before = source.metadata()?;
+    let mut snapshot = tempfile::tempfile()?;
+    let mut hash = Sha256::new();
+    let mut buffer = [0u8; 128 * 1024];
+    loop {
+        let count = source.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        snapshot.write_all(&buffer[..count])?;
+        hash.update(&buffer[..count]);
+    }
+    let sha256: [u8; 32] = hash.finalize().into();
+    after_copy()?;
+    source.seek(SeekFrom::Start(0))?;
+    if hash_reader(&mut source)? != sha256 || !unchanged_metadata(&before, &source.metadata()?) {
+        return Err(io::Error::other(
+            "Original alterado durante captura do merge",
+        ));
+    }
+    snapshot.seek(SeekFrom::Start(0))?;
+    Ok((
+        OriginalSnapshot {
+            path: path.to_path_buf(),
+            metadata: before,
+            sha256,
+            outputs: Arc::default(),
+        },
+        snapshot,
+    ))
+}
+
+/// The hook is private and allows deterministic publication/rollback faults in unit tests.
+fn publish_chunks(
+    chunks: &[(PathBuf, PathBuf)],
+    workspace: &AnchoredDir,
+    output: &AnchoredDir,
+    mut before_publish: impl FnMut(usize, &Path) -> io::Result<()>,
+) -> Result<Vec<[u8; 32]>, (io::Error, bool)> {
+    let mut published: Vec<(&Path, fs::Metadata, [u8; 32])> = Vec::new();
+    for (index, (temporary, destination)) in chunks.iter().enumerate() {
+        let result = (|| -> io::Result<()> {
+            before_publish(index, destination)?;
+            let mut file = workspace.open_regular(
+                temporary
+                    .file_name()
+                    .ok_or_else(|| io::Error::other("temporary name"))?,
+            )?;
+            let metadata = file.metadata()?;
+            let hash = hash_reader(&mut file)?;
+            workspace.publish_noreplace(
+                temporary
+                    .file_name()
+                    .ok_or_else(|| io::Error::other("temporary name"))?,
+                output,
+                destination
+                    .file_name()
+                    .ok_or_else(|| io::Error::other("destination name"))?,
+            )?;
+            published.push((destination, metadata, hash));
+            Ok(())
+        })();
+        if let Err(error) = result {
+            let mut failures = Vec::new();
+            for (rollback_index, (path, metadata, hash)) in published.iter().enumerate().rev() {
+                let name = path.file_name().expect("validated name");
+                let recovery_name = format!("rollback-{rollback_index}");
+                let recovery_name = OsStr::new(&recovery_name);
+                let rollback = (|| -> io::Result<()> {
+                    output.publish_noreplace(name, workspace, recovery_name)?;
+                    let verified = (|| -> io::Result<bool> {
+                        let mut recovered = workspace.open_regular(recovery_name)?;
+                        Ok(same_file_identity(metadata, &recovered.metadata()?)
+                            && hash_reader(&mut recovered)? == *hash)
+                    })();
+                    if !matches!(verified, Ok(true)) {
+                        workspace.publish_noreplace(recovery_name, output, name)?;
+                        return Err(io::Error::other(
+                            "Arquivo publicado mudou; rollback recusado",
+                        ));
+                    }
+                    workspace.remove_file(recovery_name)
+                })();
+                if let Err(rollback_error) = rollback {
+                    failures.push(format!("{}: {rollback_error}", path.display()));
+                }
+            }
+            if failures.is_empty() {
+                return Err((error, false));
+            }
+            return Err((
+                io::Error::other(format!("{error}; rollback falhou: {}", failures.join("; "))),
+                true,
+            ));
+        }
+    }
+    Ok(published.into_iter().map(|(_, _, hash)| hash).collect())
 }
 
 /// O que fazer com os arquivos originais depois de um merge bem-sucedido.
@@ -384,9 +528,20 @@ where
         });
 
         let outcome = match result {
-            Ok(report) if report.success && report.failed_files.is_empty() && !report.partial && !report.output_packages.is_empty() => {
+            Ok(report)
+                if report.success
+                    && report.failed_files.is_empty()
+                    && !report.partial
+                    && !report.output_packages.is_empty() =>
+            {
                 let post = common_ancestor(&job.input_files).map(|root| {
-                    apply_post_merge_action_validated(job.post_action, &report, &job.input_files, &root, disabled_mgr)
+                    apply_post_merge_action_validated(
+                        job.post_action,
+                        &report,
+                        &job.input_files,
+                        &root,
+                        disabled_mgr,
+                    )
                 });
                 let status = match &post {
                     Some(p) if p.failed > 0 || p.error.is_some() => JobStatus::Partial,
@@ -402,7 +557,11 @@ where
             }
             Ok(report) => JobOutcome {
                 name: job.name.clone(),
-                status: if report.partial { JobStatus::Partial } else { JobStatus::Failed },
+                status: if report.partial {
+                    JobStatus::Partial
+                } else {
+                    JobStatus::Failed
+                },
                 report: Some(report),
                 post: None,
                 error: None,
@@ -468,114 +627,248 @@ pub fn apply_post_merge_action_validated(
     input_root: &Path,
     disabled_mgr: &DisabledManager,
 ) -> PostMergeOutcome {
-    if !report.success || report.partial || !report.failed_files.is_empty() || report.output_packages.is_empty() {
-        return PostMergeOutcome {
-            error: Some("Ação pós-merge bloqueada por segurança: o merge não foi 100% concluído com sucesso.".to_string()),
+    if action == PostMergeAction::Keep {
+        return PostMergeOutcome::default();
+    }
+    match post_merge_transaction(action, report, originals, input_root, disabled_mgr, || {
+        Ok(())
+    }) {
+        Ok(outcome) => outcome,
+        Err(error) => PostMergeOutcome {
+            error: Some(format!("Ação pós-merge bloqueada: {error}")),
             ..Default::default()
-        };
+        },
     }
-
-    // Valida que nenhum arquivo original foi modificado ou removido desde que o merge os leu
-    for (orig_path, orig_size, orig_mtime) in &report.original_snapshots {
-        if originals.contains(orig_path) {
-            match fs::metadata(orig_path) {
-                Ok(meta) => {
-                    let current_size = meta.len();
-                    let current_mtime = meta.modified().ok();
-                    if current_size != *orig_size || (orig_mtime.is_some() && current_mtime != *orig_mtime) {
-                        return PostMergeOutcome {
-                            error: Some(format!(
-                                "Ação pós-merge bloqueada: o arquivo original '{}' foi modificado após a realização do merge.",
-                                orig_path.display()
-                            )),
-                            ..Default::default()
-                        };
-                    }
-                }
-                Err(e) => {
-                    return PostMergeOutcome {
-                        error: Some(format!(
-                            "Ação pós-merge bloqueada: arquivo original '{}' inacessível ou removido ({})",
-                            orig_path.display(),
-                            e
-                        )),
-                        ..Default::default()
-                    };
-                }
-            }
-        }
-    }
-
-    apply_post_merge_action(action, originals, input_root, disabled_mgr)
 }
 
-fn apply_post_merge_action(
+struct CapturedOriginal<'a> {
+    evidence: &'a OriginalSnapshot,
+    parent: AnchoredDir,
+    lease: ReadLease,
+    staged_name: String,
+    staged: bool,
+}
+
+fn post_merge_transaction(
     action: PostMergeAction,
+    report: &MergeReport,
     originals: &[PathBuf],
     input_root: &Path,
     disabled_mgr: &DisabledManager,
-) -> PostMergeOutcome {
-    let allowed_roots = vec![input_root.to_path_buf()];
-
-    match action {
-        PostMergeAction::Keep => PostMergeOutcome::default(),
-
-        PostMergeAction::Disable => {
-            let mut outcome = PostMergeOutcome::default();
-            for path in originals {
-                match disabled_mgr.disable_mod(
-                    path,
-                    input_root,
-                    "merge",
-                    "Original substituído por package unificado",
-                    &allowed_roots,
-                ) {
-                    Ok(_) => outcome.affected += 1,
-                    Err(_) => outcome.failed += 1,
-                }
-            }
-            outcome
-        }
-
-        PostMergeAction::Backup => {
-            let stamp = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let zip_name = format!("originais_pre_merge_{}.zip", stamp);
-            let zip_path = crate::core::safety::unique_dest_path(input_root, &zip_name);
-
-            if let Err(e) = create_zip_from_files(originals, input_root, &zip_path) {
-                // O zip é a única cópia de segurança: sem ele, não apagamos nada.
-                let _ = fs::remove_file(&zip_path);
-                return PostMergeOutcome {
-                    error: Some(e.to_string()),
-                    ..Default::default()
-                };
-            }
-
-            let removal = remove_files(originals, &allowed_roots);
-            PostMergeOutcome {
-                affected: removal.removed,
-                failed: removal.failures.len(),
-                freed_bytes: removal.freed_bytes,
-                backup_path: Some(zip_path),
-                error: None,
-            }
-        }
-
-        PostMergeAction::Delete => {
-            let RemovalOutcome { removed, freed_bytes, failures } =
-                remove_files(originals, &allowed_roots);
-            PostMergeOutcome {
-                affected: removed,
-                failed: failures.len(),
-                freed_bytes,
-                backup_path: None,
-                error: None,
-            }
-        }
+    after_validation: impl FnOnce() -> io::Result<()>,
+) -> io::Result<PostMergeOutcome> {
+    if !report.success
+        || report.partial
+        || !report.failed_files.is_empty()
+        || originals.is_empty()
+        || report.success_count != originals.len()
+        || report.total_files_found != originals.len()
+        || report.original_snapshots.len() != originals.len()
+    {
+        return Err(io::Error::other(
+            "Relatório sem evidência de sucesso integral",
+        ));
     }
+    let authorized: HashSet<&Path> = originals.iter().map(PathBuf::as_path).collect();
+    let processed: HashSet<&Path> = report
+        .original_snapshots
+        .iter()
+        .map(|s| s.path.as_path())
+        .collect();
+    if authorized.len() != originals.len()
+        || processed.len() != originals.len()
+        || authorized != processed
+    {
+        return Err(io::Error::other(
+            "Originais autorizados não correspondem exatamente aos processados",
+        ));
+    }
+    let outputs = &report.original_snapshots[0].outputs;
+    if outputs.is_empty()
+        || outputs.len() != report.output_packages.len()
+        || !outputs
+            .iter()
+            .zip(&report.output_packages)
+            .all(|((path, _), expected)| path.to_string_lossy() == *expected)
+        || !report
+            .original_snapshots
+            .iter()
+            .all(|s| Arc::ptr_eq(&s.outputs, outputs))
+    {
+        return Err(io::Error::other(
+            "Evidência das partes publicadas ausente ou divergente",
+        ));
+    }
+    let root = AnchoredDir::open(input_root)?;
+    let _operation_lock = root.lock_exclusive()?;
+    let normalized_root = crate::core::safety::normalize_path(input_root);
+    let mut output_leases = Vec::new();
+    for (path, expected_hash) in outputs.iter() {
+        let (_, file) = open_original(path)?;
+        let mut lease = ReadLease::acquire(file)?;
+        if hash_reader(&mut lease.file)? != *expected_hash {
+            return Err(io::Error::other("Parte publicada ausente ou modificada"));
+        }
+        lease.check()?;
+        output_leases.push(lease);
+    }
+    let mut captured = Vec::new();
+    for (index, evidence) in report.original_snapshots.iter().enumerate() {
+        let normalized = crate::core::safety::normalize_path(&evidence.path);
+        if normalized == normalized_root || !normalized.starts_with(&normalized_root) {
+            return Err(io::Error::other("Original fora da raiz autorizada"));
+        }
+        let (parent, file) = open_original(&evidence.path)?;
+        let mut lease = ReadLease::acquire(file)?;
+        if !unchanged_metadata(&evidence.metadata, &lease.file.metadata()?)
+            || hash_reader(&mut lease.file)? != evidence.sha256
+        {
+            return Err(io::Error::other(format!(
+                "Original '{}' modificado após a realização do merge",
+                evidence.path.display()
+            )));
+        }
+        lease.check()?;
+        captured.push(CapturedOriginal {
+            evidence,
+            parent,
+            lease,
+            staged_name: format!("{index}.original"),
+            staged: false,
+        });
+    }
+    after_validation()?;
+    let quarantine = tempfile::Builder::new()
+        .prefix(".s4-post-merge-")
+        .tempdir_in(root.path())?;
+    let quarantine_dir = root.child(
+        quarantine
+            .path()
+            .file_name()
+            .ok_or_else(|| io::Error::other("quarantine name"))?,
+    )?;
+    let mut outcome = PostMergeOutcome::default();
+    let result = (|| -> io::Result<()> {
+        // Capture names before final validation. Never unlink the user-facing
+        // path after hashing: a replacement is restored, never destroyed.
+        for original in &mut captured {
+            original.parent.publish_noreplace(
+                original
+                    .evidence
+                    .path
+                    .file_name()
+                    .ok_or_else(|| io::Error::other("original name"))?,
+                &quarantine_dir,
+                OsStr::new(&original.staged_name),
+            )?;
+            original.staged = true;
+        }
+        for original in &mut captured {
+            original.lease.check()?;
+            let mut file = quarantine_dir.open_regular(OsStr::new(&original.staged_name))?;
+            if !same_file_identity(&original.evidence.metadata, &file.metadata()?)
+                || hash_reader(&mut file)? != original.evidence.sha256
+            {
+                return Err(io::Error::other(
+                    "Original substituído entre validação e pós-ação",
+                ));
+            }
+        }
+        for lease in &output_leases {
+            lease.check()?;
+        }
+        if action == PostMergeAction::Backup {
+            outcome.backup_path = Some(create_zip_from_captured(
+                &mut captured,
+                input_root,
+                &root,
+                &quarantine_dir,
+                |_| Ok(()),
+            )?);
+        }
+        for original in &mut captured {
+            for lease in &output_leases {
+                lease.check()?;
+            }
+            original.lease.check()?;
+            match action {
+                PostMergeAction::Disable => {
+                    let name = original
+                        .evidence
+                        .path
+                        .file_name()
+                        .ok_or_else(|| io::Error::other("original name"))?;
+                    let disabled_name = format!("{}.disabled", name.to_string_lossy());
+                    let destination = loop {
+                        let candidate = crate::core::safety::unique_dest_path(
+                            &original.parent.path(),
+                            &disabled_name,
+                        );
+                        let candidate_name = candidate
+                            .file_name()
+                            .ok_or_else(|| io::Error::other("disabled name"))?;
+                        match quarantine_dir.publish_noreplace(
+                            OsStr::new(&original.staged_name),
+                            &original.parent,
+                            candidate_name,
+                        ) {
+                            Ok(()) => break original.evidence.path.with_file_name(candidate_name),
+                            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                            Err(error) => return Err(error),
+                        }
+                    };
+                    original.staged = false;
+                    outcome.affected += 1;
+                    disabled_mgr.record_disabled(
+                        &original.evidence.path,
+                        &destination,
+                        "merge",
+                        "Original substituído por package unificado",
+                    )?;
+                }
+                PostMergeAction::Delete | PostMergeAction::Backup => {
+                    quarantine_dir.remove_file(OsStr::new(&original.staged_name))?;
+                    original.staged = false;
+                    outcome.affected += 1;
+                    outcome.freed_bytes += original.evidence.metadata.len();
+                }
+                PostMergeAction::Keep => {}
+            }
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        let mut failures = Vec::new();
+        for original in captured.iter_mut().rev().filter(|o| o.staged) {
+            let name = original
+                .evidence
+                .path
+                .file_name()
+                .expect("validated original name");
+            if let Err(restore) = quarantine_dir.publish_noreplace(
+                OsStr::new(&original.staged_name),
+                &original.parent,
+                name,
+            ) {
+                failures.push(format!("{}: {restore}", original.evidence.path.display()));
+            }
+        }
+        outcome.failed = originals.len().saturating_sub(outcome.affected);
+        if failures.is_empty() {
+            outcome.error = Some(error.to_string());
+            quarantine.close()?;
+        } else {
+            let recovery = quarantine.keep();
+            outcome.error = Some(format!(
+                "{error}; restauração falhou: {}; arquivos preservados em {}",
+                failures.join("; "),
+                recovery.display()
+            ));
+        }
+        return Ok(outcome);
+    }
+    quarantine.close()?;
+    Ok(outcome)
 }
 
 /// Pasta comum mais profunda que contém todos os caminhos. Serve de raiz de
@@ -593,71 +886,62 @@ pub fn common_ancestor(paths: &[PathBuf]) -> Option<PathBuf> {
     Some(common)
 }
 
-/// Compacta uma lista específica de arquivos, preservando o caminho relativo
-/// a `base_dir`.
-fn create_zip_from_files(files: &[PathBuf], base_dir: &Path, zip_path: &Path) -> io::Result<()> {
-    let parent = zip_path.parent().unwrap_or(base_dir);
-    let tmp_zip = parent.join(format!(
-        ".{}.s4tmp",
-        zip_path.file_name().unwrap_or_default().to_string_lossy()
-    ));
-
-    let res = (|| -> io::Result<()> {
-        let file = File::create(&tmp_zip)?;
-        let mut zip = zip::ZipWriter::new(file);
-        let options = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated);
-
-        for path in files {
-            if !path.exists() || !path.is_file() {
-                return Err(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    format!("Arquivo original não encontrado para backup: {}", path.display()),
-                ));
-            }
-            let name = path.strip_prefix(base_dir).unwrap_or(path);
-            zip.start_file(name.to_string_lossy().to_string(), options)?;
-            let mut f = File::open(path)?;
-            let mut buffer = Vec::new();
-            f.read_to_end(&mut buffer)?;
-            zip.write_all(&buffer)?;
-        }
-
-        zip.finish()?;
-        Ok(())
-    })();
-
-    if let Err(e) = res {
-        let _ = fs::remove_file(&tmp_zip);
-        return Err(e);
+/// ZIP bytes are streamed from leased, captured originals, then verified against
+/// merge-time SHA-256 before no-replace publication. No original is deleted here.
+fn create_zip_from_captured(
+    originals: &mut [CapturedOriginal<'_>],
+    base_dir: &Path,
+    output: &AnchoredDir,
+    workspace: &AnchoredDir,
+    mut before_publish: impl FnMut(&Path) -> io::Result<()>,
+) -> io::Result<PathBuf> {
+    let temporary_name = OsStr::new("originals.zip");
+    let file = workspace.create_new(temporary_name)?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    for original in originals.iter_mut() {
+        original.lease.check()?;
+        let name = original
+            .evidence
+            .path
+            .strip_prefix(base_dir)
+            .map_err(io::Error::other)?;
+        zip.start_file(name.to_string_lossy(), options)?;
+        original.lease.file.seek(SeekFrom::Start(0))?;
+        io::copy(&mut original.lease.file, &mut zip)?;
     }
-
-    // Valida o zip gerado antes de renomear para o destino final
-    let val_res = (|| -> io::Result<()> {
-        let f = File::open(&tmp_zip)?;
-        let mut archive = zip::ZipArchive::new(f).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-        let expected_count = files.iter().filter(|p| p.is_file()).count();
-        if archive.len() != expected_count {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Inconsistência no arquivo de backup: esperado {} arquivos, encontrado {}", expected_count, archive.len()),
+    zip.finish()?.sync_all()?;
+    let mut archive = zip::ZipArchive::new(workspace.open_regular(temporary_name)?)?;
+    if archive.len() != originals.len() {
+        return Err(io::Error::other("Backup incompleto"));
+    }
+    for (index, original) in originals.iter().enumerate() {
+        let mut entry = archive.by_index(index)?;
+        if hash_reader(&mut entry)? != original.evidence.sha256 {
+            return Err(io::Error::other(
+                "SHA-256 do backup difere do original utilizado no merge",
             ));
         }
-        for i in 0..archive.len() {
-            let mut entry = archive.by_index(i).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-            let mut buf = Vec::new();
-            entry.read_to_end(&mut buf)?;
-        }
-        Ok(())
-    })();
-
-    if let Err(e) = val_res {
-        let _ = fs::remove_file(&tmp_zip);
-        return Err(e);
+        original.lease.check()?;
     }
-
-    fs::rename(&tmp_zip, zip_path)?;
-    Ok(())
+    drop(archive);
+    let zip_name = format!("originais_pre_merge_{}.zip", chrono_like_timestamp());
+    loop {
+        let path = crate::core::safety::unique_dest_path(&output.path(), &zip_name);
+        let name = path
+            .file_name()
+            .ok_or_else(|| io::Error::other("backup name"))?;
+        before_publish(&path)?;
+        match workspace.publish_noreplace(temporary_name, output, name) {
+            Ok(()) => {
+                output.sync_all()?;
+                return Ok(base_dir.join(name));
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 fn validate_package_chunk(
@@ -694,7 +978,10 @@ fn validate_package_chunk(
     Ok(())
 }
 
-fn write_package_chunk(part_path: &Path, resources: &[PackageResource]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn write_package_chunk(
+    part_path: &Path,
+    resources: &[PackageResource],
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let file = File::create(part_path)?;
     let mut writer = BufWriter::with_capacity(4 * 1024 * 1024, file);
     DBPFWriter::write_package(&mut writer, resources)?;
@@ -703,9 +990,10 @@ fn write_package_chunk(part_path: &Path, resources: &[PackageResource]) -> Resul
     Ok(())
 }
 
-
 fn chrono_like_timestamp() -> String {
-    let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
     format!("{}", now.as_secs())
 }
 
@@ -716,7 +1004,13 @@ fn chrono_like_timestamp() -> String {
 fn sanitize_stem(raw: &str) -> String {
     let limpo: String = raw
         .chars()
-        .map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { '_' } else { c })
+        .map(|c| {
+            if c.is_control() || "/\\:*?\"<>|".contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
     limpo.trim().trim_matches('_').trim().to_string()
 }
@@ -819,5 +1113,212 @@ mod tests {
         assert_eq!(index.len(), 1);
         assert_eq!(index[0].key, key_shared);
         assert_eq!(index[0].file_size, 37); // Length of NEW UPDATED VERSION from Mod2
+    }
+
+    fn hash_file(path: &Path) -> [u8; 32] {
+        hash_reader(&mut File::open(path).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn p0_publication_failure_after_first_part_rolls_back_and_preserves_collision() {
+        let temp = tempdir().unwrap();
+        let out_path = temp.path().join("out");
+        let work_path = temp.path().join("work");
+        let output = AnchoredDir::create(&out_path).unwrap();
+        let workspace = AnchoredDir::create(&work_path).unwrap();
+        let chunks: Vec<_> = (0..3)
+            .map(|i| {
+                let source = work_path.join(format!("part-{i}.tmp"));
+                fs::write(&source, format!("new-{i}")).unwrap();
+                (source, out_path.join(format!("part-{i}.package")))
+            })
+            .collect();
+        let previous = out_path.join("previous.package");
+        fs::write(&previous, b"previous bytes").unwrap();
+        let previous_hash = hash_file(&previous);
+        let mut observed_first = false;
+        let result = publish_chunks(&chunks, &workspace, &output, |index, destination| {
+            if index == 1 {
+                assert_eq!(fs::read(&chunks[0].1)?, b"new-0");
+                observed_first = true;
+                fs::write(destination, b"concurrent file")?;
+            }
+            Ok(())
+        });
+        let (error, preserve) = result.unwrap_err();
+        assert!(observed_first);
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert!(!preserve);
+        assert!(!chunks[0].1.exists());
+        assert!(!chunks[2].1.exists());
+        assert_eq!(fs::read(&chunks[1].1).unwrap(), b"concurrent file");
+        assert_eq!(hash_file(&previous), previous_hash);
+    }
+
+    #[test]
+    fn p0_publication_reports_rollback_failure_without_deleting_replacement() {
+        let temp = tempdir().unwrap();
+        let out_path = temp.path().join("out");
+        let work_path = temp.path().join("work");
+        let output = AnchoredDir::create(&out_path).unwrap();
+        let workspace = AnchoredDir::create(&work_path).unwrap();
+        let chunks: Vec<_> = (0..2)
+            .map(|i| {
+                let source = work_path.join(format!("part-{i}.tmp"));
+                fs::write(&source, format!("new-{i}")).unwrap();
+                (source, out_path.join(format!("part-{i}.package")))
+            })
+            .collect();
+        let saved = out_path.join("saved-first.package");
+        let result = publish_chunks(&chunks, &workspace, &output, |index, destination| {
+            if index == 1 {
+                assert_eq!(fs::read(&chunks[0].1)?, b"new-0");
+                fs::rename(&chunks[0].1, &saved)?;
+                fs::create_dir(&chunks[0].1)?;
+                fs::write(chunks[0].1.join("keep"), b"replacement contents")?;
+                fs::write(destination, b"collision")?;
+            }
+            Ok(())
+        });
+        let (error, preserve) = result.unwrap_err();
+        assert!(preserve);
+        assert!(error.to_string().contains("rollback falhou"));
+        assert_eq!(fs::read(&saved).unwrap(), b"new-0");
+        assert_eq!(
+            fs::read(chunks[0].1.join("keep")).unwrap(),
+            b"replacement contents"
+        );
+        assert_eq!(fs::read(&chunks[1].1).unwrap(), b"collision");
+    }
+
+    fn post_fixture() -> (tempfile::TempDir, PathBuf, PathBuf, MergeReport) {
+        let temp = tempdir().unwrap();
+        let source = temp.path().join("original.package");
+        let replacement = temp.path().join("replacement.package");
+        let resource = PackageResource {
+            key: ResourceKey {
+                type_id: 1,
+                group_id: 0,
+                instance_ex: 0,
+                instance_low: 1,
+            },
+            data: b"merged bytes".to_vec(),
+            mem_size: 12,
+            compressed: 0,
+        };
+        DBPFWriter::write_package(&mut File::create(&source).unwrap(), &[resource]).unwrap();
+        fs::write(&replacement, b"unmerged replacement contents").unwrap();
+        let report = merge_sims4_packages(
+            &MergeTask {
+                input_files: vec![source.clone()],
+                output_dir: temp.path().join("output"),
+                max_size_bytes: 1_000_000,
+                name: Some("safe".into()),
+            },
+            |_, _, _| {},
+        )
+        .unwrap();
+        (temp, source, replacement, report)
+    }
+
+    #[test]
+    fn p0_replacement_between_validation_and_action_is_restored_intact() {
+        for action in [
+            PostMergeAction::Delete,
+            PostMergeAction::Disable,
+            PostMergeAction::Backup,
+        ] {
+            let (temp, source, replacement, report) = post_fixture();
+            let expected = hash_file(&replacement);
+            let outcome = post_merge_transaction(
+                action,
+                &report,
+                &[source.clone()],
+                temp.path(),
+                &DisabledManager::new(&temp.path().join("config")),
+                || fs::rename(&replacement, &source),
+            )
+            .unwrap();
+            assert!(outcome.error.is_some());
+            assert_eq!(outcome.affected, 0);
+            assert_eq!(hash_file(&source), expected);
+        }
+    }
+
+    #[test]
+    fn p0_existing_writer_blocks_destructive_action() {
+        let (temp, source, _, report) = post_fixture();
+        let expected = hash_file(&source);
+        let _writer = File::options().write(true).open(&source).unwrap();
+        let outcome = apply_post_merge_action_validated(
+            PostMergeAction::Delete,
+            &report,
+            &[source.clone()],
+            temp.path(),
+            &DisabledManager::new(&temp.path().join("config")),
+        );
+        assert!(outcome.error.is_some());
+        assert_eq!(hash_file(&source), expected);
+    }
+
+    #[test]
+    fn p0_modified_merge_output_cannot_authorize_original_deletion() {
+        let (temp, source, _, report) = post_fixture();
+        let expected = hash_file(&source);
+        fs::write(&report.output_packages[0], b"corrupt output").unwrap();
+        let outcome = apply_post_merge_action_validated(
+            PostMergeAction::Delete,
+            &report,
+            &[source.clone()],
+            temp.path(),
+            &DisabledManager::new(&temp.path().join("config")),
+        );
+        assert!(outcome.error.is_some());
+        assert_eq!(hash_file(&source), expected);
+    }
+
+    #[test]
+    fn p0_mutation_during_original_capture_is_rejected() {
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("source.package");
+        fs::write(&path, b"original").unwrap();
+        let result = snapshot_original_with(&path, || fs::write(&path, b"mutation"));
+        assert!(result.is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"mutation");
+    }
+
+    #[test]
+    fn p0_backup_collision_between_selection_and_publication_preserves_both() {
+        let (temp, source, _, report) = post_fixture();
+        let expected = hash_file(&source);
+        let output = AnchoredDir::open(temp.path()).unwrap();
+        let work = tempfile::tempdir_in(temp.path()).unwrap();
+        let workspace = AnchoredDir::open(work.path()).unwrap();
+        let mut originals = vec![CapturedOriginal {
+            evidence: &report.original_snapshots[0],
+            parent: output.try_clone().unwrap(),
+            lease: ReadLease::acquire(File::open(&source).unwrap()).unwrap(),
+            staged_name: String::new(),
+            staged: false,
+        }];
+        let mut collision = None;
+        let backup =
+            create_zip_from_captured(&mut originals, temp.path(), &output, &workspace, |path| {
+                if collision.is_none() {
+                    fs::write(path, b"preexisting ZIP bytes")?;
+                    collision = Some(temp.path().join(path.file_name().unwrap()));
+                }
+                Ok(())
+            })
+            .unwrap();
+        let collision = collision.unwrap();
+        assert_ne!(backup, collision);
+        assert_eq!(fs::read(&collision).unwrap(), b"preexisting ZIP bytes");
+        assert_eq!(hash_file(&source), expected);
+        let mut zip = zip::ZipArchive::new(File::open(backup).unwrap()).unwrap();
+        assert_eq!(
+            hash_reader(&mut zip.by_index(0).unwrap()).unwrap(),
+            expected
+        );
     }
 }
