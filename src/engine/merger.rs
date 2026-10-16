@@ -16,8 +16,9 @@ pub struct MergeReport {
     pub success_count: usize,
     pub failed_files: Vec<(String, String)>,
     pub output_packages: Vec<String>,
+    #[serde(skip, default)]
+    pub original_snapshots: Vec<(PathBuf, u64, Option<SystemTime>)>,
 }
-
 pub struct MergeTask {
     pub input_files: Vec<PathBuf>,
     pub output_dir: PathBuf,
@@ -45,9 +46,16 @@ where
             success_count: 0,
             failed_files: Vec::new(),
             output_packages: Vec::new(),
+            original_snapshots: Vec::new(),
         });
     }
 
+    let mut original_snapshots = Vec::new();
+    for fpath in &task.input_files {
+        if let Ok(meta) = fs::metadata(fpath) {
+            original_snapshots.push((fpath.clone(), meta.len(), meta.modified().ok()));
+        }
+    }
     // O prefixo é resolvido **antes** de escrever qualquer parte: duas tarefas
     // da fila que terminam no mesmo segundo produziam o mesmo nome, e a segunda
     // gravava por cima da primeira — com os originais já consumidos pela
@@ -100,9 +108,9 @@ where
             success_count: 0,
             failed_files,
             output_packages: Vec::new(),
+            original_snapshots,
         });
     }
-
     // Sort resources by TGI for engine load times
     let mut sorted_keys: Vec<ResourceKey> = global_resources.keys().copied().collect();
     sorted_keys.sort();
@@ -181,8 +189,14 @@ where
                 let part_path = task.output_dir.join(&part_name);
                 let tmp_path = task.output_dir.join(&tmp_name);
 
-                write_package_chunk(&tmp_path, &current_chunk_resources)?;
-                validate_package_chunk(&tmp_path, current_chunk_resources.len())?;
+                if let Err(e) = write_package_chunk(&tmp_path, &current_chunk_resources) {
+                    let _ = fs::remove_file(&tmp_path);
+                    return Err(e);
+                }
+                if let Err(e) = validate_package_chunk(&tmp_path, current_chunk_resources.len()) {
+                    let _ = fs::remove_file(&tmp_path);
+                    return Err(e);
+                }
                 pending_chunks.push((tmp_path, part_path));
 
                 chunk_index += 1;
@@ -205,8 +219,14 @@ where
             let part_path = task.output_dir.join(&part_name);
             let tmp_path = task.output_dir.join(&tmp_name);
 
-            write_package_chunk(&tmp_path, &current_chunk_resources)?;
-            validate_package_chunk(&tmp_path, current_chunk_resources.len())?;
+            if let Err(e) = write_package_chunk(&tmp_path, &current_chunk_resources) {
+                let _ = fs::remove_file(&tmp_path);
+                return Err(e);
+            }
+            if let Err(e) = validate_package_chunk(&tmp_path, current_chunk_resources.len()) {
+                let _ = fs::remove_file(&tmp_path);
+                return Err(e);
+            }
             pending_chunks.push((tmp_path, part_path));
         }
 
@@ -225,8 +245,15 @@ where
     let mut published = Vec::new();
     let mut publish_err = None;
     let mut chunks_iter = pending_chunks.into_iter();
-
     while let Some((tmp_path, final_path)) = chunks_iter.next() {
+        if crate::core::safety::path_exists_or_symlink(&final_path) {
+            let _ = fs::remove_file(&tmp_path);
+            publish_err = Some(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("Destino de publicação já existe: {}", final_path.display()),
+            ));
+            break;
+        }
         match fs::rename(&tmp_path, &final_path) {
             Ok(()) => {
                 output_packages.push(final_path.display().to_string());
@@ -260,8 +287,8 @@ where
         success_count,
         failed_files,
         output_packages,
+        original_snapshots,
     };
-
     // O relatório acompanha as partes gravado de forma atômica
     let report_path = task.output_dir.join(format!("{}_report.json", stem));
     if let Ok(json) = serde_json::to_string_pretty(&report) {
@@ -447,10 +474,42 @@ pub fn apply_post_merge_action_validated(
             ..Default::default()
         };
     }
+
+    // Valida que nenhum arquivo original foi modificado ou removido desde que o merge os leu
+    for (orig_path, orig_size, orig_mtime) in &report.original_snapshots {
+        if originals.contains(orig_path) {
+            match fs::metadata(orig_path) {
+                Ok(meta) => {
+                    let current_size = meta.len();
+                    let current_mtime = meta.modified().ok();
+                    if current_size != *orig_size || (orig_mtime.is_some() && current_mtime != *orig_mtime) {
+                        return PostMergeOutcome {
+                            error: Some(format!(
+                                "Ação pós-merge bloqueada: o arquivo original '{}' foi modificado após a realização do merge.",
+                                orig_path.display()
+                            )),
+                            ..Default::default()
+                        };
+                    }
+                }
+                Err(e) => {
+                    return PostMergeOutcome {
+                        error: Some(format!(
+                            "Ação pós-merge bloqueada: arquivo original '{}' inacessível ou removido ({})",
+                            orig_path.display(),
+                            e
+                        )),
+                        ..Default::default()
+                    };
+                }
+            }
+        }
+    }
+
     apply_post_merge_action(action, originals, input_root, disabled_mgr)
 }
 
-pub fn apply_post_merge_action(
+fn apply_post_merge_action(
     action: PostMergeAction,
     originals: &[PathBuf],
     input_root: &Path,
@@ -674,13 +733,28 @@ fn unique_output_stem(output_dir: &Path, name: Option<&str>) -> String {
         .map(|s| format!("{}_Merged", s))
         .unwrap_or_else(|| format!("Merged_Content_{}", chrono_like_timestamp()));
 
-    let livre = |stem: &str| !output_dir.join(format!("{}_Part001.package", stem)).exists();
-    if livre(&base) {
+    let stem_is_free = |stem: &str| -> bool {
+        if let Ok(entries) = fs::read_dir(output_dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                // Bloqueia se existir qualquer parte (Part001, Part002, etc.), relatório ou temporário
+                if name.starts_with(&format!("{}_Part", stem))
+                    || name == format!("{}_report.json", stem)
+                    || name.starts_with(&format!(".{}_", stem))
+                {
+                    return false;
+                }
+            }
+        }
+        true
+    };
+
+    if stem_is_free(&base) {
         return base;
     }
     for n in 2..1000 {
         let tentativa = format!("{}_{}", base, n);
-        if livre(&tentativa) {
+        if stem_is_free(&tentativa) {
             return tentativa;
         }
     }

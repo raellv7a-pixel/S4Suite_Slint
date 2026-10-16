@@ -3,9 +3,8 @@
 use s4suite::engine::dbpf::{DBPFReader, DBPFWriter, PackageResource, ResourceKey};
 use s4suite::engine::disabled::DisabledManager;
 use s4suite::engine::merger::{
-    apply_post_merge_action, apply_post_merge_action_validated, common_ancestor,
-    merge_sims4_packages, run_merge_queue, JobStatus, MergeJob, MergeReport, MergeTask,
-    PostMergeAction,
+    apply_post_merge_action_validated, common_ancestor, merge_sims4_packages, run_merge_queue,
+    JobStatus, MergeJob, MergeReport, MergeTask, PostMergeAction,
 };
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
@@ -63,6 +62,16 @@ impl Fixture {
             .collect();
         v.sort();
         v
+    }
+
+    fn run_merge(&self, inputs: &[PathBuf]) -> MergeReport {
+        let task = MergeTask {
+            input_files: inputs.to_vec(),
+            output_dir: self.output_dir.clone(),
+            max_size_bytes: 1_000_000_000,
+            name: None,
+        };
+        merge_sims4_packages(&task, |_, _, _| {}).unwrap()
     }
 }
 
@@ -177,9 +186,9 @@ fn pos_merge_manter_nao_toca_em_nada() {
     write_package(&fx.input_dir.join("a.package"), &[1], 100);
     let originais = fx.inputs();
 
+    let report = fx.run_merge(&originais);
     let outcome =
-        apply_post_merge_action(PostMergeAction::Keep, &originais, &fx.input_dir, &fx.manager());
-
+        apply_post_merge_action_validated(PostMergeAction::Keep, &report, &originais, &fx.input_dir, &fx.manager());
     assert_eq!(outcome.affected, 0);
     assert!(originais.iter().all(|p| p.exists()));
 }
@@ -191,9 +200,9 @@ fn pos_merge_desativar_renomeia_originais_para_disabled() {
     write_package(&fx.input_dir.join("b.package"), &[2], 100);
     let originais = fx.inputs();
 
+    let report = fx.run_merge(&originais);
     let outcome =
-        apply_post_merge_action(PostMergeAction::Disable, &originais, &fx.input_dir, &fx.manager());
-
+        apply_post_merge_action_validated(PostMergeAction::Disable, &report, &originais, &fx.input_dir, &fx.manager());
     assert_eq!(outcome.affected, 2);
     assert_eq!(outcome.failed, 0);
     assert!(originais.iter().all(|p| !p.exists()));
@@ -207,9 +216,9 @@ fn pos_merge_excluir_remove_os_originais() {
     write_package(&fx.input_dir.join("a.package"), &[1], 1000);
     let originais = fx.inputs();
 
+    let report = fx.run_merge(&originais);
     let outcome =
-        apply_post_merge_action(PostMergeAction::Delete, &originais, &fx.input_dir, &fx.manager());
-
+        apply_post_merge_action_validated(PostMergeAction::Delete, &report, &originais, &fx.input_dir, &fx.manager());
     assert_eq!(outcome.affected, 1);
     assert!(outcome.freed_bytes > 0);
     assert!(!originais[0].exists());
@@ -227,9 +236,9 @@ fn pos_merge_excluir_recusa_caminho_fora_da_pasta_de_origem() {
     let mut alvos = fx.inputs();
     alvos.push(intruso.clone());
 
+    let report = fx.run_merge(&fx.inputs());
     let outcome =
-        apply_post_merge_action(PostMergeAction::Delete, &alvos, &fx.input_dir, &fx.manager());
-
+        apply_post_merge_action_validated(PostMergeAction::Delete, &report, &alvos, &fx.input_dir, &fx.manager());
     assert_eq!(outcome.affected, 1);
     assert_eq!(outcome.failed, 1);
     assert!(intruso.exists(), "arquivo fora da raiz de segurança foi apagado");
@@ -242,9 +251,9 @@ fn pos_merge_backup_gera_zip_antes_de_remover_os_originais() {
     write_package(&fx.input_dir.join("b.package"), &[2], 500);
     let originais = fx.inputs();
 
+    let report = fx.run_merge(&originais);
     let outcome =
-        apply_post_merge_action(PostMergeAction::Backup, &originais, &fx.input_dir, &fx.manager());
-
+        apply_post_merge_action_validated(PostMergeAction::Backup, &report, &originais, &fx.input_dir, &fx.manager());
     assert!(outcome.error.is_none());
     assert_eq!(outcome.affected, 2);
 
@@ -652,6 +661,7 @@ fn pos_merge_recusado_se_relatorio_for_parcial_ou_com_falhas() {
         success_count: 1,
         failed_files: vec![("b.package".to_string(), "erro I/O".to_string())],
         output_packages: vec!["Part001.package".to_string()],
+        original_snapshots: Vec::new(),
     };
 
     let outcome = apply_post_merge_action_validated(
@@ -675,9 +685,10 @@ fn backups_consecutivos_no_mesmo_segundo_nao_colidem() {
     write_package(&f1, &[1], 200);
     write_package(&f2, &[2], 200);
 
-    // Primeiro backup
-    let out1 = apply_post_merge_action(
+    let rep1 = fx.run_merge(&[f1.clone()]);
+    let out1 = apply_post_merge_action_validated(
         PostMergeAction::Backup,
+        &rep1,
         &[f1.clone()],
         &fx.input_dir,
         &fx.manager(),
@@ -687,8 +698,10 @@ fn backups_consecutivos_no_mesmo_segundo_nao_colidem() {
     assert!(zip1.exists());
 
     // Segundo backup no mesmo diretório (potencial mesmo segundo)
-    let out2 = apply_post_merge_action(
+    let rep2 = fx.run_merge(&[f2.clone()]);
+    let out2 = apply_post_merge_action_validated(
         PostMergeAction::Backup,
+        &rep2,
         &[f2.clone()],
         &fx.input_dir,
         &fx.manager(),
@@ -708,11 +721,7 @@ fn falha_na_publicacao_de_parte_executa_rollback_completo() {
     let p = fx.input_dir.join("multi.package");
     write_package(&p, &[1, 2, 3, 4], 80 * 1024);
 
-    // Provoca falha na publicação da Part002 criando um diretório com o mesmo nome da Part002
-    // No Linux, rename de arquivo sobre diretório falha com EISDIR
-    let fake_part2 = fx.output_dir.join("FalhaPub_Merged_Part002.package");
-    fs::create_dir_all(&fake_part2).unwrap();
-
+    let out_dir = fx.output_dir.clone();
     let task = MergeTask {
         input_files: vec![p],
         output_dir: fx.output_dir.clone(),
@@ -720,8 +729,20 @@ fn falha_na_publicacao_de_parte_executa_rollback_completo() {
         name: Some("FalhaPub".to_string()),
     };
 
-    let res = merge_sims4_packages(&task, |_, _, _| {});
-    assert!(res.is_err(), "deve falhar ao tentar renomear sobre diretório");
+    let res = merge_sims4_packages(&task, move |cur, total, _| {
+        if cur == total {
+            let mut perms = fs::metadata(&out_dir).unwrap().permissions();
+            perms.set_readonly(true);
+            let _ = fs::set_permissions(&out_dir, perms);
+        }
+    });
+
+    // Restaura permissão de escrita para inspeção do resultado
+    let mut perms = fs::metadata(&fx.output_dir).unwrap().permissions();
+    perms.set_readonly(false);
+    let _ = fs::set_permissions(&fx.output_dir, perms);
+
+    assert!(res.is_err(), "deve falhar ao tentar renomear em diretório protegido contra escrita");
 
     // Nenhuma parte .package do merge FalhaPub deve sobrar publicada
     let publicadas: Vec<_> = fs::read_dir(&fx.output_dir)
@@ -741,4 +762,68 @@ fn falha_na_publicacao_de_parte_executa_rollback_completo() {
         .filter(|e| e.file_name().to_string_lossy().contains(".s4tmp"))
         .collect();
     assert!(temporarios.is_empty(), "todos os .s4tmp devem ser removidos no rollback");
+}
+
+#[test]
+fn stem_evita_sobrescrita_quando_apenas_part002_preexiste() {
+    let fx = Fixture::new();
+    write_package(&fx.input_dir.join("a.package"), &[1, 2], 300);
+
+    // Simula que Part002 já existe de uma unificação anterior ou arquivo com mesmo prefixo
+    let preexistente = fx.output_dir.join("Cabelos_Merged_Part002.package");
+    fs::create_dir_all(&fx.output_dir).unwrap();
+    fs::write(&preexistente, b"conteudo_preexistente_que_nao_pode_ser_sobrescrito").unwrap();
+
+    let task = MergeTask {
+        input_files: fx.inputs(),
+        output_dir: fx.output_dir.clone(),
+        max_size_bytes: 1024 * 1024 * 1024,
+        name: Some("Cabelos".to_string()),
+    };
+
+    let report = merge_sims4_packages(&task, |_, _, _| {}).unwrap();
+    assert!(report.success);
+
+    // O stem Cabelos_Merged não pode ser reutilizado: deve avançar para Cabelos_Merged_2
+    assert!(report.output_packages[0].contains("Cabelos_Merged_2"));
+    assert_eq!(
+        fs::read(&preexistente).unwrap(),
+        b"conteudo_preexistente_que_nao_pode_ser_sobrescrito",
+        "arquivo Part002 preexistente deve permanecer intacto"
+    );
+}
+
+#[test]
+fn pos_merge_recusado_se_originais_foram_modificados_apos_leitura() {
+    let fx = Fixture::new();
+    let a = fx.input_dir.join("mod_mutavel.package");
+    write_package(&a, &[1], 500);
+    let originais = vec![a.clone()];
+
+    let task = MergeTask {
+        input_files: originais.clone(),
+        output_dir: fx.output_dir.clone(),
+        max_size_bytes: 1024 * 1024 * 1024,
+        name: Some("Mutavel".to_string()),
+    };
+
+    let report = merge_sims4_packages(&task, |_, _, _| {}).unwrap();
+    assert!(report.success);
+
+    // Modifica o arquivo original no disco DEPOIS que o merge leu o conteúdo
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    fs::write(&a, b"CONTEUDO_MODIFICADO_PELO_USUARIO_APOS_MERGE").unwrap();
+
+    // A ação pós-merge DEVE ser recusada para não destruir modificações recentes do usuário
+    let outcome = apply_post_merge_action_validated(
+        PostMergeAction::Delete,
+        &report,
+        &originais,
+        &fx.input_dir,
+        &fx.manager(),
+    );
+
+    assert!(outcome.error.is_some(), "pós-ação deve ser bloqueada se arquivo original mudou");
+    assert!(outcome.error.unwrap().contains("modificado após a realização do merge"));
+    assert!(a.exists(), "original modificado deve ser preservado");
 }
