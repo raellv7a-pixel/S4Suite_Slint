@@ -149,6 +149,14 @@ propósito.
 - [ ] Fechar o app durante uma operação longa não deixa `.s4suite_staging` para
       trás na próxima abertura.
 
+
+### Segurança e Integridade P0 (Subsystem Hardening)
+
+- [x] **Merger: autorização estrita pós-merge** — correspondência bijetiva exata entre originais autorizados e arquivos processados; rejeição de arquivos adicionais, ausentes, duplicados ou relatórios sem evidência íntegra.
+- [x] **Merger: integridade temporal e SHA-256** — leitura operada sobre snapshot privado imutável; captura de SHA-256 e metadata inode/mtime/len; bloqueio destrutivo se houver alteração de conteúdo ou concorrência com escritores externos (`ReadLease`).
+- [x] **Merger: publicação no-replace e rollback com contenção** — publicação de partes DBPF e backup ZIP via `publish_noreplace` sem sobrescrita; rollback de publicação restaura estado anterior sem tocar em colisões alheias e preserva workspace de recuperação se houver erro no próprio rollback.
+- [x] **Safety e Installer: AnchoredDir e atomic_copy** — criação exclusiva com `tempfile_in`, pinagem de diretórios via file descriptor (`O_DIRECTORY | O_NOFOLLOW`), recusa de symlink ancestral e bloqueio de substituição de arquivos regulares ou links existentes.
+- [x] **Disabled e Organizer: contenção de manifesto e restauração** — `enable_mod` valida que tanto o mod desativado quanto o destino original permaneçam estritamente dentro de `Mods`; `save_manifest` usa arquivo temporário anônimo exclusivo para neutralizar redirecionamento por symlinks no config.
 ## Pendências conhecidas
 
 - **ReShade** — adiado por decisão do usuário; precisa de mais trabalho de
