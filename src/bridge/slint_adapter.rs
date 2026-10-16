@@ -14,8 +14,8 @@ use crate::engine::merger::{
 };
 use crate::engine::organizer::{
     auto_fix_script_depth, check_script_depth, create_folder, detect_duplicates, filter_tree,
-    find_junk_files, remove_entries, remove_files, rename_item, scan_mods_tree, transfer_items,
-    TransferMode,
+    find_junk_files, remove_duplicates, remove_entries, remove_files, rename_item, scan_mods_tree,
+    transfer_items, TransferMode,
 };
 use crate::engine::reshade::{
     detect_environment, detect_installation, install_reshade, install_shader_preset,
@@ -34,7 +34,11 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
-pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, state: Arc<AppState>) {
+pub fn setup_app_adapter(
+    window: &MainWindow,
+    config_mgr: Arc<ConfigManager>,
+    state: Arc<AppState>,
+) {
     let weak_win = window.as_weak();
 
     // Tradução: a UI chama I18n.tr(chave), que repassa para core::i18n::t com
@@ -144,7 +148,10 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let weak_clone = weak_win.clone();
     window.on_select_installer_files(move || {
         if let Some(files) = rfd::FileDialog::new()
-            .add_filter("Mods & Archives", &["zip", "7z", "rar", "package", "ts4script"])
+            .add_filter(
+                "Mods & Archives",
+                &["zip", "7z", "rar", "package", "ts4script"],
+            )
             .pick_files()
         {
             // Os caminhos reais ficam no estado; a fila da tela é só o reflexo.
@@ -155,8 +162,15 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                 for f in &files {
                     let size = fs::metadata(f).map(|m| m.len()).unwrap_or(0);
                     model.push(crate::QueueItem {
-                        name: SharedString::from(f.file_name().unwrap_or_default().to_string_lossy().to_string()),
-                        size_str: SharedString::from(crate::bridge::slint_models::format_size_bytes(size)),
+                        name: SharedString::from(
+                            f.file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string(),
+                        ),
+                        size_str: SharedString::from(
+                            crate::bridge::slint_models::format_size_bytes(size),
+                        ),
                         status: SharedString::from("Pronto"),
                     });
                 }
@@ -176,15 +190,24 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_start_install(move || {
+        let Some(operation) = state_clone.try_begin_file_operation() else {
+            return;
+        };
         let config = cfg_clone.load();
         let Some(sims_path) = config.sims4_path.clone() else {
-            set_installer_error(&weak_clone, "⚠️ Configure a pasta do jogo antes de instalar mods.");
+            set_installer_error(
+                &weak_clone,
+                "⚠️ Configure a pasta do jogo antes de instalar mods.",
+            );
             return;
         };
 
         let sources = state_clone.installer_sources();
         if sources.is_empty() {
-            set_installer_error(&weak_clone, "⚠️ Nenhum arquivo na fila. Selecione mods primeiro.");
+            set_installer_error(
+                &weak_clone,
+                "⚠️ Nenhum arquivo na fila. Selecione mods primeiro.",
+            );
             return;
         }
 
@@ -193,16 +216,18 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
 
         if let Some(w) = weak_clone.upgrade() {
             w.set_is_installing(true);
-            w.set_installer_status(SharedString::from("⚙️ Verificando segurança e extraindo arquivos..."));
+            w.set_installer_status(SharedString::from(
+                "⚙️ Verificando segurança e extraindo arquivos...",
+            ));
         }
 
         let weak_async = weak_clone.clone();
         let state_async = Arc::clone(&state_clone);
         tokio::task::spawn_blocking(move || {
-            let outcome = prepare_staging(&sources, &staging)
-                .and_then(|staging_report| {
-                    calculate_conflicts(&staging, &mods_dir).map(|conflicts| (staging_report, conflicts))
-                });
+            let outcome = prepare_staging(&sources, &staging).and_then(|staging_report| {
+                calculate_conflicts(&staging, &mods_dir)
+                    .map(|conflicts| (staging_report, conflicts))
+            });
 
             match outcome {
                 Ok((staging_report, conflicts)) => {
@@ -238,10 +263,11 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                     };
 
                     // Variantes do mesmo mod marcadas como "escolha uma".
-                    let exclusivos: Vec<String> = detect_mutually_exclusive(&conflicts.staged_files)
-                        .iter()
-                        .map(|f| f.rel_path.display().to_string())
-                        .collect();
+                    let exclusivos: Vec<String> =
+                        detect_mutually_exclusive(&conflicts.staged_files)
+                            .iter()
+                            .map(|f| f.rel_path.display().to_string())
+                            .collect();
 
                     let statuses: Vec<(String, String)> = conflicts
                         .staged_files
@@ -259,6 +285,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                     state_async.set_pending_install(conflicts);
 
                     let _ = slint::invoke_from_event_loop(move || {
+                        let _operation = operation;
                         if let Some(w) = weak_async.upgrade() {
                             let model = Rc::new(VecModel::default());
                             for (name, status) in statuses {
@@ -290,6 +317,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                     let _ = clear_staging(&staging);
                     let msg = format!("❌ {}", e);
                     let _ = slint::invoke_from_event_loop(move || {
+                        let _operation = operation;
                         if let Some(w) = weak_async.upgrade() {
                             w.set_is_installing(false);
                             w.set_installer_status(SharedString::from(msg));
@@ -307,7 +335,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_exclusive_option_picked(move |escolhida| {
-        let Some(mut report) = state_clone.take_pending_install() else { return };
+        let Some(mut report) = state_clone.take_pending_install() else {
+            return;
+        };
 
         let descartadas: Vec<String> = detect_mutually_exclusive(&report.staged_files)
             .iter()
@@ -320,12 +350,21 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             .retain(|f| !descartadas.contains(&f.rel_path.display().to_string()));
 
         // As contagens do resumo precisam refletir o que sobrou.
-        report.new_files =
-            report.staged_files.iter().filter(|f| f.conflict == ConflictType::NewFile).count();
-        report.updates =
-            report.staged_files.iter().filter(|f| f.conflict == ConflictType::SizeDiff).count();
-        report.exact_matches =
-            report.staged_files.iter().filter(|f| f.conflict == ConflictType::ExactMatch).count();
+        report.new_files = report
+            .staged_files
+            .iter()
+            .filter(|f| f.conflict == ConflictType::NewFile)
+            .count();
+        report.updates = report
+            .staged_files
+            .iter()
+            .filter(|f| f.conflict == ConflictType::SizeDiff)
+            .count();
+        report.exact_matches = report
+            .staged_files
+            .iter()
+            .filter(|f| f.conflict == ConflictType::ExactMatch)
+            .count();
 
         let resumo = format!(
             "Variante escolhida: {}\n\n\
@@ -351,6 +390,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_cancel_exclusive(move || {
+        let Some(_operation) = state_clone.try_begin_file_operation() else {
+            return;
+        };
         let config = cfg_clone.load();
         state_clone.take_pending_install();
         if let Some(sims_path) = &config.sims4_path {
@@ -370,6 +412,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_proceed_install_clicked(move || {
+        let Some(operation) = state_clone.try_begin_file_operation() else {
+            return;
+        };
         let config = cfg_clone.load();
         let Some(sims_path) = config.sims4_path.clone() else {
             return;
@@ -393,22 +438,30 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         let state_async = Arc::clone(&state_clone);
         tokio::task::spawn_blocking(move || {
             let result = execute_installation(&report, &mods_dir, MANAGED_BASE_DIR, &allowed_roots);
-            let _ = clear_staging(&staging);
 
             let (msg, clear_queue) = match result {
                 Ok((installed, skipped)) => {
                     state_async.clear_installer();
-                    let mut m = format!("✅ Instalação concluída! {} mod(s) instalados.", installed);
+                    let mut m =
+                        format!("✅ Instalação concluída! {} mod(s) instalados.", installed);
                     if skipped > 0 {
                         m.push_str(&format!(" {} já estavam atualizados.", skipped));
                     }
+                    if let Err(error) = clear_staging(&staging) {
+                        m.push_str(&format!(" ⚠️ Staging preservado: {}", error));
+                    }
                     (m, true)
                 }
-                // `execute_installation` reverte sozinho; a fila fica para retentar.
-                Err(e) => (format!("❌ Falha na instalação (alterações revertidas): {}", e), false),
+                // Em falha, preserva os bytes selecionados e qualquer diagnóstico
+                // de recuperação; não promete rollback quando ele foi recusado.
+                Err(e) => (
+                    format!("❌ Falha na instalação: {}. Staging preservado.", e),
+                    false,
+                ),
             };
 
             let _ = slint::invoke_from_event_loop(move || {
+                let _operation = operation;
                 if let Some(w) = weak_async.upgrade() {
                     w.set_is_installing(false);
                     if clear_queue {
@@ -424,6 +477,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_cancel_install_clicked(move || {
+        let Some(_operation) = state_clone.try_begin_file_operation() else {
+            return;
+        };
         // Cancelar precisa remover o staging: senão os arquivos extraídos ficam
         // dentro de Mods e o jogo tenta carregá-los.
         let config = cfg_clone.load();
@@ -444,6 +500,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_clear_installer_queue(move || {
+        let Some(_operation) = state_clone.try_begin_file_operation() else {
+            return;
+        };
         let config = cfg_clone.load();
         if let Some(sims_path) = &config.sims4_path {
             let _ = clear_staging(&get_mods_dir(sims_path).join(STAGING_DIR_NAME));
@@ -525,7 +584,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             let issues = check_script_depth(&mods_dir);
             if issues.is_empty() {
                 if let Some(w) = weak_clone.upgrade() {
-                    w.set_organizer_status(SharedString::from("✨ Todos os scripts estão no nível correto!"));
+                    w.set_organizer_status(SharedString::from(
+                        "✨ Todos os scripts estão no nível correto!",
+                    ));
                 }
             } else {
                 // Corrigir é mover arquivos de mods do usuário para outra pasta.
@@ -533,13 +594,21 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                 // do organizador, onde apagar e limpar pedem confirmação.
                 let rotulos: Vec<String> = issues
                     .iter()
-                    .map(|i| format!("{}  (nível {})", display_path(&i.file_path, &mods_dir), i.depth))
+                    .map(|i| {
+                        format!(
+                            "{}  (nível {})",
+                            display_path(&i.file_path, &mods_dir),
+                            i.depth
+                        )
+                    })
                     .collect();
                 let total = issues.len();
                 state_clone.set_pending_organizer(PendingOrganizerAction::FixScriptDepth(issues));
 
                 if let Some(w) = weak_clone.upgrade() {
-                    w.set_organizer_confirm_title(SharedString::from("Corrigir profundidade de scripts"));
+                    w.set_organizer_confirm_title(SharedString::from(
+                        "Corrigir profundidade de scripts",
+                    ));
                     w.set_organizer_confirm_message(SharedString::from(format!(
                         "O jogo só carrega .ts4script até um nível abaixo de Mods. \
                          {} script(s) estão mais fundos e serão movidos para \
@@ -560,6 +629,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_toggle_disabled_mod(move |path| {
+        let Some(_operation) = state_clone.try_begin_file_operation() else {
+            return;
+        };
         let config = cfg_clone.load();
         let Some(sims_path) = config.sims4_path.clone() else {
             return;
@@ -576,8 +648,14 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             mgr.enable_mod(&target, &mods_dir)
                 .map(|p| format!("🟢 Mod reativado: {}", file_label(&p)))
         } else {
-            mgr.disable_mod(&target, &mods_dir, "manual", "Desativado pelo organizador", &[mods_dir.clone()])
-                .map(|p| format!("🔴 Mod desativado: {}", file_label(&p)))
+            mgr.disable_mod(
+                &target,
+                &mods_dir,
+                "manual",
+                "Desativado pelo organizador",
+                std::slice::from_ref(&mods_dir),
+            )
+            .map(|p| format!("🔴 Mod desativado: {}", file_label(&p)))
         };
 
         // O caminho selecionado deixou de existir de qualquer forma.
@@ -608,7 +686,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let weak_clone = weak_win.clone();
     window.on_create_mod_folder(move || {
         let config = cfg_clone.load();
-        let Some(sims_path) = config.sims4_path.clone() else { return };
+        let Some(sims_path) = config.sims4_path.clone() else {
+            return;
+        };
         let mods_dir = get_mods_dir(&sims_path);
 
         // Com uma pasta marcada, a nova nasce dentro dela; senão, na raiz.
@@ -619,7 +699,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             .cloned()
             .unwrap_or_else(|| mods_dir.clone());
 
-        state_clone.set_pending_input(PendingInput::CreateFolder { parent: parent.clone() });
+        state_clone.set_pending_input(PendingInput::CreateFolder {
+            parent: parent.clone(),
+        });
 
         if let Some(w) = weak_clone.upgrade() {
             w.set_organizer_input_title(SharedString::from(format!(
@@ -638,7 +720,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let weak_clone = weak_win.clone();
     window.on_rename_selected_mod(move || {
         let config = cfg_clone.load();
-        let Some(sims_path) = config.sims4_path.clone() else { return };
+        let Some(sims_path) = config.sims4_path.clone() else {
+            return;
+        };
         let mods_dir = get_mods_dir(&sims_path);
 
         let selected = state_clone.selected_mods();
@@ -651,8 +735,14 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             return;
         };
 
-        let atual = target.file_name().unwrap_or_default().to_string_lossy().to_string();
-        state_clone.set_pending_input(PendingInput::Rename { target: target.clone() });
+        let atual = target
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        state_clone.set_pending_input(PendingInput::Rename {
+            target: target.clone(),
+        });
 
         if let Some(w) = weak_clone.upgrade() {
             w.set_organizer_input_title(SharedString::from(format!(
@@ -670,12 +760,19 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_confirm_organizer_input(move |nome| {
+        let Some(_operation) = state_clone.try_begin_file_operation() else {
+            return;
+        };
         let config = cfg_clone.load();
-        let Some(sims_path) = config.sims4_path.clone() else { return };
+        let Some(sims_path) = config.sims4_path.clone() else {
+            return;
+        };
         let mods_dir = get_mods_dir(&sims_path);
 
         // `take` fecha a porta para um duplo-clique executar a ação duas vezes.
-        let Some(pending) = state_clone.take_pending_input() else { return };
+        let Some(pending) = state_clone.take_pending_input() else {
+            return;
+        };
 
         let msg = match pending {
             PendingInput::CreateFolder { parent } => {
@@ -719,7 +816,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         let weak_clone = weak_win.clone();
         let abrir_seletor = move || {
             let config = cfg_clone.load();
-            let Some(sims_path) = config.sims4_path.clone() else { return };
+            let Some(sims_path) = config.sims4_path.clone() else {
+                return;
+            };
             let mods_dir = get_mods_dir(&sims_path);
 
             let sources = state_clone.selected_mods();
@@ -732,7 +831,10 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                 return;
             }
 
-            state_clone.set_pending_transfer(PendingTransfer { sources, mode: modo });
+            state_clone.set_pending_transfer(PendingTransfer {
+                sources,
+                mode: modo,
+            });
 
             let model = Rc::new(VecModel::default());
             for (label, path) in folder_choices(&mods_dir) {
@@ -763,11 +865,18 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_folder_destination_picked(move |destino| {
+        let Some(_operation) = state_clone.try_begin_file_operation() else {
+            return;
+        };
         let config = cfg_clone.load();
-        let Some(sims_path) = config.sims4_path.clone() else { return };
+        let Some(sims_path) = config.sims4_path.clone() else {
+            return;
+        };
         let mods_dir = get_mods_dir(&sims_path);
 
-        let Some(pending) = state_clone.take_pending_transfer() else { return };
+        let Some(pending) = state_clone.take_pending_transfer() else {
+            return;
+        };
         let dest = PathBuf::from(destino.as_str());
 
         let msg = match transfer_items(&pending.sources, &dest, pending.mode, &mods_dir) {
@@ -823,7 +932,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let weak_clone = weak_win.clone();
     window.on_delete_selected_mods(move || {
         let config = cfg_clone.load();
-        let Some(sims_path) = config.sims4_path.clone() else { return };
+        let Some(sims_path) = config.sims4_path.clone() else {
+            return;
+        };
         let mods_dir = get_mods_dir(&sims_path);
 
         let alvos = state_clone.selected_mods();
@@ -883,8 +994,13 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_restore_selected_disabled(move || {
+        let Some(_operation) = state_clone.try_begin_file_operation() else {
+            return;
+        };
         let config = cfg_clone.load();
-        let Some(sims_path) = config.sims4_path.clone() else { return };
+        let Some(sims_path) = config.sims4_path.clone() else {
+            return;
+        };
         let mods_dir = get_mods_dir(&sims_path);
         let mgr = state_clone.disabled_manager();
 
@@ -916,7 +1032,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let weak_clone = weak_win.clone();
     window.on_delete_selected_disabled(move || {
         let config = cfg_clone.load();
-        let Some(sims_path) = config.sims4_path.clone() else { return };
+        let Some(sims_path) = config.sims4_path.clone() else {
+            return;
+        };
         let mods_dir = get_mods_dir(&sims_path);
 
         let alvos = state_clone.selected_disabled();
@@ -945,6 +1063,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_find_duplicates(move || {
+        let Some(operation) = state_clone.try_begin_file_operation() else { return };
         let config = cfg_clone.load();
         let Some(sims_path) = config.sims4_path.clone() else {
             return;
@@ -971,6 +1090,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             state_async.set_pending_organizer(PendingOrganizerAction::RemoveDuplicates(groups));
 
             let _ = slint::invoke_from_event_loop(move || {
+                let _operation = operation;
                 if let Some(w) = weak_async.upgrade() {
                     if preview.is_empty() {
                         w.set_organizer_status(SharedString::from("✨ Nenhuma duplicata exata encontrada."));
@@ -999,6 +1119,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_clean_junk(move || {
+        let Some(_operation) = state_clone.try_begin_file_operation() else { return };
         let config = cfg_clone.load();
         let Some(sims_path) = config.sims4_path.clone() else {
             return;
@@ -1040,6 +1161,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_confirm_organizer_action(move || {
+        let Some(operation) = state_clone.try_begin_file_operation() else {
+            return;
+        };
         let config = cfg_clone.load();
         let Some(sims_path) = config.sims4_path.clone() else {
             return;
@@ -1059,13 +1183,12 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         // A correção de profundidade move, não remove: sai antes do caminho
         // compartilhado das exclusões.
         if let PendingOrganizerAction::FixScriptDepth(issues) = pending {
-            let fixed = auto_fix_script_depth(&issues, &mods_dir).unwrap_or(0);
-            refresh_organizer_tree_status(
-                &weak_clone,
-                &cfg_clone,
-                &state_clone,
-                Some(format!("🔧 {} script(s) movidos para 00_Scripts_Corrigidos", fixed)),
-            );
+            let _operation = operation;
+            let status = match auto_fix_script_depth(&issues, &mods_dir) {
+                Ok(fixed) => format!("🔧 {} script(s) movidos para 00_Scripts_Corrigidos", fixed),
+                Err(error) => format!("❌ Correção de scripts bloqueada: {}", error),
+            };
+            refresh_organizer_tree_status(&weak_clone, &cfg_clone, &state_clone, Some(status));
             return;
         }
 
@@ -1077,16 +1200,14 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         // propósito, e `remove_entries`. Na limpeza de lixo e nas duplicatas
         // uma pasta na lista só poderia ser engano; no explorador o usuário
         // marcou a pasta de propósito.
-        let (targets, what, usa_pastas) = match pending {
-            PendingOrganizerAction::RemoveDuplicates(groups) => (
-                groups.iter().flat_map(|g| g.redundant()).collect::<Vec<_>>(),
-                "duplicata(s)",
-                false,
-            ),
-            PendingOrganizerAction::CleanJunk(files) => (files, "arquivo(s) de lixo", false),
-            PendingOrganizerAction::DeleteSelection(paths) => (paths, "item(ns)", true),
+        let (targets, duplicate_groups, what, usa_pastas) = match pending {
+            PendingOrganizerAction::RemoveDuplicates(groups) => {
+                (Vec::new(), Some(groups), "duplicata(s)", false)
+            }
+            PendingOrganizerAction::CleanJunk(files) => (files, None, "arquivo(s) de lixo", false),
+            PendingOrganizerAction::DeleteSelection(paths) => (paths, None, "item(ns)", true),
             PendingOrganizerAction::DeleteDisabled(paths) => {
-                (paths, "mod(s) desativado(s)", false)
+                (paths, None, "mod(s) desativado(s)", false)
             }
             // Tratada acima, antes deste match.
             PendingOrganizerAction::FixScriptDepth(_) => unreachable!(),
@@ -1099,7 +1220,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         let cfg_async = Arc::clone(&cfg_clone);
         let state_async = Arc::clone(&state_clone);
         tokio::task::spawn_blocking(move || {
-            let outcome = if usa_pastas {
+            let outcome = if let Some(groups) = duplicate_groups {
+                remove_duplicates(&groups, &mods_dir)
+            } else if usa_pastas {
                 remove_entries(&targets, &allowed_roots)
             } else {
                 remove_files(&targets, &allowed_roots)
@@ -1111,10 +1234,14 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                 crate::bridge::slint_models::format_size_bytes(outcome.freed_bytes)
             );
             if !outcome.failures.is_empty() {
-                msg.push_str(&format!(" ⚠️ {} bloqueados por segurança.", outcome.failures.len()));
+                msg.push_str(&format!(
+                    " ⚠️ {} bloqueados por segurança.",
+                    outcome.failures.len()
+                ));
             }
 
             let _ = slint::invoke_from_event_loop(move || {
+                let _operation = operation;
                 refresh_organizer_tree_status(&weak_async, &cfg_async, &state_async, Some(msg));
                 refresh_disabled_panel(&weak_async, &cfg_async, &state_async);
             });
@@ -1144,19 +1271,28 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             for entry in crate::engine::walk_user_mods(&dir, usize::MAX) {
                 let path = entry.path();
                 let is_package = path.is_file()
-                    && path.extension().and_then(|e| e.to_str()).unwrap_or("").eq_ignore_ascii_case("package");
+                    && path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("")
+                        .eq_ignore_ascii_case("package");
                 if !is_package {
                     continue;
                 }
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
                 model.push(crate::MergeQueueItem {
                     name: SharedString::from(entry.file_name().to_string_lossy().to_string()),
-                    size_str: SharedString::from(crate::bridge::slint_models::format_size_bytes(size)),
+                    size_str: SharedString::from(crate::bridge::slint_models::format_size_bytes(
+                        size,
+                    )),
                 });
                 inputs.push(path.to_path_buf());
             }
 
-            let total: u64 = inputs.iter().map(|p| fs::metadata(p).map(|m| m.len()).unwrap_or(0)).sum();
+            let total: u64 = inputs
+                .iter()
+                .map(|p| fs::metadata(p).map(|m| m.len()).unwrap_or(0))
+                .sum();
             let count = inputs.len();
             state_clone.set_merger_inputs(inputs);
 
@@ -1195,6 +1331,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_add_merge_job(move || {
+        let Some(_operation) = state_clone.try_begin_file_operation() else {
+            return;
+        };
         let inputs = state_clone.merger_inputs();
         let Some(output_dir) = state_clone.merger_output() else {
             if let Some(w) = weak_clone.upgrade() {
@@ -1254,6 +1393,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_remove_merge_job(move || {
+        let Some(_operation) = state_clone.try_begin_file_operation() else {
+            return;
+        };
         let removidos = state_clone.remove_selected_jobs();
         refresh_merge_jobs(&weak_clone, &state_clone);
         if let Some(w) = weak_clone.upgrade() {
@@ -1288,6 +1430,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_start_merge_queue(move || {
+        let Some(operation) = state_clone.try_begin_file_operation() else {
+            return;
+        };
         let jobs = state_clone.merge_jobs();
         if jobs.is_empty() {
             return;
@@ -1363,7 +1508,11 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                     // O avanço mostrado é o da fila inteira, não o da tarefa:
                     // uma barra que reinicia a cada tarefa esconde o quanto
                     // ainda falta no total.
-                    let dentro = if total == 0 { 0.0 } else { current as f32 / total as f32 };
+                    let dentro = if total == 0 {
+                        0.0
+                    } else {
+                        current as f32 / total as f32
+                    };
                     let geral = (index as f32 + dentro) / total_jobs as f32;
                     let msg = format!("[{}/{}] {}", index + 1, total_jobs, texto);
                     let weak_ui = weak.clone();
@@ -1383,11 +1532,23 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                 on_progress,
             );
 
-            let concluidas = outcomes.iter().filter(|o| o.status == JobStatus::Done).count();
-            let parciais = outcomes.iter().filter(|o| o.status == JobStatus::Partial).count();
-            let falhas = outcomes.iter().filter(|o| o.status == JobStatus::Failed).count();
+            let concluidas = outcomes
+                .iter()
+                .filter(|o| o.status == JobStatus::Done)
+                .count();
+            let parciais = outcomes
+                .iter()
+                .filter(|o| o.status == JobStatus::Partial)
+                .count();
+            let falhas = outcomes
+                .iter()
+                .filter(|o| o.status == JobStatus::Failed)
+                .count();
 
-            let mut msg = format!("✅ Fila concluída: {} de {} tarefa(s).", concluidas, total_jobs);
+            let mut msg = format!(
+                "✅ Fila concluída: {} de {} tarefa(s).",
+                concluidas, total_jobs
+            );
             if parciais > 0 {
                 msg.push_str(&format!(
                     " ⚠️ {} parcial(is) — os originais foram mantidos.",
@@ -1399,6 +1560,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             }
 
             let _ = slint::invoke_from_event_loop(move || {
+                let _operation = operation;
                 refresh_merge_jobs(&weak_async, &state_async);
                 if let Some(w) = weak_async.upgrade() {
                     w.set_is_merging(false);
@@ -1416,6 +1578,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_start_merge(move || {
+        let Some(operation) = state_clone.try_begin_file_operation() else { return };
         let inputs = state_clone.merger_inputs();
         let Some(output_dir) = state_clone.merger_output() else {
             if let Some(w) = weak_clone.upgrade() {
@@ -1468,13 +1631,13 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             });
 
             let _ = slint::invoke_from_event_loop(move || {
+                let _operation = operation;
                 let Some(w) = weak_async.upgrade() else { return };
                 w.set_is_merging(false);
                 w.set_merge_progress(0.0);
 
                 match result {
                     Ok(report) if report.success && !report.partial && report.failed_files.is_empty() && !report.output_packages.is_empty() => {
-                        state_merge.set_pending_post_merge(report.clone(), inputs_snapshot, root_snapshot);
                         let msg = format!(
                             "✅ {} package(s) unificados em {} parte(s).",
                             report.success_count,
@@ -1486,6 +1649,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                             report.output_packages.len(),
                             report.success_count
                         )));
+                        state_merge.set_pending_post_merge(report, inputs_snapshot, root_snapshot);
                         w.set_show_post_merge_dialog(true);
                     }
                     Ok(report) if report.partial => {
@@ -1518,6 +1682,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_post_merge_action(move |action| {
+        let Some(operation) = state_clone.try_begin_file_operation() else {
+            return;
+        };
         let choice = PostMergeAction::parse(action.as_str());
 
         if let Some(w) = weak_clone.upgrade() {
@@ -1533,7 +1700,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             if let Some(w) = weak_clone.upgrade() {
                 w.set_merge_items(ModelRc::from(Rc::new(VecModel::default())));
                 w.set_merge_input_dir(SharedString::default());
-                w.set_merge_status(SharedString::from("Arquivos originais mantidos como estavam."));
+                w.set_merge_status(SharedString::from(
+                    "Arquivos originais mantidos como estavam.",
+                ));
             }
             return;
         }
@@ -1555,11 +1724,17 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             state_async.clear_merger();
 
             let msg = if let Some(err) = &outcome.error {
-                format!("❌ Backup falhou, nada foi removido: {}", err)
+                format!(
+                    "❌ Pós-ação incompleta: {} concluído(s), {} falha(s). {}",
+                    outcome.affected, outcome.failed, err
+                )
             } else {
                 let mut m = match choice {
                     PostMergeAction::Disable => {
-                        format!("🔴 {} original(is) desativados (.disabled).", outcome.affected)
+                        format!(
+                            "🔴 {} original(is) desativados (.disabled).",
+                            outcome.affected
+                        )
                     }
                     PostMergeAction::Backup => format!(
                         "📦 {} original(is) arquivados em {} e removidos da pasta.",
@@ -1584,6 +1759,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             };
 
             let _ = slint::invoke_from_event_loop(move || {
+                let _operation = operation;
                 if let Some(w) = weak_async.upgrade() {
                     w.set_merge_items(ModelRc::from(Rc::new(VecModel::default())));
                     w.set_merge_input_dir(SharedString::default());
@@ -1600,10 +1776,25 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_select_tray_files(move || {
+        let Some(operation) = state_clone.try_begin_file_operation() else {
+            return;
+        };
         let Some(files) = rfd::FileDialog::new()
             .add_filter(
                 "Sims / Lot Archives",
-                &["zip", "7z", "rar", "trayitem", "householdbinary", "sgi", "hhi", "bpi", "blueprint", "room", "rmi"],
+                &[
+                    "zip",
+                    "7z",
+                    "rar",
+                    "trayitem",
+                    "householdbinary",
+                    "sgi",
+                    "hhi",
+                    "bpi",
+                    "blueprint",
+                    "room",
+                    "rmi",
+                ],
             )
             .pick_files()
         else {
@@ -1613,7 +1804,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         state_clone.set_tray_sources(files.clone());
         if let Some(w) = weak_clone.upgrade() {
             w.set_is_importing_tray(true);
-            w.set_tray_status(SharedString::from("🔎 Extraindo e analisando arquivos de Tray..."));
+            w.set_tray_status(SharedString::from(
+                "🔎 Extraindo e analisando arquivos de Tray...",
+            ));
         }
 
         let work_dir = state_clone.tray_work_dir().to_path_buf();
@@ -1652,6 +1845,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
 
                     let cfg_ui = Arc::clone(&cfg_async);
                     let _ = slint::invoke_from_event_loop(move || {
+                        let _operation = operation;
                         refresh_tray_queue(&weak_async, &cfg_ui, &state_async);
                         if let Some(w) = weak_async.upgrade() {
                             w.set_is_importing_tray(false);
@@ -1662,6 +1856,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                 Err(e) => {
                     let msg = format!("❌ Falha ao analisar os arquivos: {}", e);
                     let _ = slint::invoke_from_event_loop(move || {
+                        let _operation = operation;
                         if let Some(w) = weak_async.upgrade() {
                             w.set_is_importing_tray(false);
                             w.set_tray_status(SharedString::from(msg));
@@ -1694,10 +1889,15 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         let weak_clone = weak_win.clone();
         let escolher_destino = move || {
             let config = cfg_clone.load();
-            let Some(sims_path) = config.sims4_path.clone() else { return };
+            let Some(sims_path) = config.sims4_path.clone() else {
+                return;
+            };
             let mods_dir = get_mods_dir(&sims_path);
 
-            let Some(dir) = rfd::FileDialog::new().set_directory(&mods_dir).pick_folder() else {
+            let Some(dir) = rfd::FileDialog::new()
+                .set_directory(&mods_dir)
+                .pick_folder()
+            else {
                 return;
             };
 
@@ -1720,7 +1920,11 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             if let Some(w) = weak_clone.upgrade() {
                 w.set_tray_status(SharedString::from(format!(
                     "📂 CC de {} irá para {}.",
-                    if apenas_marcados { "itens marcados" } else { "todos os itens" },
+                    if apenas_marcados {
+                        "itens marcados"
+                    } else {
+                        "todos os itens"
+                    },
                     display_path(&dir, &mods_dir)
                 )));
             }
@@ -1748,6 +1952,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_clear_tray_queue(move || {
+        let Some(_operation) = state_clone.try_begin_file_operation() else {
+            return;
+        };
         let _ = clear_tray_work_dir(state_clone.tray_work_dir());
         state_clone.clear_tray();
         refresh_tray_queue(&weak_clone, &cfg_clone, &state_clone);
@@ -1763,10 +1970,15 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_start_tray_import(move || {
+        let Some(operation) = state_clone.try_begin_file_operation() else {
+            return;
+        };
         let config = cfg_clone.load();
         let Some(sims_path) = config.sims4_path.clone() else {
             if let Some(w) = weak_clone.upgrade() {
-                w.set_tray_status(SharedString::from("⚠️ Configure a pasta do jogo antes de importar."));
+                w.set_tray_status(SharedString::from(
+                    "⚠️ Configure a pasta do jogo antes de importar.",
+                ));
             }
             return;
         };
@@ -1774,7 +1986,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         let candidates = state_clone.take_tray_candidates();
         if candidates.is_empty() {
             if let Some(w) = weak_clone.upgrade() {
-                w.set_tray_status(SharedString::from("⚠️ Nenhum item analisado na fila. Selecione arquivos primeiro."));
+                w.set_tray_status(SharedString::from(
+                    "⚠️ Nenhum item analisado na fila. Selecione arquivos primeiro.",
+                ));
             }
             return;
         }
@@ -1810,7 +2024,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                     }
                     // `import_tray_item` reverte a própria cópia; seguimos com
                     // os demais itens.
-                    Err(e) => failures.push(format!("{} ({})", candidate.analysis.detected_name, e)),
+                    Err(e) => {
+                        failures.push(format!("{} ({})", candidate.analysis.detected_name, e))
+                    }
                 }
             }
 
@@ -1822,13 +2038,17 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
                 tray_total, cc_total
             );
             if skipped_total > 0 {
-                msg.push_str(&format!(" {} CC já instalado(s) foram ignorados.", skipped_total));
+                msg.push_str(&format!(
+                    " {} CC já instalado(s) foram ignorados.",
+                    skipped_total
+                ));
             }
             if !failures.is_empty() {
                 msg.push_str(&format!(" ⚠️ Falhas: {}", failures.join(", ")));
             }
 
             let _ = slint::invoke_from_event_loop(move || {
+                let _operation = operation;
                 if let Some(w) = weak_async.upgrade() {
                     w.set_is_importing_tray(false);
                     w.set_tray_items(ModelRc::from(Rc::new(VecModel::default())));
@@ -1844,8 +2064,12 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     // dentro de Mods, onde o jogo não lê nada, e qualquer erro sumia num
     // `let _ =`. Agora passa pelo instalador de verdade, em `spawn_blocking`.
     let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_select_translation_file(move || {
+        let Some(operation) = state_clone.try_begin_file_operation() else {
+            return;
+        };
         let config = cfg_clone.load();
         let Some(sims_path) = config.sims4_path.clone() else {
             if let Some(w) = weak_clone.upgrade() {
@@ -1857,7 +2081,10 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         };
 
         let Some(file) = rfd::FileDialog::new()
-            .add_filter("Traduções (.package, .zip, .7z, .rar)", &["package", "zip", "7z", "rar"])
+            .add_filter(
+                "Traduções (.package, .zip, .7z, .rar)",
+                &["package", "zip", "7z", "rar"],
+            )
             .pick_file()
         else {
             return;
@@ -1889,6 +2116,7 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             };
 
             let _ = slint::invoke_from_event_loop(move || {
+                let _operation = operation;
                 refresh_translations_list(&weak_async, &cfg_async);
                 if let Some(w) = weak_async.upgrade() {
                     w.set_translations_status(SharedString::from(msg));
@@ -1899,16 +2127,23 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
 
     // Callback: delete_translation
     let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
     let weak_clone = weak_win.clone();
     window.on_delete_translation(move |name| {
+        let Some(_operation) = state_clone.try_begin_file_operation() else {
+            return;
+        };
         let config = cfg_clone.load();
-        let Some(sims_path) = config.sims4_path.clone() else { return };
+        let Some(sims_path) = config.sims4_path.clone() else {
+            return;
+        };
         let mods_dir = get_mods_dir(&sims_path);
 
-        let msg = match remove_translation(&mods_dir, name.as_str(), &[mods_dir.clone()]) {
-            Ok(()) => format!("🗑️ Tradução removida: {}", name),
-            Err(e) => format!("❌ Não foi possível remover '{}': {}", name, e),
-        };
+        let msg =
+            match remove_translation(&mods_dir, name.as_str(), std::slice::from_ref(&mods_dir)) {
+                Ok(()) => format!("🗑️ Tradução removida: {}", name),
+                Err(e) => format!("❌ Não foi possível remover '{}': {}", name, e),
+            };
 
         refresh_translations_list(&weak_clone, &cfg_clone);
         if let Some(w) = weak_clone.upgrade() {
@@ -1925,7 +2160,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
         let config = cfg_clone.load();
         let Some(sims_path) = config.sims4_path.clone() else {
             if let Some(w) = weak_clone.upgrade() {
-                w.set_reshade_status(SharedString::from("⚠️ Configure a pasta do jogo antes de instalar o ReShade."));
+                w.set_reshade_status(SharedString::from(
+                    "⚠️ Configure a pasta do jogo antes de instalar o ReShade.",
+                ));
             }
             return;
         };
@@ -1933,7 +2170,9 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
 
         if let Some(w) = weak_clone.upgrade() {
             w.set_is_reshade_busy(true);
-            w.set_reshade_status(SharedString::from("🌐 Baixando e injetando ReShade (5.9.2)..."));
+            w.set_reshade_status(SharedString::from(
+                "🌐 Baixando e injetando ReShade (5.9.2)...",
+            ));
         }
 
         let weak_async = weak_clone.clone();
@@ -2012,7 +2251,10 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             let game_bin = sims_path.join("Game").join("Bin");
             let (_, cmd) = detect_environment(&game_bin);
             if let Some(w) = weak_clone.upgrade() {
-                w.set_reshade_status(SharedString::from(format!("📋 Comando de inicialização: {}", cmd)));
+                w.set_reshade_status(SharedString::from(format!(
+                    "📋 Comando de inicialização: {}",
+                    cmd
+                )));
             }
         }
     });
@@ -2044,11 +2286,15 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             let _ = cfg_clone.save(&cfg);
             if let Some(w) = weak_clone.upgrade() {
                 w.set_game_path(SharedString::from(p.display().to_string()));
-                w.set_config_status(SharedString::from("✅ Caminho do The Sims 4 encontrado e salvo!"));
+                w.set_config_status(SharedString::from(
+                    "✅ Caminho do The Sims 4 encontrado e salvo!",
+                ));
             }
             refresh_dashboard_stats(&weak_clone, &cfg_clone);
         } else if let Some(w) = weak_clone.upgrade() {
-            w.set_config_status(SharedString::from("⚠️ Não foi possível localizar a pasta do The Sims 4. Selecione manualmente."));
+            w.set_config_status(SharedString::from(
+                "⚠️ Não foi possível localizar a pasta do The Sims 4. Selecione manualmente.",
+            ));
         }
     });
 
@@ -2067,7 +2313,8 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
             w.set_config_status(SharedString::from(if saved {
                 t("✅ Configurações salvas!", &cfg.language)
             } else {
-                "⚠️ Idioma alterado, mas não foi possível gravar o arquivo de configuração.".to_string()
+                "⚠️ Idioma alterado, mas não foi possível gravar o arquivo de configuração."
+                    .to_string()
             }));
         }
     });
@@ -2084,12 +2331,19 @@ pub fn setup_app_adapter(window: &MainWindow, config_mgr: Arc<ConfigManager>, st
     let follow_clone = Arc::clone(&follow_system);
     window.on_theme_selected(move |idx| {
         // Um índice fora da lista viraria um tema inexistente na global.
-        let idx = if (0..=theme::SYSTEM_INDEX).contains(&idx) { idx } else { 0 };
+        let idx = if (0..=theme::SYSTEM_INDEX).contains(&idx) {
+            idx
+        } else {
+            0
+        };
         let mut cfg = cfg_clone.load();
         cfg.theme = theme::name_from_index(idx).to_string();
         let saved = cfg_clone.save(&cfg).is_ok();
 
-        follow_clone.store(idx == theme::SYSTEM_INDEX, std::sync::atomic::Ordering::Relaxed);
+        follow_clone.store(
+            idx == theme::SYSTEM_INDEX,
+            std::sync::atomic::Ordering::Relaxed,
+        );
 
         if let Some(w) = weak_clone.upgrade() {
             // Sem isto o tema só aparecia na abertura seguinte, quando
@@ -2174,7 +2428,8 @@ fn apply_config_to_ui(
     let cfg = config_mgr.load();
     if let Some(w) = weak_win.upgrade() {
         w.set_active_language(SharedString::from(cfg.language.clone()));
-        w.global::<crate::I18n>().set_lang(SharedString::from(cfg.language));
+        w.global::<crate::I18n>()
+            .set_lang(SharedString::from(cfg.language));
 
         // "Sistema" gravado no config mas shell removida da máquina: cai no tema embutido em vez
         // de deixar o app com o chip aceso e nenhuma cor vinda de lugar nenhum.
@@ -2182,7 +2437,10 @@ fn apply_config_to_ui(
         if idx == theme::SYSTEM_INDEX && !theme::system_available() {
             idx = 0;
         }
-        follow_system.store(idx == theme::SYSTEM_INDEX, std::sync::atomic::Ordering::Relaxed);
+        follow_system.store(
+            idx == theme::SYSTEM_INDEX,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         w.global::<crate::Theme>().set_active_theme(idx);
         theme::apply(&w, &theme::roles_for_index(idx));
         w.set_merge_max_size(SharedString::from(format!("{}", cfg.merge_limit_gb)));
@@ -2229,7 +2487,7 @@ fn refresh_dashboard_stats(weak_win: &slint::Weak<MainWindow>, config_mgr: &Conf
         if let Some(sims_path) = config.sims4_path.clone() {
             w.set_game_path(SharedString::from(sims_path.display().to_string()));
             let weak_async = weak_win.clone();
-            
+
             tokio::task::spawn_blocking(move || {
                 let mods_dir = get_mods_dir(&sims_path);
                 let stats = collect_stats(&mods_dir, &get_tray_dir(&sims_path));
@@ -2247,10 +2505,12 @@ fn refresh_dashboard_stats(weak_win: &slint::Weak<MainWindow>, config_mgr: &Conf
                         )
                     })
                     .collect();
-                let scripts: Vec<String> =
-                    stats.scripts.iter().map(|p| display_path(p, &mods_dir)).collect();
-                let tray: Vec<String> =
-                    stats.tray_files.iter().map(|p| file_label(p)).collect();
+                let scripts: Vec<String> = stats
+                    .scripts
+                    .iter()
+                    .map(|p| display_path(p, &mods_dir))
+                    .collect();
+                let tray: Vec<String> = stats.tray_files.iter().map(|p| file_label(p)).collect();
 
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak_async.upgrade() {
@@ -2271,7 +2531,9 @@ fn refresh_dashboard_stats(weak_win: &slint::Weak<MainWindow>, config_mgr: &Conf
             });
         } else {
             w.set_game_path(SharedString::from("Não configurado"));
-            w.set_dashboard_status(SharedString::from("⚠️ Configure a pasta do jogo nas Configurações."));
+            w.set_dashboard_status(SharedString::from(
+                "⚠️ Configure a pasta do jogo nas Configurações.",
+            ));
         }
     }
 }
@@ -2368,7 +2630,9 @@ fn refresh_organizer_tree_status(
 ) {
     let config = config_mgr.load();
     let Some(w) = weak_win.upgrade() else { return };
-    let Some(sims_path) = config.sims4_path.clone() else { return };
+    let Some(sims_path) = config.sims4_path.clone() else {
+        return;
+    };
 
     let mods_dir = get_mods_dir(&sims_path);
     // Mover e excluir invalidam caminhos que continuariam marcados. É barato, e a barra de ações
@@ -2411,7 +2675,9 @@ fn refresh_tray_queue(
 ) {
     let config = config_mgr.load();
     let Some(w) = weak_win.upgrade() else { return };
-    let Some(sims_path) = &config.sims4_path else { return };
+    let Some(sims_path) = &config.sims4_path else {
+        return;
+    };
 
     let mods_dir = get_mods_dir(sims_path);
     let marcados = state.selected_tray();
@@ -2481,7 +2747,9 @@ fn refresh_disabled_panel(
 ) {
     let config = config_mgr.load();
     let Some(w) = weak_win.upgrade() else { return };
-    let Some(sims_path) = &config.sims4_path else { return };
+    let Some(sims_path) = &config.sims4_path else {
+        return;
+    };
 
     let mods_dir = get_mods_dir(sims_path);
     let selected = state.selected_disabled();
@@ -2570,9 +2838,9 @@ fn refresh_translations_list(weak_win: &slint::Weak<MainWindow>, config_mgr: &Co
             for item in list_installed(&get_mods_dir(sims_path)) {
                 model.push(crate::TranslationItem {
                     name: SharedString::from(item.name),
-                    size_str: SharedString::from(
-                        crate::bridge::slint_models::format_size_bytes(item.size),
-                    ),
+                    size_str: SharedString::from(crate::bridge::slint_models::format_size_bytes(
+                        item.size,
+                    )),
                 });
             }
             w.set_installed_translations(ModelRc::from(model));
@@ -2592,9 +2860,13 @@ fn sims4_path_cache(sims_path: &Path) -> Vec<PathBuf> {
 fn create_zip_archive(src_dir: &Path, zip_path: &Path) -> io::Result<()> {
     let file = File::create(zip_path)?;
     let mut zip = zip::ZipWriter::new(file);
-    let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
 
-    for entry in walkdir::WalkDir::new(src_dir).into_iter().filter_map(|e| e.ok()) {
+    for entry in walkdir::WalkDir::new(src_dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
         let path = entry.path();
         let name = path.strip_prefix(src_dir).unwrap_or(path);
 

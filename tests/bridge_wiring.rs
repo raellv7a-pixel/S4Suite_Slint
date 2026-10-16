@@ -42,7 +42,9 @@ fn declared_callbacks(src: &str) -> BTreeSet<String> {
     let mut nomes = BTreeSet::new();
     for linha in src.lines() {
         let linha = linha.trim();
-        let Some(resto) = linha.strip_prefix("callback ") else { continue };
+        let Some(resto) = linha.strip_prefix("callback ") else {
+            continue;
+        };
         // `pure callback` e afins param aqui de propósito: só nos interessam os
         // que o Rust precisa implementar.
         let nome: String = resto
@@ -86,9 +88,7 @@ fn view_files() -> Vec<PathBuf> {
 #[test]
 fn todo_callback_da_janela_tem_handler_no_adapter() {
     let main = read(&ui_dir().join("main.slint"));
-    let adapter = read(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src/bridge/slint_adapter.rs"),
-    );
+    let adapter = read(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src/bridge/slint_adapter.rs"));
 
     let sem_handler: Vec<String> = declared_callbacks(&main)
         .into_iter()
@@ -125,7 +125,9 @@ fn todo_callback_de_view_tem_quem_o_acione_na_propria_view() {
         for callback in declared_callbacks(&src) {
             // A vista aciona como `root.nome()` ou `root.nome(arg)`.
             let id = format!("{}::{}", nome_view, callback);
-            if !src.contains(&format!("root.{}(", callback)) && !LEGADO_CONHECIDO.contains(&id.as_str()) {
+            if !src.contains(&format!("root.{}(", callback))
+                && !LEGADO_CONHECIDO.contains(&id.as_str())
+            {
                 soltos.push(id);
             }
         }
@@ -274,7 +276,10 @@ async fn criar_pasta_pela_ui_cria_a_pasta_no_disco() {
     let w = h.window();
 
     w.invoke_create_mod_folder();
-    assert!(w.get_show_organizer_input(), "o diálogo de nome deveria abrir");
+    assert!(
+        w.get_show_organizer_input(),
+        "o diálogo de nome deveria abrir"
+    );
 
     w.invoke_confirm_organizer_input("Cabelos".into());
 
@@ -367,7 +372,10 @@ async fn excluir_pela_ui_so_apaga_depois_de_confirmar() {
     w.invoke_select_mod_entry(alvo.display().to_string().into());
     w.invoke_delete_selected_mods();
 
-    assert!(w.get_show_organizer_confirm(), "o diálogo de confirmação deveria abrir");
+    assert!(
+        w.get_show_organizer_confirm(),
+        "o diálogo de confirmação deveria abrir"
+    );
     assert!(alvo.exists(), "nada pode ser apagado antes de confirmar");
 
     w.invoke_cancel_organizer_action();
@@ -398,7 +406,8 @@ async fn adicionar_tarefa_pela_ui_entra_na_fila_do_merger() {
     // O seletor de arquivos é nativo e não roda em teste; alimentamos o estado
     // como se o usuário já tivesse escolhido.
     h.state.set_merger_inputs(vec![pacote]);
-    h.state.set_merger_output(Some(h.mods_dir.join("Unificados")));
+    h.state
+        .set_merger_output(Some(h.mods_dir.join("Unificados")));
 
     w.invoke_add_merge_job();
 
@@ -433,7 +442,11 @@ async fn abertura_limpa_o_staging_de_uma_sessao_interrompida() {
 
     // Segunda abertura, mesmo config e mesma pasta.
     let janela = MainWindow::new().unwrap();
-    setup_app_adapter(&janela, Arc::clone(&h.config_mgr), Arc::new(AppState::new(&h.config_dir)));
+    setup_app_adapter(
+        &janela,
+        Arc::clone(&h.config_mgr),
+        Arc::new(AppState::new(&h.config_dir)),
+    );
 
     assert!(!staging.exists(), "o staging órfão continuou em Mods");
 }
@@ -464,10 +477,12 @@ async fn executar_a_fila_de_novo_nao_repete_as_tarefas_concluidas() {
     let pacote = h.mods_dir.join("Grupo/a.package");
     write_file(&pacote, b"x");
     h.state.set_merger_inputs(vec![pacote]);
-    h.state.set_merger_output(Some(h.mods_dir.join("Unificados")));
+    h.state
+        .set_merger_output(Some(h.mods_dir.join("Unificados")));
     w.invoke_add_merge_job();
 
-    h.state.set_job_status(0, s4suite::engine::merger::JobStatus::Done);
+    h.state
+        .set_job_status(0, s4suite::engine::merger::JobStatus::Done);
     w.invoke_start_merge_queue();
 
     assert!(
@@ -475,5 +490,137 @@ async fn executar_a_fila_de_novo_nao_repete_as_tarefas_concluidas() {
         "status inesperado: {}",
         w.get_merge_status()
     );
-    assert!(!w.get_is_merging(), "a fila não deveria ter começado a rodar");
+    assert!(
+        !w.get_is_merging(),
+        "a fila não deveria ter começado a rodar"
+    );
+}
+
+#[test]
+fn p0_ui_limpar_tray_nao_apaga_fontes_de_importacao_agendada() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap();
+    let _entered = runtime.enter();
+    let h = Harness::new();
+    let window = h.window();
+    let source = h.state.tray_work_dir().join("item/original.trayitem");
+    write_file(&source, b"TRAY_SOB_POSSE_DA_IMPORTACAO");
+    let before_hash = s4suite::engine::tray::full_sha256(&source).unwrap();
+    let analysis =
+        s4suite::engine::tray::analyze_tray_source(source.parent().unwrap(), None).unwrap();
+    h.state
+        .set_tray_candidates(vec![s4suite::engine::tray::TrayImportCandidate {
+            source: source.clone(),
+            analysis,
+            cc_target: None,
+            skipped: false,
+        }]);
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let blocker = tokio::task::spawn_blocking(move || {
+        started_tx.send(()).unwrap();
+        let _ = release_rx.recv();
+    });
+    started_rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap();
+
+    window.invoke_start_tray_import();
+    window.invoke_clear_tray_queue();
+    let source_bytes = fs::read(&source);
+    let source_hash = s4suite::engine::tray::full_sha256(&source);
+    let still_importing = window.get_is_importing_tray();
+    release_tx.send(()).unwrap();
+    runtime.block_on(async {
+        blocker.await.unwrap();
+        tokio::task::spawn_blocking(|| {}).await.unwrap();
+    });
+
+    assert!(
+        still_importing,
+        "limpar fila encerrou importação em andamento"
+    );
+    assert_eq!(source_bytes.unwrap(), b"TRAY_SOB_POSSE_DA_IMPORTACAO");
+    assert_eq!(source_hash.unwrap(), before_hash);
+}
+
+#[test]
+fn p0_ui_duplicata_alterada_antes_de_confirmar_nao_e_apagada() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap();
+    let _entered = runtime.enter();
+    let h = Harness::new();
+    let keeper = h.mods_dir.join("original.package");
+    let changed = h.mods_dir.join("sub/copia.package");
+    write_file(&keeper, b"CONTEUDO_DUPLICADO");
+    write_file(&changed, b"CONTEUDO_DUPLICADO");
+    let groups = s4suite::engine::organizer::detect_duplicates(&h.mods_dir);
+    assert_eq!(groups.len(), 1);
+    h.state.set_pending_organizer(
+        s4suite::bridge::state::PendingOrganizerAction::RemoveDuplicates(groups),
+    );
+    write_file(&changed, b"EDICAO_UNICA_DEPOIS_DA_ANALISE");
+    let changed_hash = s4suite::engine::tray::full_sha256(&changed).unwrap();
+    let keeper_hash = s4suite::engine::tray::full_sha256(&keeper).unwrap();
+
+    h.window().invoke_confirm_organizer_action();
+    runtime.block_on(async {
+        tokio::task::spawn_blocking(|| {}).await.unwrap();
+    });
+
+    assert_eq!(
+        fs::read(&changed).unwrap(),
+        b"EDICAO_UNICA_DEPOIS_DA_ANALISE"
+    );
+    assert_eq!(
+        s4suite::engine::tray::full_sha256(&changed).unwrap(),
+        changed_hash
+    );
+    assert_eq!(fs::read(&keeper).unwrap(), b"CONTEUDO_DUPLICADO");
+    assert_eq!(
+        s4suite::engine::tray::full_sha256(&keeper).unwrap(),
+        keeper_hash
+    );
+}
+
+#[test]
+fn p0_ui_sem_keeper_preserva_a_ultima_copia_confirmada() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap();
+    let _entered = runtime.enter();
+    let h = Harness::new();
+    let keeper = h.mods_dir.join("original.package");
+    let last_copy = h.mods_dir.join("sub/copia.package");
+    write_file(&keeper, b"ULTIMA_COPIA_NAO_PODE_SER_PERDIDA");
+    write_file(&last_copy, b"ULTIMA_COPIA_NAO_PODE_SER_PERDIDA");
+    let before_hash = s4suite::engine::tray::full_sha256(&last_copy).unwrap();
+    let groups = s4suite::engine::organizer::detect_duplicates(&h.mods_dir);
+    assert_eq!(groups.len(), 1);
+    h.state.set_pending_organizer(
+        s4suite::bridge::state::PendingOrganizerAction::RemoveDuplicates(groups),
+    );
+    fs::remove_file(&keeper).unwrap();
+
+    h.window().invoke_confirm_organizer_action();
+    runtime.block_on(async {
+        tokio::task::spawn_blocking(|| {}).await.unwrap();
+    });
+
+    assert_eq!(
+        fs::read(&last_copy).unwrap(),
+        b"ULTIMA_COPIA_NAO_PODE_SER_PERDIDA"
+    );
+    assert_eq!(
+        s4suite::engine::tray::full_sha256(&last_copy).unwrap(),
+        before_hash
+    );
 }

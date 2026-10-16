@@ -5,6 +5,20 @@ use crate::engine::organizer::{DuplicateGroup, ScriptDepthIssue, TransferMode};
 use crate::engine::tray::{TrayImportCandidate, TRAY_WORK_DIR};
 use parking_lot::Mutex;
 use std::path::{Path, PathBuf};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+
+/// Posse exclusiva dos fluxos de disco da janela, inclusive trabalho já
+/// agendado. O guard atravessa spawn_blocking e só libera no callback final.
+pub(crate) struct FileOperationGuard(Arc<AtomicBool>);
+
+impl Drop for FileOperationGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
 
 /// Ação do organizador que mexe em arquivos do usuário e aguarda confirmação.
 ///
@@ -60,6 +74,7 @@ pub struct QueuedJob {
 /// texto na tela e o caminho real dos arquivos era perdido no instante em que
 /// o diálogo de seleção fechava.
 pub struct AppState {
+    file_operation: Arc<AtomicBool>,
     /// Arquivos que o usuário escolheu para instalar (caminhos reais em disco).
     installer_sources: Mutex<Vec<PathBuf>>,
     /// Análise de conflitos aguardando confirmação no diálogo.
@@ -107,6 +122,7 @@ pub struct AppState {
 impl AppState {
     pub fn new(config_dir: &Path) -> Self {
         Self {
+            file_operation: Arc::new(AtomicBool::new(false)),
             installer_sources: Mutex::new(Vec::new()),
             pending_install: Mutex::new(None),
             selected_mods: Mutex::new(Vec::new()),
@@ -127,6 +143,13 @@ impl AppState {
             disabled_mgr: DisabledManager::new(config_dir),
             tray_work_dir: config_dir.join(TRAY_WORK_DIR),
         }
+    }
+
+    pub(crate) fn try_begin_file_operation(&self) -> Option<FileOperationGuard> {
+        self.file_operation
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .ok()
+            .map(|_| FileOperationGuard(Arc::clone(&self.file_operation)))
     }
 
     pub fn disabled_manager(&self) -> &DisabledManager {
