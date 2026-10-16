@@ -578,3 +578,70 @@ fn interrupcao_recuperavel_preserva_integridade_e_permite_reinstalacao() {
     assert_eq!(skipped, 0);
     assert!(fx.managed().join("ModRecuperavel/recup/item.package").exists());
 }
+
+#[test]
+fn scripts_com_mesmo_nome_em_mods_diferentes_na_mesma_fila_sao_desambiguados() {
+    let fx = Fixture::new();
+
+    // Dois zips de autores diferentes na mesma fila, ambos contendo main.ts4script
+    let zip_a = fx.downloads.join("AutorA_Mod.zip");
+    let zip_b = fx.downloads.join("AutorB_Mod.zip");
+    make_zip(&zip_a, &[("main.ts4script", b"script_do_autor_a".to_vec())]);
+    make_zip(&zip_b, &[("main.ts4script", b"script_do_autor_b".to_vec())]);
+
+    let rep = prepare_staging(&[zip_a, zip_b], &fx.staging()).unwrap();
+    assert_eq!(rep.prepared, 2);
+
+    let report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
+    assert_eq!(report.staged_files.len(), 2);
+
+    // Os dois arquivos não podem ter o mesmo destino
+    let dest0 = report.staged_files[0].destination(&fx.mods_dir, MANAGED_BASE_DIR);
+    let dest1 = report.staged_files[1].destination(&fx.mods_dir, MANAGED_BASE_DIR);
+    assert_ne!(dest0, dest1, "scripts com mesmo nome na mesma fila devem receber destinos desambiguados");
+
+    let (installed, skipped) =
+        execute_installation(&report, &fx.mods_dir, MANAGED_BASE_DIR, &[fx.mods_dir.clone()]).unwrap();
+    assert_eq!(installed, 2);
+    assert_eq!(skipped, 0);
+
+    // Ambos os scripts devem existir com seus conteúdos preservados
+    assert!(dest0.exists());
+    assert!(dest1.exists());
+    let c0 = fs::read(&dest0).unwrap();
+    let c1 = fs::read(&dest1).unwrap();
+    assert_ne!(c0, c1);
+    assert!(c0 == b"script_do_autor_a" || c0 == b"script_do_autor_b");
+    assert!(c1 == b"script_do_autor_a" || c1 == b"script_do_autor_b");
+}
+
+#[test]
+fn unique_dest_path_e_atomic_copy_protegidos_contra_symlinks_quebrados() {
+    let fx = Fixture::new();
+    let pasta = fx.mods_dir.join("TesteSymlink");
+    fs::create_dir_all(&pasta).unwrap();
+
+    let arquivo_inexistente = pasta.join("alvo_inexistente.txt");
+    let link_quebrado = pasta.join("conflito.package");
+
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&arquivo_inexistente, &link_quebrado).unwrap();
+        assert!(fs::symlink_metadata(&link_quebrado).is_ok());
+        assert!(!link_quebrado.exists(), "link quebrado não tem destino existente");
+
+        // unique_dest_path não pode retornar o link_quebrado existente
+        let unico = s4suite::core::safety::unique_dest_path(&pasta, "conflito.package");
+        assert_ne!(unico, link_quebrado, "unique_dest_path deve detectar link quebrado e gerar nome novo");
+        assert_eq!(unico, pasta.join("conflito_1.package"));
+
+        // atomic_copy para um destino que é symlink substitui o link sem seguir para o alvo
+        let fonte = pasta.join("fonte.package");
+        fs::write(&fonte, b"NOVO_CONTEUDO_ATOMIC").unwrap();
+
+        s4suite::engine::installer::atomic_copy(&fonte, &link_quebrado).unwrap();
+        assert!(link_quebrado.is_file(), "link simbólico deve ter sido substituído por arquivo regular");
+        assert_eq!(fs::read(&link_quebrado).unwrap(), b"NOVO_CONTEUDO_ATOMIC");
+        assert!(!arquivo_inexistente.exists(), "alvo inexistente não deve ter sido criado fora");
+    }
+}

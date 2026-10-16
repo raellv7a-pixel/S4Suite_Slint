@@ -285,6 +285,8 @@ pub struct StagedFile {
     pub size: u64,
     pub conflict: ConflictType,
     pub existing_dest: Option<PathBuf>,
+    /// Nome alternativo atribuído quando há colisão de destino na mesma fila (ex: .ts4script de autores diferentes)
+    pub target_filename: Option<String>,
 }
 
 impl StagedFile {
@@ -305,10 +307,13 @@ impl StagedFile {
             return existing.clone();
         }
         let managed = mods_dir.join(managed_base);
+        let effective_name = self.target_filename.as_deref().unwrap_or(&self.filename);
         if self.is_script() {
-            managed.join(&self.filename)
+            managed.join(effective_name)
+        } else if let Some(parent) = self.rel_path.parent() {
+            managed.join(parent).join(effective_name)
         } else {
-            managed.join(&self.rel_path)
+            managed.join(effective_name)
         }
     }
 }
@@ -413,11 +418,45 @@ pub fn calculate_conflicts(
             size,
             conflict,
             existing_dest,
+            target_filename: None,
         });
     }
 
     if staged_files.is_empty() {
         return Err(InstallerError::NoUsefulFiles);
+    }
+
+    // Detecta e resolve antecipadamente colisões de destino na mesma fila
+    // Especialmente .ts4script de autores diferentes ou arquivos com mesmo caminho relativo
+    let mut script_counts: HashMap<String, usize> = HashMap::new();
+    for f in &staged_files {
+        if f.is_script() && f.existing_dest.is_none() {
+            *script_counts.entry(f.filename.to_lowercase()).or_default() += 1;
+        }
+    }
+
+    let mut dest_counts: HashMap<PathBuf, usize> = HashMap::new();
+    for f in &mut staged_files {
+        if f.is_script() && f.existing_dest.is_none() {
+            if let Some(&count) = script_counts.get(&f.filename.to_lowercase()) {
+                if count > 1 {
+                    // Há múltiplos scripts com o mesmo nome na fila: prefixa a identidade do mod para desambiguar
+                    let namespaced = format!("{}_{}", f.mod_root, f.filename);
+                    f.target_filename = Some(namespaced);
+                }
+            }
+        }
+
+        let dest = f.destination(mods_dir, MANAGED_BASE_DIR);
+        let count = dest_counts.entry(dest).or_default();
+        *count += 1;
+        if *count > 1 && f.existing_dest.is_none() {
+            let stem = Path::new(&f.filename).file_stem().and_then(|s| s.to_str()).unwrap_or("mod");
+            let ext = Path::new(&f.filename).extension().and_then(|e| e.to_str()).unwrap_or("");
+            let dot_ext = if ext.is_empty() { String::new() } else { format!(".{}", ext) };
+            let unique_name = format!("{}_{}{}", stem, count, dot_ext);
+            f.target_filename = Some(unique_name);
+        }
     }
 
     Ok(ConflictReport {
@@ -526,22 +565,55 @@ pub fn collect_dependencies(staged: &[StagedFile]) -> Vec<String> {
     encontradas
 }
 
-/// Copia de forma atômica usando um arquivo temporário no mesmo diretório de destino.
-/// Garante que interrupções ou erros não deixem arquivos parciais corrompidos no destino.
+/// Copia de forma atômica usando criação exclusiva de arquivo temporário (.s4tmp)
+/// no mesmo diretório de destino. Protege contra symlinks, colisões e escritas parciais.
 pub fn atomic_copy(src: &Path, dest: &Path) -> io::Result<()> {
     let parent = dest.parent().ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidInput, "Destino sem pasta pai")
     })?;
     fs::create_dir_all(parent)?;
     let filename = dest.file_name().unwrap_or_default().to_string_lossy();
-    let tmp_dest = unique_dest_path(parent, &format!(".{}.s4tmp", filename));
 
-    if let Err(e) = fs::copy(src, &tmp_dest) {
-        let _ = fs::remove_file(&tmp_dest);
-        return Err(e);
-    }
+    // Criação exclusiva de arquivo temporário com create_new para evitar condições de corrida
+    let mut counter = 0;
+    let (mut tmp_file, tmp_dest) = loop {
+        let candidate_name = if counter == 0 {
+            format!(".{}.s4tmp", filename)
+        } else {
+            format!(".{}_{}.s4tmp", filename, counter)
+        };
+        let candidate = parent.join(candidate_name);
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(f) => break (f, candidate),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                counter += 1;
+            }
+            Err(e) => return Err(e),
+        }
+    };
 
-    if let Err(e) = fs::rename(&tmp_dest, dest) {
+    let copy_res = (|| -> io::Result<()> {
+        let mut src_file = File::open(src)?;
+        io::copy(&mut src_file, &mut tmp_file)?;
+        tmp_file.sync_all()?;
+        drop(tmp_file);
+
+        // Se o destino for um symlink, removemos o link antes do rename para evitar substituir alvo externo
+        if let Ok(meta) = fs::symlink_metadata(dest) {
+            if meta.file_type().is_symlink() {
+                let _ = fs::remove_file(dest);
+            }
+        }
+
+        fs::rename(&tmp_dest, dest)?;
+        Ok(())
+    })();
+
+    if let Err(e) = copy_res {
         let _ = fs::remove_file(&tmp_dest);
         return Err(e);
     }

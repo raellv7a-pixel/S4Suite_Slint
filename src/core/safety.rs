@@ -226,6 +226,12 @@ pub fn safe_remove_dir_all(target: &Path, allowed_roots: &[PathBuf]) -> Result<(
     }
     Ok(())
 }
+/// Verifica se o caminho existe no sistema de arquivos, seja como arquivo regular, diretório
+/// ou link simbólico (mesmo que quebrado/órfão).
+pub fn path_exists_or_symlink(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok()
+}
+
 pub fn unique_dest_path(dest_dir: &Path, filename: &str) -> PathBuf {
     // Garante que o filename não contenha componentes de traversal que escapem do dest_dir
     let clean_filename = Path::new(filename)
@@ -233,7 +239,7 @@ pub fn unique_dest_path(dest_dir: &Path, filename: &str) -> PathBuf {
         .and_then(|s| s.to_str())
         .unwrap_or(filename);
     let base_path = dest_dir.join(clean_filename);
-    if !base_path.exists() {
+    if !path_exists_or_symlink(&base_path) {
         return base_path;
     }
 
@@ -244,7 +250,7 @@ pub fn unique_dest_path(dest_dir: &Path, filename: &str) -> PathBuf {
     let mut counter = 1;
     loop {
         let candidate = dest_dir.join(format!("{}_{}{}", stem, counter, dot_ext));
-        if !candidate.exists() {
+        if !path_exists_or_symlink(&candidate) {
             return candidate;
         }
         counter += 1;
