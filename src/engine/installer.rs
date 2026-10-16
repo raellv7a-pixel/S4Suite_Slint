@@ -59,7 +59,11 @@ pub fn install_identity_name(path: &Path) -> String {
 /// Um arquivo só é instalável se for `.package` ou `.ts4script` e não for
 /// resíduo de sistema de arquivos (`._foo`, `.DS_Store`).
 pub fn is_valid_mod_file(filename: &str) -> bool {
-    if filename.starts_with("._") || filename.eq_ignore_ascii_case(".DS_Store") {
+    if filename.starts_with("._")
+        || filename.starts_with('.')
+        || filename.ends_with(".s4tmp")
+        || filename.eq_ignore_ascii_case(".DS_Store")
+    {
         return false;
     }
     let lower = filename.to_lowercase();

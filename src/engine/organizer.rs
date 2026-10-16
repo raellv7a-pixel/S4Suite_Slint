@@ -166,7 +166,7 @@ pub fn transfer_items(
 
         let result = match mode {
             TransferMode::Copy => copy_recursive(src, &dest),
-            TransferMode::Move => move_entry(src, &dest),
+            TransferMode::Move => move_entry(src, &dest, mods_dir),
         };
 
         match result {
@@ -184,21 +184,45 @@ pub fn transfer_items(
 /// `fs::rename` só funciona dentro do mesmo sistema de arquivos. A pasta `Mods`
 /// costuma estar num disco separado do resto, então caímos para copiar-e-apagar
 /// quando ele recusa.
-fn move_entry(src: &Path, dest: &Path) -> io::Result<()> {
+fn move_entry(src: &Path, dest: &Path, mods_dir: &Path) -> io::Result<()> {
     match fs::rename(src, dest) {
         Ok(()) => Ok(()),
         Err(_) => {
             copy_recursive(src, dest)?;
-            if src.is_dir() {
-                fs::remove_dir_all(src)
+            let allowed_roots = [mods_dir.to_path_buf()];
+            let is_symlink = fs::symlink_metadata(src)
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false);
+            if is_symlink {
+                safe_remove_file(src, &allowed_roots)
+                    .map_err(|e| io::Error::new(io::ErrorKind::PermissionDenied, e.to_string()))?;
+            } else if src.is_dir() {
+                safe_remove_dir_all(src, &allowed_roots)
+                    .map_err(|e| io::Error::new(io::ErrorKind::PermissionDenied, e.to_string()))?;
             } else {
-                fs::remove_file(src)
+                safe_remove_file(src, &allowed_roots)
+                    .map_err(|e| io::Error::new(io::ErrorKind::PermissionDenied, e.to_string()))?;
             }
+            Ok(())
         }
     }
 }
 
 fn copy_recursive(src: &Path, dest: &Path) -> io::Result<()> {
+    let is_symlink = fs::symlink_metadata(src)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false);
+    if is_symlink {
+        #[cfg(unix)]
+        {
+            let target = fs::read_link(src)?;
+            if let Some(parent) = dest.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let _ = fs::remove_file(dest);
+            return std::os::unix::fs::symlink(&target, dest);
+        }
+    }
     if src.is_file() {
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent)?;
@@ -496,7 +520,7 @@ pub fn remove_files(files: &[PathBuf], allowed_roots: &[PathBuf]) -> RemovalOutc
 }
 
 pub fn find_junk_files(mods_dir: &Path) -> Vec<PathBuf> {
-    let junk_exts = ["txt", "url", "png", "jpg", "jpeg", "db"];
+    let junk_exts = ["txt", "url", "png", "jpg", "jpeg", "db", "s4tmp"];
     let mut junk = Vec::new();
 
     for entry in walk_user_mods(mods_dir, usize::MAX) {
