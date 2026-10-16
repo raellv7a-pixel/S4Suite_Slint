@@ -478,3 +478,36 @@ fn painel_de_desativados_ignora_as_pastas_internas() {
     assert_eq!(lista.len(), 1);
     assert_eq!(lista[0].name, "real.package");
 }
+
+#[test]
+fn falha_na_copia_em_transferencia_preserva_origem_e_limpa_destino_parcial() {
+    let fx = Fixture::new();
+    let origem = fx.mods_dir.join("Origem/mod.package");
+    write_file(&origem, b"DADOS_ORIGINAIS_PRESERVADOS");
+
+    let destino_pasta = fx.mods_dir.join("DestinoBloqueado");
+    fs::create_dir_all(&destino_pasta).unwrap();
+    let mut perms = fs::metadata(&destino_pasta).unwrap().permissions();
+    perms.set_readonly(true);
+    fs::set_permissions(&destino_pasta, perms).unwrap();
+
+    let outcome = s4suite::engine::organizer::transfer_items(
+        &[origem.clone()],
+        &destino_pasta,
+        s4suite::engine::organizer::TransferMode::Move,
+        &fx.mods_dir,
+    ).unwrap();
+
+    assert_eq!(outcome.done, 0);
+    assert_eq!(outcome.failures.len(), 1);
+
+    // Origem DEVE continuar intacta
+    assert!(origem.exists(), "origem deve permanecer intacta após falha na transferência");
+    assert_eq!(fs::read(&origem).unwrap(), b"DADOS_ORIGINAIS_PRESERVADOS");
+
+    // Nenhum arquivo temporário .s4tmp na pasta Mods
+    for entry in walkdir::WalkDir::new(&fx.mods_dir).into_iter().filter_map(|e| e.ok()) {
+        let n = entry.file_name().to_string_lossy();
+        assert!(!n.ends_with(".s4tmp"), "nenhum .s4tmp deve sobrar: {}", entry.path().display());
+    }
+}

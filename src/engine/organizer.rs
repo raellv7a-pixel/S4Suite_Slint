@@ -188,7 +188,15 @@ fn move_entry(src: &Path, dest: &Path, mods_dir: &Path) -> io::Result<()> {
     match fs::rename(src, dest) {
         Ok(()) => Ok(()),
         Err(_) => {
-            copy_recursive(src, dest)?;
+            if let Err(e) = copy_recursive(src, dest) {
+                // Se a cópia falhar, limpa o destino parcial e preserva a origem intacta
+                if dest.is_dir() {
+                    let _ = fs::remove_dir_all(dest);
+                } else {
+                    let _ = fs::remove_file(dest);
+                }
+                return Err(e);
+            }
             let allowed_roots = [mods_dir.to_path_buf()];
             let is_symlink = fs::symlink_metadata(src)
                 .map(|m| m.file_type().is_symlink())
@@ -224,10 +232,7 @@ fn copy_recursive(src: &Path, dest: &Path) -> io::Result<()> {
         }
     }
     if src.is_file() {
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::copy(src, dest)?;
+        crate::engine::installer::atomic_copy(src, dest)?;
         return Ok(());
     }
 

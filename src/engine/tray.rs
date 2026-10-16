@@ -395,7 +395,7 @@ pub fn import_tray_item(
     let mut execute_moves = || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         for file_entry in &analysis.tray_files {
             let dest = unique_dest_path(tray_dir, &file_entry.rel_name);
-            fs::copy(&file_entry.src_path, &dest)?;
+            crate::engine::installer::atomic_copy(&file_entry.src_path, &dest)?;
             moved_files.push((file_entry.src_path.clone(), dest));
             tray_installed += 1;
         }
@@ -406,7 +406,7 @@ pub fn import_tray_item(
                 continue;
             }
             let dest = unique_dest_path(&dest_mods_folder, &file_entry.rel_name);
-            fs::copy(&file_entry.src_path, &dest)?;
+            crate::engine::installer::atomic_copy(&file_entry.src_path, &dest)?;
             moved_files.push((file_entry.src_path.clone(), dest));
             cc_installed += 1;
         }
@@ -415,9 +415,16 @@ pub fn import_tray_item(
     };
 
     if let Err(e) = execute_moves() {
-        // Rollback
+        let mut rollback_errors = Vec::new();
         for (_, created_dest) in moved_files {
-            let _ = safe_remove_file(&created_dest, allowed_roots);
+            if created_dest.exists() {
+                if let Err(err) = safe_remove_file(&created_dest, allowed_roots) {
+                    rollback_errors.push(format!("{}: {}", created_dest.display(), err));
+                }
+            }
+        }
+        if !rollback_errors.is_empty() {
+            return Err(format!("Falha na importação: {}. Erros adicionais no rollback: {}", e, rollback_errors.join("; ")).into());
         }
         return Err(e);
     }

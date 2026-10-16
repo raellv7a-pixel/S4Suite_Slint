@@ -274,3 +274,48 @@ fn destino_padrao_e_uma_subpasta_com_o_nome_do_item() {
     );
     assert!(!c.skipped, "um item recém-analisado entra na fila para importar");
 }
+
+#[test]
+fn falha_durante_importacao_de_tray_executa_rollback_sem_arquivos_parciais() {
+    let fx = Fixture::new();
+    let zip = fx.downloads.join("SimMisto.zip");
+    make_zip(
+        &zip,
+        &[
+            ("sim.trayitem", b"<N>Maria Silva</N>".to_vec()),
+            ("sim.hhi", b"hhi_conteudo".to_vec()),
+            ("cabelo.package", package_bytes("cabelo_cc")),
+        ],
+    );
+
+    let (candidatos, _) = prepare_tray_candidates(&[zip], &fx.work_dir, None).unwrap();
+    assert_eq!(candidatos.len(), 1);
+
+    // Provoca falha no destino de CC tornando o diretório somente leitura
+    let cc_folder = fx.mods_dir.join("Imported_Sims/Maria Silva");
+    fs::create_dir_all(&cc_folder).unwrap();
+    let mut perms = fs::metadata(&cc_folder).unwrap().permissions();
+    perms.set_readonly(true);
+    fs::set_permissions(&cc_folder, perms).unwrap();
+    let res = import_tray_item(
+        &candidatos[0].analysis,
+        &fx.tray_dir,
+        &cc_folder,
+        &[fx.tray_dir.clone(), fx.mods_dir.clone()],
+    );
+
+    assert!(res.is_err(), "deve falhar ao encontrar colisão");
+
+    // Nenhum arquivo do Tray deve sobrar em fx.tray_dir após o rollback
+    let tray_files: Vec<_> = fs::read_dir(&fx.tray_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert!(tray_files.is_empty(), "arquivos de tray devem sofrer rollback completo: {:?}", tray_files);
+
+    // Nenhum arquivo .s4tmp deve permanecer
+    for entry in walkdir::WalkDir::new(&fx.mods_dir).into_iter().filter_map(|e| e.ok()) {
+        let n = entry.file_name().to_string_lossy();
+        assert!(!n.ends_with(".s4tmp"), "nenhum .s4tmp deve sobrar: {}", entry.path().display());
+    }
+}
