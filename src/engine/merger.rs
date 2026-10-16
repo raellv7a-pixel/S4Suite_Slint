@@ -30,7 +30,7 @@ pub struct OriginalSnapshot {
     path: PathBuf,
     metadata: fs::Metadata,
     sha256: [u8; 32],
-    outputs: Arc<Vec<(PathBuf, [u8; 32])>>,
+    outputs: Arc<Vec<(PathBuf, [u8; 32], fs::Metadata)>>,
 }
 pub struct MergeTask {
     pub input_files: Vec<PathBuf>,
@@ -267,7 +267,9 @@ where
     for ((_, final_path), hash) in pending_chunks.iter().zip(hashes) {
         let name = final_path.file_name().ok_or("invalid output name")?;
         let path = task.output_dir.join(name);
-        outputs.push((path.clone(), hash));
+        let file = output_dir.open_regular(name)?;
+        let meta = file.metadata()?;
+        outputs.push((path.clone(), hash, meta));
         output_packages.push(path.display().to_string());
     }
     let outputs = Arc::new(outputs);
@@ -290,11 +292,41 @@ where
     let tmp_report = workspace.path().join(&report_name);
     let json = serde_json::to_vec_pretty(&report)?;
     fs::write(&tmp_report, json)?;
-    workspace_dir.publish_noreplace(
+    let report_publish_res = workspace_dir.publish_noreplace(
         OsStr::new(&report_name),
         &output_dir,
         OsStr::new(&report_name),
-    )?;
+    );
+    if let Err(error) = report_publish_res {
+        // Rollback das partes DBPF já publicadas: evita que partes órfãs ativas
+        // sobrevivam no diretório de saída sem relatório JSON correspondente.
+        let mut rollback_failures = Vec::new();
+        for (_, final_path) in pending_chunks.iter().rev() {
+            if let Some(name) = final_path.file_name() {
+                let recovery_name = format!("rollback-part-{}", name.to_string_lossy());
+                if let Err(rb_err) =
+                    output_dir.publish_noreplace(name, &workspace_dir, OsStr::new(&recovery_name))
+                {
+                    rollback_failures.push(format!("{}: {rb_err}", final_path.display()));
+                }
+            }
+        }
+        if rollback_failures.is_empty() {
+            let _ = workspace.close();
+            return Err(format!(
+                "Falha na publicação do relatório ({error}); partes publicadas sofreram rollback com sucesso"
+            )
+            .into());
+        } else {
+            let recovery = workspace.keep();
+            return Err(format!(
+                "Falha na publicação do relatório ({error}); rollback parcial das partes falhou: {}; arquivos preservados em {}",
+                rollback_failures.join("; "),
+                recovery.display()
+            )
+            .into());
+        }
+    }
     output_dir.sync_all()?;
     workspace.close()?;
 
@@ -649,6 +681,38 @@ struct CapturedOriginal<'a> {
     staged: bool,
 }
 
+fn verify_published_outputs(outputs: &[(PathBuf, [u8; 32], fs::Metadata)]) -> io::Result<()> {
+    for (path, expected_hash, expected_meta) in outputs {
+        let (_, mut file) = open_original(path).map_err(|e| {
+            io::Error::other(format!(
+                "Package publicado '{}' não pôde ser verificado no caminho de saída: {e}",
+                path.display()
+            ))
+        })?;
+        let current_meta = file.metadata()?;
+        if !same_file_identity(expected_meta, &current_meta) {
+            return Err(io::Error::other(format!(
+                "Package publicado '{}' foi desvinculado ou substituído no caminho de saída",
+                path.display()
+            )));
+        }
+        if !unchanged_metadata(expected_meta, &current_meta) {
+            return Err(io::Error::other(format!(
+                "Package publicado '{}' teve metadados modificados no caminho de saída",
+                path.display()
+            )));
+        }
+        let current_hash = hash_reader(&mut file)?;
+        if current_hash != *expected_hash {
+            return Err(io::Error::other(format!(
+                "Package publicado '{}' teve conteúdo alterado",
+                path.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn post_merge_transaction(
     action: PostMergeAction,
     report: &MergeReport,
@@ -656,6 +720,26 @@ fn post_merge_transaction(
     input_root: &Path,
     disabled_mgr: &DisabledManager,
     after_validation: impl FnOnce() -> io::Result<()>,
+) -> io::Result<PostMergeOutcome> {
+    post_merge_transaction_with(
+        action,
+        report,
+        originals,
+        input_root,
+        disabled_mgr,
+        after_validation,
+        |_, _| Ok(()),
+    )
+}
+
+pub(crate) fn post_merge_transaction_with(
+    action: PostMergeAction,
+    report: &MergeReport,
+    originals: &[PathBuf],
+    input_root: &Path,
+    disabled_mgr: &DisabledManager,
+    after_validation: impl FnOnce() -> io::Result<()>,
+    mut before_original_action: impl FnMut(usize, &Path) -> io::Result<()>,
 ) -> io::Result<PostMergeOutcome> {
     if !report.success
         || report.partial
@@ -689,7 +773,7 @@ fn post_merge_transaction(
         || !outputs
             .iter()
             .zip(&report.output_packages)
-            .all(|((path, _), expected)| path.to_string_lossy() == *expected)
+            .all(|((path, _, _), expected)| path.to_string_lossy() == *expected)
         || !report
             .original_snapshots
             .iter()
@@ -703,15 +787,22 @@ fn post_merge_transaction(
     let _operation_lock = root.lock_exclusive()?;
     let normalized_root = crate::core::safety::normalize_path(input_root);
     let mut output_leases = Vec::new();
-    for (path, expected_hash) in outputs.iter() {
+    for (path, expected_hash, expected_meta) in outputs.iter() {
         let (_, file) = open_original(path)?;
         let mut lease = ReadLease::acquire(file)?;
+        if !same_file_identity(expected_meta, &lease.file.metadata()?) {
+            return Err(io::Error::other(format!(
+                "Package publicado '{}' foi substituído antes da aquisição da lease",
+                path.display()
+            )));
+        }
         if hash_reader(&mut lease.file)? != *expected_hash {
             return Err(io::Error::other("Parte publicada ausente ou modificada"));
         }
         lease.check()?;
         output_leases.push(lease);
     }
+    verify_published_outputs(outputs)?;
     let mut captured = Vec::new();
     for (index, evidence) in report.original_snapshots.iter().enumerate() {
         let normalized = crate::core::safety::normalize_path(&evidence.path);
@@ -774,6 +865,7 @@ fn post_merge_transaction(
                 ));
             }
         }
+        verify_published_outputs(outputs)?;
         for lease in &output_leases {
             lease.check()?;
         }
@@ -786,7 +878,9 @@ fn post_merge_transaction(
                 |_| Ok(()),
             )?);
         }
-        for original in &mut captured {
+        for (idx, original) in captured.iter_mut().enumerate() {
+            before_original_action(idx, &original.evidence.path)?;
+            verify_published_outputs(outputs)?;
             for lease in &output_leases {
                 lease.check()?;
             }
@@ -839,28 +933,46 @@ fn post_merge_transaction(
     })();
     if let Err(error) = result {
         let mut failures = Vec::new();
+        let mut restored_count = 0;
         for original in captured.iter_mut().rev().filter(|o| o.staged) {
             let name = original
                 .evidence
                 .path
                 .file_name()
                 .expect("validated original name");
-            if let Err(restore) = quarantine_dir.publish_noreplace(
+            match quarantine_dir.publish_noreplace(
                 OsStr::new(&original.staged_name),
                 &original.parent,
                 name,
             ) {
-                failures.push(format!("{}: {restore}", original.evidence.path.display()));
+                Ok(()) => {
+                    restored_count += 1;
+                }
+                Err(restore) => {
+                    failures.push(format!("{}: {restore}", original.evidence.path.display()));
+                }
             }
         }
         outcome.failed = originals.len().saturating_sub(outcome.affected);
         if failures.is_empty() {
-            outcome.error = Some(error.to_string());
+            if outcome.affected > 0 {
+                outcome.error = Some(format!(
+                    "Falha parcial durante pós-ação: {} arquivo(s) foram processados irreversivelmente antes do erro; {} arquivo(s) restantes foram restaurados da quarentena; erro: {error}",
+                    outcome.affected,
+                    restored_count
+                ));
+            } else {
+                outcome.error = Some(format!(
+                    "Ação pós-merge abortada; originais restaurados: {error}"
+                ));
+            }
             quarantine.close()?;
         } else {
             let recovery = quarantine.keep();
             outcome.error = Some(format!(
-                "{error}; restauração falhou: {}; arquivos preservados em {}",
+                "Falha na pós-ação ({error}); {} arquivo(s) processados irreversivelmente; restauração de {} arquivo(s) falhou: {}; arquivos preservados em {}",
+                outcome.affected,
+                failures.len(),
                 failures.join("; "),
                 recovery.display()
             ));
@@ -1278,6 +1390,48 @@ mod tests {
     }
 
     #[test]
+    fn p0_published_package_unlink_or_rename_after_validation_blocks_destructive_action() {
+        for is_unlink in [true, false] {
+            let (temp, source, _, report) = post_fixture();
+            let source_expected = hash_file(&source);
+            let published_pkg = PathBuf::from(&report.output_packages[0]);
+            let rogue = temp.path().join("rogue.package");
+            fs::write(&rogue, b"rogue unverified content").unwrap();
+
+            let outcome = post_merge_transaction(
+                PostMergeAction::Delete,
+                &report,
+                &[source.clone()],
+                temp.path(),
+                &DisabledManager::new(&temp.path().join("config")),
+                || {
+                    if is_unlink {
+                        fs::remove_file(&published_pkg)?;
+                    } else {
+                        fs::rename(&rogue, &published_pkg)?;
+                    }
+                    Ok(())
+                },
+            )
+            .unwrap();
+
+            assert!(
+                outcome.error.is_some(),
+                "is_unlink={is_unlink}: a pós-ação destrutiva DEVE ser bloqueada se o package publicado foi alterado no diretório"
+            );
+            assert_eq!(
+                outcome.affected, 0,
+                "is_unlink={is_unlink}: nenhum original pode ser apagado"
+            );
+            assert_eq!(
+                hash_file(&source),
+                source_expected,
+                "is_unlink={is_unlink}: o arquivo original DEVE ser preservado intacto"
+            );
+        }
+    }
+
+    #[test]
     fn p0_mutation_during_original_capture_is_rejected() {
         let temp = tempdir().unwrap();
         let path = temp.path().join("source.package");
@@ -1320,5 +1474,123 @@ mod tests {
             hash_reader(&mut zip.by_index(0).unwrap()).unwrap(),
             expected
         );
+    }
+
+    #[test]
+    fn p0_report_publication_failure_rolls_back_published_parts() {
+        let fx = post_fixture();
+        let (temp, source, _, _) = fx;
+        let out_dir = temp.path().join("output_report_fail");
+        fs::create_dir_all(&out_dir).unwrap();
+        let task = MergeTask {
+            input_files: vec![source.clone()],
+            output_dir: out_dir.clone(),
+            max_size_bytes: 1_000_000,
+            name: Some("ReportFail".into()),
+        };
+        let collision = out_dir.join("ReportFail_Merged_report.json");
+        let res = merge_sims4_packages(&task, |cur, total, label| {
+            if label.starts_with("Processando") && cur == total {
+                fs::write(&collision, b"colisao_concorrente_no_relatorio").unwrap();
+            }
+        });
+        assert!(
+            res.is_err(),
+            "merge deve falhar se o relatório não puder ser publicado"
+        );
+        let err_msg = res.unwrap_err().to_string();
+        assert!(err_msg.contains("Falha na publicação do relatório"));
+        assert_eq!(
+            fs::read(&collision).unwrap(),
+            b"colisao_concorrente_no_relatorio",
+            "arquivo de colisão deve ser preservado"
+        );
+        let active_parts: Vec<_> = fs::read_dir(&out_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".package"))
+            .collect();
+        assert!(
+            active_parts.is_empty(),
+            "nenhuma parte DBPF deve sobrar ativa no diretório se o relatório falhou: {active_parts:?}"
+        );
+    }
+
+    #[test]
+    fn p0_sequential_deletion_failure_does_not_claim_full_rollback() {
+        let temp = tempdir().unwrap();
+        let mut sources = Vec::new();
+        let mut hashes = Vec::new();
+        for i in 1..=3 {
+            let s = temp.path().join(format!("orig_{i}.package"));
+            let resource = PackageResource {
+                key: ResourceKey {
+                    type_id: 1,
+                    group_id: 0,
+                    instance_ex: 0,
+                    instance_low: i as u32,
+                },
+                data: vec![i as u8; 30],
+                mem_size: 30,
+                compressed: 0,
+            };
+            DBPFWriter::write_package(&mut File::create(&s).unwrap(), &[resource]).unwrap();
+            hashes.push(hash_file(&s));
+            sources.push(s);
+        }
+        let report = merge_sims4_packages(
+            &MergeTask {
+                input_files: sources.clone(),
+                output_dir: temp.path().join("output"),
+                max_size_bytes: 1_000_000,
+                name: Some("SeqFail".into()),
+            },
+            |_, _, _| {},
+        )
+        .unwrap();
+
+        let outcome = post_merge_transaction_with(
+            PostMergeAction::Delete,
+            &report,
+            &sources,
+            temp.path(),
+            &DisabledManager::new(&temp.path().join("config")),
+            || Ok(()),
+            |idx, _path| {
+                if idx == 1 {
+                    return Err(io::Error::other("falha_injetada_no_segundo_arquivo"));
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            outcome.affected, 1,
+            "o primeiro arquivo foi irreversivelmente excluído"
+        );
+        assert_eq!(
+            outcome.failed, 2,
+            "os outros dois arquivos falharam em ser concluídos"
+        );
+        let err = outcome.error.expect("deve registrar o erro");
+        assert!(
+            err.contains("Falha parcial durante pós-ação"),
+            "erro DEVE declarar falha parcial e não rollback integral: {err}"
+        );
+        assert!(err.contains("1 arquivo(s) foram processados irreversivelmente"));
+        assert!(err.contains("2 arquivo(s) restantes foram restaurados da quarentena"));
+
+        assert!(!sources[0].exists(), "arquivo 1 foi excluído");
+        assert!(
+            sources[1].exists(),
+            "arquivo 2 foi restaurado da quarentena"
+        );
+        assert_eq!(hash_file(&sources[1]), hashes[1]);
+        assert!(
+            sources[2].exists(),
+            "arquivo 3 foi restaurado da quarentena"
+        );
+        assert_eq!(hash_file(&sources[2]), hashes[2]);
     }
 }
