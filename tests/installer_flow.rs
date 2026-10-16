@@ -645,3 +645,82 @@ fn unique_dest_path_e_atomic_copy_protegidos_contra_symlinks_quebrados() {
         assert!(!arquivo_inexistente.exists(), "alvo inexistente não deve ter sido criado fora");
     }
 }
+
+#[test]
+fn atomic_copy_bloqueia_escrita_atraves_de_symlink_ancestral() {
+    let fx = Fixture::new();
+    let pasta_externa = fx._root.path().join("PastaExterna");
+    fs::create_dir_all(&pasta_externa).unwrap();
+
+    let pasta_link = fx.mods_dir.join("LinkAncestral");
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&pasta_externa, &pasta_link).unwrap();
+        assert!(fs::symlink_metadata(&pasta_link).is_ok());
+
+        let fonte = fx.downloads.join("teste.txt");
+        fs::write(&fonte, b"conteudo_de_teste").unwrap();
+
+        // Tenta gravar arquivo dentro da pasta que é um link simbólico para fora
+        let destino_escapando = pasta_link.join("arquivo_escapando.txt");
+        let res = s4suite::engine::installer::atomic_copy(&fonte, &destino_escapando);
+        assert!(res.is_err(), "atomic_copy deve recusar escrever através de symlink ancestral");
+
+        let err = res.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(!pasta_externa.join("arquivo_escapando.txt").exists(), "nenhum arquivo pode ser escrito na pasta externa");
+    }
+}
+
+#[test]
+fn prepare_staging_isola_fontes_diferentes_com_mesma_identidade() {
+    let fx = Fixture::new();
+
+    // Duas fontes em diretórios diferentes, ambas chamadas mod.zip
+    let dir_a = fx.downloads.join("DirA");
+    let dir_b = fx.downloads.join("DirB");
+    fs::create_dir_all(&dir_a).unwrap();
+    fs::create_dir_all(&dir_b).unwrap();
+
+    let zip_a = dir_a.join("mod.zip");
+    let zip_b = dir_b.join("mod.zip");
+    make_zip(&zip_a, &[("conteudo_a.package", package_bytes("payload_a"))]);
+    make_zip(&zip_b, &[("conteudo_b.package", package_bytes("payload_b"))]);
+
+    let rep = prepare_staging(&[zip_a, zip_b], &fx.staging()).unwrap();
+    assert_eq!(rep.prepared, 2);
+    assert!(rep.failures.is_empty());
+
+    // As duas fontes não podem ter colidido no mesmo diretório de staging
+    assert!(fx.staging().join("mod/conteudo_a.package").exists(), "fonte A deve estar preservada");
+    assert!(fx.staging().join("mod_1/conteudo_b.package").exists(), "fonte B deve estar isolada em mod_1");
+
+    let report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
+    assert_eq!(report.staged_files.len(), 2);
+
+    // Destinos finais não devem colidir
+    let dest_a = report.staged_files[0].destination(&fx.mods_dir, MANAGED_BASE_DIR);
+    let dest_b = report.staged_files[1].destination(&fx.mods_dir, MANAGED_BASE_DIR);
+    assert_ne!(dest_a, dest_b, "destinos devem ser isolados em pastas de triagem distintas");
+}
+
+#[test]
+fn fila_com_destinos_colidentes_ou_ja_existentes_garante_unicidade() {
+    let fx = Fixture::new();
+
+    // Arquivo existente em 00_Triagem_Novos
+    let preexistente = fx.managed().join("Autor_Mod/item.package");
+    write_file(&preexistente, b"item_preexistente_no_disco");
+
+    // Instalando novo mod com o mesmo caminho relativo que colidiria
+    let zip = fx.downloads.join("Autor_Mod.zip");
+    make_zip(&zip, &[("item.package", package_bytes("novo_item"))]);
+
+    prepare_staging(&[zip], &fx.staging()).unwrap();
+    let report = calculate_conflicts(&fx.staging(), &fx.mods_dir).unwrap();
+
+    assert_eq!(report.staged_files.len(), 1);
+    // Deve ser atualização segura ou receber destino desambiguado sem substituir silenciosamente
+    let dest = report.staged_files[0].destination(&fx.mods_dir, MANAGED_BASE_DIR);
+    assert!(dest.starts_with(&fx.mods_dir));
+}

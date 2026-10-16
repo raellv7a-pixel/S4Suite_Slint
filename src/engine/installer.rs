@@ -204,13 +204,12 @@ pub fn prepare_staging(
     let mut report = StagingReport::default();
 
     for source in sources {
-        let identity = install_identity_name(source);
-        let dest = staging_dir.join(&identity);
+        let base_identity = install_identity_name(source);
+        let dest = crate::core::safety::unique_dest_path(staging_dir, &base_identity);
         let label = source
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| source.display().to_string());
-
         let outcome = if is_archive(source) {
             extract_archive_to_staging(source, &dest).map(|_| ())
         } else {
@@ -336,9 +335,9 @@ pub fn calculate_conflicts(
     mods_dir: &Path,
 ) -> Result<ConflictReport, InstallerError> {
     let mut staged_files = Vec::new();
-    let mut exact_matches = 0;
-    let mut updates = 0;
-    let mut new_files = 0;
+    let mut exact_matches: usize = 0;
+    let mut updates: usize = 0;
+    let mut new_files: usize = 0;
 
     // O staging e os backups moram dentro de Mods. Sem excluí-los aqui, os
     // arquivos recém-extraídos apareceriam como "já instalados" e toda a fila
@@ -435,7 +434,7 @@ pub fn calculate_conflicts(
         }
     }
 
-    let mut dest_counts: HashMap<PathBuf, usize> = HashMap::new();
+    let mut assigned_destinations: HashSet<PathBuf> = HashSet::new();
     for f in &mut staged_files {
         if f.is_script() && f.existing_dest.is_none() {
             if let Some(&count) = script_counts.get(&f.filename.to_lowercase()) {
@@ -447,16 +446,39 @@ pub fn calculate_conflicts(
             }
         }
 
-        let dest = f.destination(mods_dir, MANAGED_BASE_DIR);
-        let count = dest_counts.entry(dest).or_default();
-        *count += 1;
-        if *count > 1 && f.existing_dest.is_none() {
-            let stem = Path::new(&f.filename).file_stem().and_then(|s| s.to_str()).unwrap_or("mod");
-            let ext = Path::new(&f.filename).extension().and_then(|e| e.to_str()).unwrap_or("");
-            let dot_ext = if ext.is_empty() { String::new() } else { format!(".{}", ext) };
-            let unique_name = format!("{}_{}{}", stem, count, dot_ext);
-            f.target_filename = Some(unique_name);
+        // Se o arquivo é uma atualização aprovada com existing_dest:
+        if let Some(existing) = &f.existing_dest {
+            if assigned_destinations.insert(existing.clone()) {
+                continue;
+            }
+            // Outro arquivo na fila JÁ reivindicou este destino existente:
+            // Desvincula para não substituir silenciosamente o primeiro arquivo
+            f.existing_dest = None;
+            f.conflict = ConflictType::NewFile;
+            updates = updates.saturating_sub(1);
+            new_files += 1;
         }
+
+        // Para arquivos novos (ou atualizações colidentes desvinculadas):
+        // Garante que o destino seja estritamente único na fila E no disco
+        let mut dest = f.destination(mods_dir, MANAGED_BASE_DIR);
+        let mut counter = 1;
+        while assigned_destinations.contains(&dest) || (dest.exists() && f.existing_dest.is_none()) {
+            counter += 1;
+            let base_stem = if let Some(custom) = &f.target_filename {
+                Path::new(custom).file_stem().and_then(|s| s.to_str()).unwrap_or("mod").to_string()
+            } else if f.is_script() {
+                format!("{}_{}", f.mod_root, Path::new(&f.filename).file_stem().and_then(|s| s.to_str()).unwrap_or("script"))
+            } else {
+                Path::new(&f.filename).file_stem().and_then(|s| s.to_str()).unwrap_or("mod").to_string()
+            };
+            let ext = Path::new(&f.filename).extension().and_then(|s| s.to_str()).unwrap_or("");
+            let dot_ext = if ext.is_empty() { String::new() } else { format!(".{}", ext) };
+            let unique_name = format!("{}_{}{}", base_stem, counter, dot_ext);
+            f.target_filename = Some(unique_name);
+            dest = f.destination(mods_dir, MANAGED_BASE_DIR);
+        }
+        assigned_destinations.insert(dest);
     }
 
     Ok(ConflictReport {
@@ -568,6 +590,14 @@ pub fn collect_dependencies(staged: &[StagedFile]) -> Vec<String> {
 /// Copia de forma atômica usando criação exclusiva de arquivo temporário (.s4tmp)
 /// no mesmo diretório de destino. Protege contra symlinks, colisões e escritas parciais.
 pub fn atomic_copy(src: &Path, dest: &Path) -> io::Result<()> {
+    // Impede escrita se qualquer diretório ancestral for link simbólico
+    if crate::core::safety::has_symlink_ancestor(dest) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("Escrita bloqueada por segurança: diretório ancestral de '{}' é um link simbólico", dest.display()),
+        ));
+    }
+
     let parent = dest.parent().ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidInput, "Destino sem pasta pai")
     })?;
@@ -602,13 +632,7 @@ pub fn atomic_copy(src: &Path, dest: &Path) -> io::Result<()> {
         tmp_file.sync_all()?;
         drop(tmp_file);
 
-        // Se o destino for um symlink, removemos o link antes do rename para evitar substituir alvo externo
-        if let Ok(meta) = fs::symlink_metadata(dest) {
-            if meta.file_type().is_symlink() {
-                let _ = fs::remove_file(dest);
-            }
-        }
-
+        // rename atômico substitui dest com segurança sem unlink manual prévio
         fs::rename(&tmp_dest, dest)?;
         Ok(())
     })();

@@ -232,6 +232,20 @@ pub fn path_exists_or_symlink(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok()
 }
 
+/// Verifica se qualquer diretório pai/ancestral de `path` é um link simbólico.
+pub fn has_symlink_ancestor(path: &Path) -> bool {
+    let mut current = path.parent();
+    while let Some(parent) = current {
+        if let Ok(meta) = fs::symlink_metadata(parent) {
+            if meta.file_type().is_symlink() {
+                return true;
+            }
+        }
+        current = parent.parent();
+    }
+    false
+}
+
 pub fn unique_dest_path(dest_dir: &Path, filename: &str) -> PathBuf {
     // Garante que o filename não contenha componentes de traversal que escapem do dest_dir
     let clean_filename = Path::new(filename)
@@ -412,5 +426,26 @@ mod tests {
         let result = unique_dest_path(&dest_dir, "../../escapar.package");
         assert_eq!(result, dest_dir.join("escapar.package"));
         assert!(is_path_inside(&result, &dest_dir));
+    }
+
+    #[test]
+    fn detector_de_symlink_ancestral_identifica_link_em_qualquer_nivel() {
+        let temp = tempdir().unwrap();
+        let base = temp.path().join("Base");
+        let alvo = temp.path().join("Alvo");
+        fs::create_dir_all(&base).unwrap();
+        fs::create_dir_all(&alvo).unwrap();
+
+        let link = base.join("LinkFolder");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&alvo, &link).unwrap();
+
+            let arquivo_no_link = link.join("sub/arquivo.txt");
+            assert!(has_symlink_ancestor(&arquivo_no_link), "deve acusar symlink no ancestral LinkFolder");
+
+            let arquivo_normal = base.join("normal/arquivo.txt");
+            assert!(!has_symlink_ancestor(&arquivo_normal), "pasta normal não deve acusar symlink");
+        }
     }
 }
