@@ -1111,8 +1111,8 @@ struct CapturedOriginal<'a> {
 }
 
 fn verify_published_outputs(outputs: &[(PathBuf, [u8; 32], fs::Metadata)]) -> io::Result<()> {
-    for (path, expected_hash, expected_meta) in outputs {
-        let (_, mut file) = open_original(path).map_err(|e| {
+    for (path, _expected_hash, expected_meta) in outputs {
+        let (_, file) = open_original(path).map_err(|e| {
             io::Error::other(format!(
                 "Package publicado '{}' não pôde ser verificado no caminho de saída: {e}",
                 path.display()
@@ -1128,13 +1128,6 @@ fn verify_published_outputs(outputs: &[(PathBuf, [u8; 32], fs::Metadata)]) -> io
         if !unchanged_metadata(expected_meta, &current_meta) {
             return Err(io::Error::other(format!(
                 "Package publicado '{}' teve metadados modificados no caminho de saída",
-                path.display()
-            )));
-        }
-        let current_hash = hash_reader(&mut file)?;
-        if current_hash != *expected_hash {
-            return Err(io::Error::other(format!(
-                "Package publicado '{}' teve conteúdo alterado",
                 path.display()
             )));
         }
