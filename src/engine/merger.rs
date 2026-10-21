@@ -17,6 +17,19 @@ use std::time::SystemTime;
 /// Mantido como política de compatibilidade; não é prova do limite interno do jogo.
 pub const MAX_SAFE_PACKAGE_SIZE: u64 = 2_147_483_647;
 
+pub const TYPE_CAS_THUMBNAIL: u32 = 0x220557DA;
+pub const TYPE_OBJECT_THUMBNAIL: u32 = 0x0D6E66E5;
+pub const TYPE_OBJECT_LARGE_THUMBNAIL: u32 = 0x5B522BB0;
+pub const TYPE_SIM_THUMBNAIL: u32 = 0xCD87CF8A;
+
+/// Recursos puramente cosméticos de catálogo/ícone compartilhados por arquétipos clonados no TS4.
+pub fn is_thumbnail_resource(type_id: u32) -> bool {
+    matches!(
+        type_id,
+        TYPE_CAS_THUMBNAIL | TYPE_OBJECT_THUMBNAIL | TYPE_OBJECT_LARGE_THUMBNAIL | TYPE_SIM_THUMBNAIL
+    )
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergeReport {
     pub success: bool,
@@ -167,30 +180,35 @@ where
     F: Fn(usize, usize, &str) + Send + Sync,
     H: FnOnce(&Path, &AnchoredDir) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
 {
-    if let Some(path) = task
-        .input_files
-        .iter()
-        .find(|path| MergedPackageManifest::is_s4s_merged_package(path))
-    {
-        return Err(format!(
-            "Entrada já contém manifesto de merge do Sims 4 Studio / S4Suite: {}. Desunifique o package antes de mesclar.",
-            path.display()
-        )
-        .into());
+    let all_premerged = !task.input_files.is_empty()
+        && task.input_files.iter().all(|path| {
+            MergedPackageManifest::is_s4s_merged_package(path)
+                || premerged_marker(path).is_some()
+        });
+    if all_premerged {
+        if let Some(path) = task
+            .input_files
+            .iter()
+            .find(|path| MergedPackageManifest::is_s4s_merged_package(path))
+        {
+            return Err(format!(
+                "Entrada já contém manifesto de merge do Sims 4 Studio / S4Suite: {}. Desunifique o package antes de mesclar.",
+                path.display()
+            )
+            .into());
+        }
+        if let Some((path, marker)) = task
+            .input_files
+            .iter()
+            .find_map(|path| premerged_marker(path).map(|marker| (path, marker)))
+        {
+            return Err(format!(
+                "Entrada suspeita de merge preexistente ({marker}): {}",
+                path.display()
+            )
+            .into());
+        }
     }
-
-    if let Some((path, marker)) = task
-        .input_files
-        .iter()
-        .find_map(|path| premerged_marker(path).map(|marker| (path, marker)))
-    {
-        return Err(format!(
-            "Entrada suspeita de merge preexistente ({marker}): {}",
-            path.display()
-        )
-        .into());
-    }
-
     let output_dir = AnchoredDir::create(&task.output_dir)?;
     let workspace = tempfile::Builder::new()
         .prefix(".s4merge-")
@@ -243,11 +261,19 @@ where
                 match DBPFReader::read_index(&mut reader) {
                     Ok((_header, index)) => {
                         if index.iter().any(|entry| entry.key == S4S_MANIFEST_KEY) {
-                            return Err("Entrada snapshot já contém manifesto de merge".into());
+                            failed_files.push((
+                                fpath.display().to_string(),
+                                "Entrada já contém manifesto de merge do Sims 4 Studio / S4Suite (desunifique antes de mesclar)".into(),
+                            ));
+                            continue;
                         }
                         let unique: HashSet<_> = index.iter().map(|entry| entry.key).collect();
                         if unique.len() != index.len() {
-                            return Err(format!("TGI repetido dentro de {}", fpath.display()).into());
+                            failed_files.push((
+                                fpath.display().to_string(),
+                                "TGI repetido internamente no mesmo package".into(),
+                            ));
+                            continue;
                         }
                         let relative = fpath.strip_prefix(&input_root).unwrap_or(fpath);
                         validate_relative_package_path(relative)?;
@@ -263,14 +289,16 @@ where
                                 compressed: entry.compressed,
                             };
                             if let Some(previous) = global_resources.get(&entry.key) {
-                                if previous.file_size != current.file_size
-                                    || previous.mem_size != current.mem_size
-                                    || previous.compressed != current.compressed
-                                    || !resource_payloads_equal(
-                                        &mut file_cache,
-                                        previous,
-                                        &current,
-                                    )?
+                                let is_thumb = is_thumbnail_resource(entry.key.type_id);
+                                if !is_thumb
+                                    && (previous.file_size != current.file_size
+                                        || previous.mem_size != current.mem_size
+                                        || previous.compressed != current.compressed
+                                        || !resource_payloads_equal(
+                                            &mut file_cache,
+                                            previous,
+                                            &current,
+                                        )?)
                                 {
                                     return Err(format!(
                                         "Colisão de TGI com conteúdo ou metadados diferentes: {} em {} e {}",
@@ -520,10 +548,12 @@ where
                 mem_size: entry.mem_size, compressed: entry.compressed,
             };
             if let Some(previous) = resources.get(&entry.key) {
-                if previous.file_size != current.file_size
-                    || previous.mem_size != current.mem_size
-                    || previous.compressed != current.compressed
-                    || !resource_payloads_equal(&mut readers, previous, &current)?
+                let is_thumb = is_thumbnail_resource(entry.key.type_id);
+                if !is_thumb
+                    && (previous.file_size != current.file_size
+                        || previous.mem_size != current.mem_size
+                        || previous.compressed != current.compressed
+                        || !resource_payloads_equal(&mut readers, previous, &current)?)
                 {
                     return Err(format!("Colisão de TGI divergente no unmerge: {}", entry.key).into());
                 }
@@ -787,7 +817,6 @@ fn snapshot_original_with(
 ) -> io::Result<(OriginalSnapshot, File)> {
     let (_parent, mut source) = open_original(path)?;
     let before = source.metadata()?;
-    let mut snapshot = tempfile::tempfile()?;
     let mut hash = Sha256::new();
     let mut buffer = [0u8; 128 * 1024];
     loop {
@@ -795,7 +824,6 @@ fn snapshot_original_with(
         if count == 0 {
             break;
         }
-        snapshot.write_all(&buffer[..count])?;
         hash.update(&buffer[..count]);
     }
     let sha256: [u8; 32] = hash.finalize().into();
@@ -806,7 +834,8 @@ fn snapshot_original_with(
             "Original alterado durante captura do merge",
         ));
     }
-    snapshot.seek(SeekFrom::Start(0))?;
+    source.seek(SeekFrom::Start(0))?;
+    let reader_file = source.try_clone()?;
     Ok((
         OriginalSnapshot {
             path: path.to_path_buf(),
@@ -814,7 +843,7 @@ fn snapshot_original_with(
             sha256,
             outputs: Arc::default(),
         },
-        snapshot,
+        reader_file,
     ))
 }
 

@@ -1281,7 +1281,9 @@ pub fn setup_app_adapter(
                     continue;
                 }
                 let index = inputs.len();
-                let locked = crate::engine::merger::premerged_marker(path).is_some();
+                let is_s4s_merged = crate::engine::manifest::MergedPackageManifest::is_s4s_merged_package(path);
+                let is_named_merged = crate::engine::merger::premerged_marker(path).is_some();
+                let locked = is_s4s_merged || is_named_merged;
                 let suspect = path
                     .file_stem()
                     .is_some_and(|stem| stem.to_string_lossy().eq_ignore_ascii_case("megapack"))
@@ -1297,7 +1299,9 @@ pub fn setup_app_adapter(
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
                 model.push(crate::MergeQueueItem {
                     name: SharedString::from(entry.file_name().to_string_lossy().to_string()),
-                    size_str: SharedString::from(if locked {
+                    size_str: SharedString::from(if is_s4s_merged {
+                        "Bloqueado: package já mesclado (manifesto S4S/S4Suite)".to_string()
+                    } else if is_named_merged {
                         "Bloqueado: marcador de merge preexistente".to_string()
                     } else if suspect {
                         "Suspeito: MegaPack; confirme antes de incluir".to_string()
@@ -1347,7 +1351,9 @@ pub fn setup_app_adapter(
         let Some((path, _)) = state_clone.merger_input_entries().get(index).cloned() else {
             return;
         };
-        if crate::engine::merger::premerged_marker(&path).is_some() {
+        let is_s4s_merged = crate::engine::manifest::MergedPackageManifest::is_s4s_merged_package(&path);
+        let is_named_merged = crate::engine::merger::premerged_marker(&path).is_some();
+        if is_s4s_merged || is_named_merged {
             return;
         }
         if state_clone.toggle_merger_input(index).is_none() {
@@ -1358,7 +1364,9 @@ pub fn setup_app_adapter(
             for (index, (path, included)) in
                 state_clone.merger_input_entries().into_iter().enumerate()
             {
-                let locked = crate::engine::merger::premerged_marker(&path).is_some();
+                let is_s4s_merged = crate::engine::manifest::MergedPackageManifest::is_s4s_merged_package(&path);
+                let is_named_merged = crate::engine::merger::premerged_marker(&path).is_some();
+                let locked = is_s4s_merged || is_named_merged;
                 let suspect = path
                     .file_stem()
                     .is_some_and(|stem| stem.to_string_lossy().eq_ignore_ascii_case("megapack"))
@@ -1378,7 +1386,9 @@ pub fn setup_app_adapter(
                             .to_string_lossy()
                             .to_string(),
                     ),
-                    size_str: SharedString::from(if locked {
+                    size_str: SharedString::from(if is_s4s_merged {
+                        "Bloqueado: package já mesclado (manifesto S4S/S4Suite)".to_string()
+                    } else if is_named_merged {
                         "Bloqueado: marcador de merge preexistente".to_string()
                     } else if suspect && included {
                         "MegaPack incluído manualmente".to_string()

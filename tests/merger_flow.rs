@@ -1421,3 +1421,56 @@ fn merge_rejects_indivisible_resource_above_configured_size() {
     assert_eq!(digest(&source), before);
     assert_eq!(fs::read_dir(&fx.output_dir).unwrap().count(), 0);
 }
+
+#[test]
+fn thumbnail_collisions_with_different_payloads_are_deduplicated_cleanly() {
+    let fx = Fixture::new();
+    let p1 = fx.input_dir.join("vestido.package");
+    let p2 = fx.input_dir.join("blusa.package");
+
+    let u1 = PackageResource {
+        key: key(1),
+        data: b"mesh 1".to_vec(),
+        mem_size: 6,
+        compressed: 0,
+    };
+    let u2 = PackageResource {
+        key: key(2),
+        data: b"mesh 2".to_vec(),
+        mem_size: 6,
+        compressed: 0,
+    };
+    let thumb_key = ResourceKey {
+        type_id: s4suite::engine::merger::TYPE_CAS_THUMBNAIL,
+        group_id: 0x80000000,
+        instance_ex: 0x12345678,
+        instance_low: 0x9ABCDEF0,
+    };
+    let t1 = PackageResource {
+        key: thumb_key,
+        data: b"thumbnail preview 1".to_vec(),
+        mem_size: 19,
+        compressed: 0,
+    };
+    let t2 = PackageResource {
+        key: thumb_key,
+        data: b"thumbnail preview diferente 2".to_vec(),
+        mem_size: 29,
+        compressed: 0,
+    };
+
+    DBPFWriter::write_package(&mut File::create(&p1).unwrap(), &[u1, t1]).unwrap();
+    DBPFWriter::write_package(&mut File::create(&p2).unwrap(), &[u2, t2]).unwrap();
+
+    let task = MergeTask {
+        input_files: vec![p1, p2],
+        output_dir: fx.output_dir.clone(),
+        max_size_bytes: 1_000_000,
+        name: Some("ThumbTest".to_string()),
+    };
+
+    let report = merge_sims4_packages(&task, |_, _, _| {}).unwrap();
+    assert!(report.success, "merge deve suceder retendo a primeira thumbnail");
+    assert_eq!(report.output_packages.len(), 1);
+    assert_eq!(report.identical_resources.len(), 1);
+}
