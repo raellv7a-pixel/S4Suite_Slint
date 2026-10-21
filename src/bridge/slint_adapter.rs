@@ -1655,13 +1655,37 @@ pub fn setup_app_adapter(
                 msg.push_str(&format!(" ❌ {} falha(s).", falhas));
             }
 
+            let failed_details: Vec<String> = outcomes
+                .iter()
+                .filter(|o| o.status == JobStatus::Failed)
+                .filter_map(|o| {
+                    o.error.as_ref().map(|err| format!("• {}: {}", o.name, err))
+                })
+                .collect();
+
             let _ = slint::invoke_from_event_loop(move || {
                 let _operation = operation;
                 refresh_merge_jobs(&weak_async, &state_async);
                 if let Some(w) = weak_async.upgrade() {
                     w.set_is_merging(false);
                     w.set_merge_progress(1.0);
-                    w.set_merge_status(SharedString::from(msg));
+                    if !failed_details.is_empty() {
+                        let first_err = outcomes
+                            .iter()
+                            .find_map(|o| o.error.as_deref())
+                            .unwrap_or("Erro desconhecido");
+                        w.set_merge_status(SharedString::from(format!("❌ Falha na fila: {first_err}")));
+                        rfd::MessageDialog::new()
+                            .set_title("Falha na Unificação de Packages")
+                            .set_description(format!(
+                                "A unificação de uma ou mais tarefas da fila falhou:\n\n{}\n\nOs arquivos originais foram mantidos intactos.",
+                                failed_details.join("\n\n")
+                            ))
+                            .set_buttons(rfd::MessageButtons::Ok)
+                            .show();
+                    } else {
+                        w.set_merge_status(SharedString::from(msg));
+                    }
                 }
             });
         });

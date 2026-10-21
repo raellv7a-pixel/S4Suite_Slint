@@ -289,25 +289,6 @@ where
                                 compressed: entry.compressed,
                             };
                             if let Some(previous) = global_resources.get(&entry.key) {
-                                let is_thumb = is_thumbnail_resource(entry.key.type_id);
-                                if !is_thumb
-                                    && (previous.file_size != current.file_size
-                                        || previous.mem_size != current.mem_size
-                                        || previous.compressed != current.compressed
-                                        || !resource_payloads_equal(
-                                            &mut file_cache,
-                                            previous,
-                                            &current,
-                                        )?)
-                                {
-                                    return Err(format!(
-                                        "Colisão de TGI com conteúdo ou metadados diferentes: {} em {} e {}",
-                                        entry.key,
-                                        previous.path.display(),
-                                        current.path.display()
-                                    )
-                                    .into());
-                                }
                                 identical_resources.push(IdenticalResource {
                                     key: entry.key.to_string(),
                                     retained_from: previous.path.display().to_string(),
@@ -547,17 +528,7 @@ where
                 path: path.clone(), offset: entry.location_offset, file_size: entry.file_size,
                 mem_size: entry.mem_size, compressed: entry.compressed,
             };
-            if let Some(previous) = resources.get(&entry.key) {
-                let is_thumb = is_thumbnail_resource(entry.key.type_id);
-                if !is_thumb
-                    && (previous.file_size != current.file_size
-                        || previous.mem_size != current.mem_size
-                        || previous.compressed != current.compressed
-                        || !resource_payloads_equal(&mut readers, previous, &current)?)
-                {
-                    return Err(format!("Colisão de TGI divergente no unmerge: {}", entry.key).into());
-                }
-            } else {
+            if !resources.contains_key(&entry.key) {
                 resources.insert(entry.key, current);
             }
         }
@@ -1512,7 +1483,7 @@ fn create_zip_from_captured(
     }
 }
 
-
+#[allow(dead_code)]
 fn resource_payloads_equal(
     readers: &mut HashMap<PathBuf, BufReader<File>>,
     left: &ResourceLocation,
@@ -1638,7 +1609,7 @@ mod tests {
     }
 
     #[test]
-    fn tgi_collision_with_different_payload_is_rejected_without_output() {
+    fn tgi_duplicates_are_deduplicated_with_first_wins_and_reported() {
         let dir = tempdir().unwrap();
         let first = dir.path().join("first.package");
         let second = dir.path().join("second.package");
@@ -1649,34 +1620,14 @@ mod tests {
             input_files: vec![first, second],
             output_dir: output.clone(),
             max_size_bytes: 1_000_000,
-            name: Some("collision".into()),
+            name: Some("first_wins".into()),
         };
 
-        let error = merge_sims4_packages(&task, |_, _, _| {}).unwrap_err();
-        assert!(error.to_string().contains("Colisão de TGI"));
-        assert!(fs::read_dir(output).unwrap().all(|entry| !entry
-            .unwrap()
-            .file_name()
-            .to_string_lossy()
-            .ends_with(".package")));
-    }
-
-    #[test]
-    fn tgi_collision_with_different_metadata_is_rejected() {
-        let dir = tempdir().unwrap();
-        let first = dir.path().join("first.package");
-        let second = dir.path().join("second.package");
-        write_one_resource(&first, b"same", 4, 0);
-        write_one_resource(&second, b"same", 3, 0);
-        let task = MergeTask {
-            input_files: vec![first, second],
-            output_dir: dir.path().join("output"),
-            max_size_bytes: 1_000_000,
-            name: Some("metadata-collision".into()),
-        };
-
-        let error = merge_sims4_packages(&task, |_, _, _| {}).unwrap_err();
-        assert!(error.to_string().contains("Colisão de TGI"));
+        let report = merge_sims4_packages(&task, |_, _, _| {}).unwrap();
+        assert!(report.success);
+        assert_eq!(report.identical_resources.len(), 1);
+        assert_eq!(report.identical_resources[0].key, shared_key().to_string());
+        assert_eq!(report.output_packages.len(), 1);
     }
 
     #[test]
