@@ -1,11 +1,12 @@
-use crate::core::safety::{safe_remove_file, unique_dest_path};
+use crate::core::safety::{same_file_identity, unique_dest_path, AnchoredDir, ReadLease};
 use md5::{Digest, Md5};
 use regex::bytes::Regex;
 use rusqlite::{params, Connection};
 use sha2::Sha256;
+use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::{self, Read};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 use walkdir::WalkDir;
 
@@ -42,7 +43,12 @@ impl TrayCacheDb {
         Ok(Self { conn })
     }
 
-    pub fn update_file_md5(&self, filepath: &Path, mtime: f64, md5: &str) -> Result<(), rusqlite::Error> {
+    pub fn update_file_md5(
+        &self,
+        filepath: &Path,
+        mtime: f64,
+        md5: &str,
+    ) -> Result<(), rusqlite::Error> {
         let path_str = filepath.display().to_string();
         self.conn.execute(
             "INSERT INTO mod_files (filepath, mtime, md5) VALUES (?1, ?2, ?3)
@@ -52,12 +58,18 @@ impl TrayCacheDb {
         Ok(())
     }
 
-    pub fn find_exact_duplicate(&self, package_path: &Path) -> Result<Option<PathBuf>, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn find_exact_duplicate(
+        &self,
+        package_path: &Path,
+    ) -> Result<Option<PathBuf>, Box<dyn std::error::Error + Send + Sync>> {
         let fast_hash = fast_md5(package_path)?;
-        let mut stmt = self.conn.prepare("SELECT filepath FROM mod_files WHERE md5=?1")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT filepath FROM mod_files WHERE md5=?1")?;
         let rows = stmt.query_map(params![fast_hash], |row| row.get::<_, String>(0))?;
 
-        let candidate_paths: Vec<PathBuf> = rows.filter_map(|r| r.ok()).map(PathBuf::from).collect();
+        let candidate_paths: Vec<PathBuf> =
+            rows.filter_map(|r| r.ok()).map(PathBuf::from).collect();
         if candidate_paths.is_empty() {
             return Ok(None);
         }
@@ -93,12 +105,15 @@ pub fn fast_md5(path: &Path) -> io::Result<String> {
 }
 
 pub fn full_sha256(path: &Path) -> io::Result<String> {
-    let mut file = File::open(path)?;
+    sha256_reader(File::open(path)?)
+}
+
+pub(crate) fn sha256_reader(mut reader: impl Read) -> io::Result<String> {
     let mut hasher = Sha256::new();
     let mut buffer = [0u8; 1024 * 1024];
 
     loop {
-        let n = file.read(&mut buffer)?;
+        let n = reader.read(&mut buffer)?;
         if n == 0 {
             break;
         }
@@ -134,7 +149,9 @@ pub fn parse_tray_name(trayitem_path: &Path) -> Option<String> {
     // Fallback: search for long text strings
     let re_fallback = Regex::new(r"\x00\x00\x00([A-Z][a-z]{2,20} [A-Z][a-z]{2,20})\x00").unwrap();
     if let Some(captures) = re_fallback.captures(&data) {
-        let name = String::from_utf8_lossy(captures.get(1)?.as_bytes()).trim().to_string();
+        let name = String::from_utf8_lossy(captures.get(1)?.as_bytes())
+            .trim()
+            .to_string();
         if !name.is_empty() {
             return Some(name);
         }
@@ -191,7 +208,16 @@ pub fn analyze_tray_source(
     let mut package_files = Vec::new();
     let mut duplicate_count = 0;
 
-    let tray_exts = ["householdbinary", "trayitem", "sgi", "hhi", "bpi", "blueprint", "room", "rmi"];
+    let tray_exts = [
+        "householdbinary",
+        "trayitem",
+        "sgi",
+        "hhi",
+        "bpi",
+        "blueprint",
+        "room",
+        "rmi",
+    ];
 
     for entry in WalkDir::new(source_root).into_iter().filter_map(|e| e.ok()) {
         let path = entry.path();
@@ -199,8 +225,16 @@ pub fn analyze_tray_source(
             continue;
         }
 
-        let fname = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+        let fname = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
 
         if ext == "trayitem" && detected_name.is_none() {
             detected_name = parse_tray_name(path);
@@ -285,11 +319,15 @@ impl TrayImportCandidate {
 ///
 /// Aceita `.zip`/`.7z`/`.rar` e também arquivos de tray soltos. Uma fonte que
 /// falhe não derruba as demais: ela vira uma entrada na lista de erros.
+#[allow(clippy::type_complexity)]
 pub fn prepare_tray_candidates(
     sources: &[PathBuf],
     work_root: &Path,
     cache_db: Option<&TrayCacheDb>,
-) -> Result<(Vec<TrayImportCandidate>, Vec<(String, String)>), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<
+    (Vec<TrayImportCandidate>, Vec<(String, String)>),
+    Box<dyn std::error::Error + Send + Sync>,
+> {
     if work_root.exists() {
         fs::remove_dir_all(work_root)?;
     }
@@ -324,7 +362,10 @@ pub fn prepare_tray_candidates(
         match analyze_tray_source(&dest, cache_db) {
             Ok(analysis) if analysis.tray_files.is_empty() && analysis.package_files.is_empty() => {
                 let _ = fs::remove_dir_all(&dest);
-                failures.push((label, "nenhum arquivo de Sim, Lote ou CC encontrado".to_string()));
+                failures.push((
+                    label,
+                    "nenhum arquivo de Sim, Lote ou CC encontrado".to_string(),
+                ));
             }
             Ok(analysis) => candidates.push(TrayImportCandidate {
                 source: source.clone(),
@@ -344,7 +385,11 @@ pub fn prepare_tray_candidates(
 
 fn is_tray_archive(path: &Path) -> bool {
     matches!(
-        path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase().as_str(),
+        path.extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase()
+            .as_str(),
         "zip" | "7z" | "rar"
     )
 }
@@ -375,6 +420,123 @@ pub fn default_cc_dir(mods_dir: &Path, detected_name: &str) -> PathBuf {
     mods_dir.join("Imported_Sims").join(detected_name)
 }
 
+fn allowed_import_root<'a>(path: &Path, roots: &'a [PathBuf]) -> io::Result<&'a Path> {
+    if path
+        .components()
+        .any(|part| matches!(part, Component::ParentDir))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "Destino com componente inseguro",
+        ));
+    }
+    roots
+        .iter()
+        .filter(|root| path.starts_with(root))
+        .max_by_key(|root| root.components().count())
+        .map(PathBuf::as_path)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "Destino fora das raízes permitidas",
+            )
+        })
+}
+
+fn import_directory(root: &AnchoredDir, root_path: &Path, path: &Path) -> io::Result<AnchoredDir> {
+    let mut directory = root.try_clone()?;
+    for component in path
+        .strip_prefix(root_path)
+        .map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "Destino fora da raiz"))?
+        .components()
+    {
+        let Component::Normal(name) = component else {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "Destino inválido",
+            ));
+        };
+        directory = directory.create_child(name)?;
+    }
+    Ok(directory)
+}
+
+fn copy_tray_entry(
+    entry: &TrayFileEntry,
+    staging: &AnchoredDir,
+    destination: &AnchoredDir,
+) -> io::Result<(OsString, ReadLease)> {
+    let source_parent = AnchoredDir::open(
+        entry
+            .src_path
+            .parent()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Fonte sem pai"))?,
+    )?;
+    crate::engine::installer::atomic_copy_at(
+        &source_parent,
+        entry.src_path.file_name().unwrap_or_default(),
+        staging,
+        "item",
+    )?;
+    let lease = ReadLease::acquire(staging.open_regular("item")?)?;
+    loop {
+        let candidate = unique_dest_path(&destination.path(), &entry.rel_name);
+        let name = candidate.file_name().unwrap_or_default();
+        lease.check()?;
+        match staging.publish_noreplace("item", destination, name) {
+            Ok(()) => return Ok((name.to_owned(), lease)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+fn rollback_tray_entry(
+    destination: &AnchoredDir,
+    directory_path: &Path,
+    name: &std::ffi::OsStr,
+    lease: &ReadLease,
+) -> io::Result<()> {
+    let temporary = tempfile::Builder::new()
+        .prefix(".s4suite-tray-rollback-")
+        .tempdir_in(destination.path())?;
+    let temporary_name = temporary.path().file_name().unwrap().to_owned();
+    let held = destination.child(&temporary_name)?;
+    destination.publish_noreplace(name, &held, "item")?;
+    let validation = lease.check().and_then(|()| {
+        if same_file_identity(
+            &held.open_regular("item")?.metadata()?,
+            &lease.file.metadata()?,
+        ) {
+            Ok(())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Destino substituído; rollback recusado",
+            ))
+        }
+    });
+    match validation {
+        Ok(()) => held.remove_file("item"),
+        Err(error) => match held.publish_noreplace("item", destination, name) {
+            Ok(()) => Err(error),
+            Err(restore) => {
+                let preserved = directory_path.join(temporary_name).join("item");
+                let _ = temporary.keep();
+                Err(io::Error::new(
+                    error.kind(),
+                    format!(
+                        "{}; restauração recusada: {}. Arquivo preservado em {}",
+                        error,
+                        restore,
+                        preserved.display(),
+                    ),
+                ))
+            }
+        },
+    }
+}
+
 /// Importa um item para o jogo: os binários de Tray vão para a pasta `Tray`, e
 /// o CC para `cc_dir`.
 pub fn import_tray_item(
@@ -383,20 +545,50 @@ pub fn import_tray_item(
     cc_dir: &Path,
     allowed_roots: &[PathBuf],
 ) -> Result<(usize, usize, usize), Box<dyn std::error::Error + Send + Sync>> {
-    fs::create_dir_all(tray_dir)?;
-    let dest_mods_folder = cc_dir.to_path_buf();
-    fs::create_dir_all(&dest_mods_folder)?;
-
-    let mut moved_files: Vec<(PathBuf, PathBuf)> = Vec::new();
+    // Valida ambos antes de criar qualquer pasta, inclusive as próprias raízes.
+    let tray_root_path = allowed_import_root(tray_dir, allowed_roots)?;
+    let cc_root_path = allowed_import_root(cc_dir, allowed_roots)?;
+    for entry in analysis.tray_files.iter().chain(&analysis.package_files) {
+        let mut components = Path::new(&entry.rel_name).components();
+        if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Nome de arquivo de Tray inválido",
+            )
+            .into());
+        }
+    }
+    let tray_root = AnchoredDir::create(tray_root_path)?;
+    let _tray_lock = tray_root.lock_exclusive()?;
+    let cc_root = if cc_root_path == tray_root_path {
+        tray_root.try_clone()?
+    } else {
+        AnchoredDir::create(cc_root_path)?
+    };
+    let _cc_lock = if cc_root_path == tray_root_path {
+        None
+    } else {
+        Some(cc_root.lock_exclusive()?)
+    };
+    let tray_destination = import_directory(&tray_root, tray_root_path, tray_dir)?;
+    let cc_destination = import_directory(&cc_root, cc_root_path, cc_dir)?;
+    let tray_temporary = tempfile::Builder::new()
+        .prefix(".s4suite-tray-")
+        .tempdir_in(tray_destination.path())?;
+    let cc_temporary = tempfile::Builder::new()
+        .prefix(".s4suite-tray-")
+        .tempdir_in(cc_destination.path())?;
+    let tray_staging = tray_destination.child(tray_temporary.path().file_name().unwrap())?;
+    let cc_staging = cc_destination.child(cc_temporary.path().file_name().unwrap())?;
+    let mut moved_files: Vec<(bool, OsString, ReadLease)> = Vec::new();
     let mut tray_installed = 0;
     let mut cc_installed = 0;
     let mut skipped_duplicates = 0;
 
     let mut execute_moves = || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         for file_entry in &analysis.tray_files {
-            let dest = unique_dest_path(tray_dir, &file_entry.rel_name);
-            fs::copy(&file_entry.src_path, &dest)?;
-            moved_files.push((file_entry.src_path.clone(), dest));
+            let (name, lease) = copy_tray_entry(file_entry, &tray_staging, &tray_destination)?;
+            moved_files.push((true, name, lease));
             tray_installed += 1;
         }
 
@@ -405,9 +597,8 @@ pub fn import_tray_item(
                 skipped_duplicates += 1;
                 continue;
             }
-            let dest = unique_dest_path(&dest_mods_folder, &file_entry.rel_name);
-            fs::copy(&file_entry.src_path, &dest)?;
-            moved_files.push((file_entry.src_path.clone(), dest));
+            let (name, lease) = copy_tray_entry(file_entry, &cc_staging, &cc_destination)?;
+            moved_files.push((false, name, lease));
             cc_installed += 1;
         }
 
@@ -415,9 +606,24 @@ pub fn import_tray_item(
     };
 
     if let Err(e) = execute_moves() {
-        // Rollback
-        for (_, created_dest) in moved_files {
-            let _ = safe_remove_file(&created_dest, allowed_roots);
+        let mut rollback_errors = Vec::new();
+        for (is_tray, name, lease) in moved_files.into_iter().rev() {
+            let (destination, path) = if is_tray {
+                (&tray_destination, tray_dir)
+            } else {
+                (&cc_destination, cc_dir)
+            };
+            if let Err(error) = rollback_tray_entry(destination, path, &name, &lease) {
+                rollback_errors.push(format!("{}: {}", path.join(name).display(), error));
+            }
+        }
+        if !rollback_errors.is_empty() {
+            return Err(format!(
+                "Falha na importação: {}. Erros adicionais no rollback: {}",
+                e,
+                rollback_errors.join("; ")
+            )
+            .into());
         }
         return Err(e);
     }
@@ -441,5 +647,36 @@ mod tests {
 
         assert_eq!(md5_hash.len(), 32);
         assert_eq!(sha256_hash.len(), 64);
+    }
+
+    #[test]
+    fn p0_rollback_nao_apaga_arquivo_que_substituiu_a_publicacao() {
+        let temporary = tempdir().unwrap();
+        let path = temporary.path().join("sim.trayitem");
+        let relocated = temporary.path().join("publicacao_movida.trayitem");
+        fs::write(&path, b"PUBLICACAO_DESTA_IMPORTACAO").unwrap();
+        let directory = AnchoredDir::open(temporary.path()).unwrap();
+        let lease = ReadLease::acquire(directory.open_regular("sim.trayitem").unwrap()).unwrap();
+        fs::rename(&path, &relocated).unwrap();
+        fs::write(&path, b"NOVO_CONTEUDO_DO_USUARIO").unwrap();
+        let new_hash = full_sha256(&path).unwrap();
+        let relocated_hash = full_sha256(&relocated).unwrap();
+
+        let result = rollback_tray_entry(
+            &directory,
+            temporary.path(),
+            OsString::from("sim.trayitem").as_os_str(),
+            &lease,
+        );
+
+        assert!(result.is_err(), "rollback aceitou inode diferente");
+        assert_eq!(fs::read(&path).unwrap(), b"NOVO_CONTEUDO_DO_USUARIO");
+        assert_eq!(full_sha256(&path).unwrap(), new_hash);
+        assert_eq!(
+            fs::read(&relocated).unwrap(),
+            b"PUBLICACAO_DESTA_IMPORTACAO"
+        );
+        assert_eq!(full_sha256(&relocated).unwrap(), relocated_hash);
+        assert_eq!(fs::read_dir(temporary.path()).unwrap().count(), 2);
     }
 }

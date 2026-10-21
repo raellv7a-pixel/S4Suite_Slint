@@ -132,9 +132,16 @@ depende do `DisabledManager`, então inverter a ordem evitaria um TODO.
       delete implementados de verdade.
 - [x] `common_ancestor()` define a raiz de segurança — nada fora da pasta de
       origem é apagado ou renomeado, mesmo que entre na lista.
-- [x] Backup só remove os originais **depois** que o zip fecha com sucesso.
-- [x] 10 testes em `tests/merger_flow.rs`.
-
+- [x] Backup só remove os originais **depois** que o zip fecha com sucesso e tem SHA-256 verificado.
+- [x] Autorização pós-merge estrita com correspondência bijetiva exata e verificação SHA-256 de originais.
+- [x] Publicação atômica no-replace de partes e backup com rollback determinístico em caso de colisão ou falha de relatório.
+- [x] Verificação estrita de dentry em outputs publicados e contenção contra falhas parciais em quarentena.
+- [x] Manifesto S4S v1 embutido, leitura/escrita DBPF 2.1 e unmerge nativo Linux.
+- [x] Tamanho total limitado (incluindo índice/manifesto), recursos copiados em streaming.
+- [x] Unmerge reúne todas as partes, preserva associações de recursos compartilhados
+      e publica um lote novo sem substituir dados existentes.
+- [x] Regressões de merge/unmerge em `tests/merger_flow.rs`, além de testes de
+      formato DBPF e parser de manifesto. Investigação e limites em [S4S_MERGE_UNMERGE.md](S4S_MERGE_UNMERGE.md).
 A lógica pós-merge vive no `engine/`, não no `bridge/`: é regra de negócio e
 precisa ser testável sem event loop (a regra de ouro no topo deste documento).
 

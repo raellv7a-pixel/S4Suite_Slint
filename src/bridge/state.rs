@@ -4,7 +4,22 @@ use crate::engine::merger::{JobStatus, PostMergeAction};
 use crate::engine::organizer::{DuplicateGroup, ScriptDepthIssue, TransferMode};
 use crate::engine::tray::{TrayImportCandidate, TRAY_WORK_DIR};
 use parking_lot::Mutex;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+
+/// Posse exclusiva dos fluxos de disco da janela, inclusive trabalho já
+/// agendado. O guard atravessa spawn_blocking e só libera no callback final.
+pub(crate) struct FileOperationGuard(Arc<AtomicBool>);
+
+impl Drop for FileOperationGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
 
 /// Ação do organizador que mexe em arquivos do usuário e aguarda confirmação.
 ///
@@ -60,6 +75,7 @@ pub struct QueuedJob {
 /// texto na tela e o caminho real dos arquivos era perdido no instante em que
 /// o diálogo de seleção fechava.
 pub struct AppState {
+    file_operation: Arc<AtomicBool>,
     /// Arquivos que o usuário escolheu para instalar (caminhos reais em disco).
     installer_sources: Mutex<Vec<PathBuf>>,
     /// Análise de conflitos aguardando confirmação no diálogo.
@@ -79,9 +95,9 @@ pub struct AppState {
     /// Desativados marcados no painel, para restaurar ou excluir em lote.
     selected_disabled: Mutex<Vec<PathBuf>>,
 
-    /// Packages encontrados na pasta de origem do merge.
+    /// Packages da origem e índices excluídos manualmente ou por marcador de merge.
     merger_inputs: Mutex<Vec<PathBuf>>,
-    /// Destino escolhido para as partes unificadas.
+    excluded_merger_inputs: Mutex<HashSet<usize>>,
     merger_output: Mutex<Option<PathBuf>>,
     /// Fila de tarefas montada pelo usuário.
     merge_jobs: Mutex<Vec<QueuedJob>>,
@@ -89,6 +105,8 @@ pub struct AppState {
     selected_jobs: Mutex<Vec<usize>>,
     /// Destino dos originais depois de unificar.
     merge_post_action: Mutex<PostMergeAction>,
+    /// Snapshot exato do relatório, originais e raiz comum do último merge concluído com sucesso.
+    pending_post_merge: Mutex<Option<(crate::engine::merger::MergeReport, Vec<PathBuf>, PathBuf)>>,
 
     /// Zips e arquivos de tray escolhidos para importar.
     tray_sources: Mutex<Vec<PathBuf>>,
@@ -105,6 +123,7 @@ pub struct AppState {
 impl AppState {
     pub fn new(config_dir: &Path) -> Self {
         Self {
+            file_operation: Arc::new(AtomicBool::new(false)),
             installer_sources: Mutex::new(Vec::new()),
             pending_install: Mutex::new(None),
             selected_mods: Mutex::new(Vec::new()),
@@ -114,16 +133,25 @@ impl AppState {
             pending_transfer: Mutex::new(None),
             selected_disabled: Mutex::new(Vec::new()),
             merger_inputs: Mutex::new(Vec::new()),
+            excluded_merger_inputs: Mutex::new(HashSet::new()),
             merger_output: Mutex::new(None),
             merge_jobs: Mutex::new(Vec::new()),
             selected_jobs: Mutex::new(Vec::new()),
             merge_post_action: Mutex::new(PostMergeAction::Keep),
+            pending_post_merge: Mutex::new(None),
             tray_sources: Mutex::new(Vec::new()),
             tray_candidates: Mutex::new(Vec::new()),
             selected_tray: Mutex::new(Vec::new()),
             disabled_mgr: DisabledManager::new(config_dir),
             tray_work_dir: config_dir.join(TRAY_WORK_DIR),
         }
+    }
+
+    pub(crate) fn try_begin_file_operation(&self) -> Option<FileOperationGuard> {
+        self.file_operation
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .ok()
+            .map(|_| FileOperationGuard(Arc::clone(&self.file_operation)))
     }
 
     pub fn disabled_manager(&self) -> &DisabledManager {
@@ -245,11 +273,48 @@ impl AppState {
     // --- Merger ---
 
     pub fn set_merger_inputs(&self, files: Vec<PathBuf>) {
+        self.set_merger_inputs_with_exclusions(files, Vec::new());
+    }
+
+    pub fn set_merger_inputs_with_exclusions(&self, files: Vec<PathBuf>, excluded: Vec<usize>) {
         *self.merger_inputs.lock() = files;
+        *self.excluded_merger_inputs.lock() = excluded.into_iter().collect();
     }
 
     pub fn merger_inputs(&self) -> Vec<PathBuf> {
-        self.merger_inputs.lock().clone()
+        let files = self.merger_inputs.lock();
+        let excluded = self.excluded_merger_inputs.lock();
+        files
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !excluded.contains(index))
+            .map(|(_, path)| path.clone())
+            .collect()
+    }
+
+    /// Toggle manual inclusion; returns the new included state.
+    pub fn toggle_merger_input(&self, index: usize) -> Option<bool> {
+        let files = self.merger_inputs.lock();
+        if index >= files.len() {
+            return None;
+        }
+        drop(files);
+        let mut excluded = self.excluded_merger_inputs.lock();
+        if excluded.remove(&index) {
+            Some(true)
+        } else {
+            excluded.insert(index);
+            Some(false)
+        }
+    }
+    pub fn merger_input_entries(&self) -> Vec<(PathBuf, bool)> {
+        let files = self.merger_inputs.lock();
+        let excluded = self.excluded_merger_inputs.lock();
+        files
+            .iter()
+            .enumerate()
+            .map(|(index, path)| (path.clone(), !excluded.contains(&index)))
+            .collect()
     }
 
     pub fn set_merger_output(&self, dir: Option<PathBuf>) {
@@ -262,7 +327,28 @@ impl AppState {
 
     pub fn clear_merger(&self) {
         self.merger_inputs.lock().clear();
+        self.excluded_merger_inputs.lock().clear();
         *self.merger_output.lock() = None;
+        self.clear_pending_post_merge();
+    }
+
+    pub fn set_pending_post_merge(
+        &self,
+        report: crate::engine::merger::MergeReport,
+        originals: Vec<PathBuf>,
+        input_root: PathBuf,
+    ) {
+        *self.pending_post_merge.lock() = Some((report, originals, input_root));
+    }
+
+    pub fn take_pending_post_merge(
+        &self,
+    ) -> Option<(crate::engine::merger::MergeReport, Vec<PathBuf>, PathBuf)> {
+        self.pending_post_merge.lock().take()
+    }
+
+    pub fn clear_pending_post_merge(&self) {
+        *self.pending_post_merge.lock() = None;
     }
 
     // --- Fila do merger ---
@@ -388,5 +474,26 @@ impl AppState {
         self.tray_sources.lock().clear();
         self.tray_candidates.lock().clear();
         self.selected_tray.lock().clear();
+    }
+}
+
+#[cfg(test)]
+mod merger_input_tests {
+    use super::AppState;
+    use std::path::PathBuf;
+
+    #[test]
+    fn manually_excluded_packages_are_omitted_and_can_be_reincluded() {
+        let temp = tempfile::tempdir().unwrap();
+        let first = PathBuf::from("first.package");
+        let second = PathBuf::from("second.package");
+        let state = AppState::new(temp.path());
+        state.set_merger_inputs_with_exclusions(vec![first.clone(), second.clone()], vec![1]);
+
+        assert_eq!(state.merger_inputs(), vec![first.clone()]);
+        assert_eq!(state.toggle_merger_input(1), Some(true));
+        assert_eq!(state.merger_inputs(), vec![first.clone(), second.clone()]);
+        assert_eq!(state.toggle_merger_input(0), Some(false));
+        assert_eq!(state.merger_inputs(), vec![second]);
     }
 }

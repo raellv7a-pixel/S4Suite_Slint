@@ -30,7 +30,11 @@ impl Fixture {
         let mods_dir = root.path().join("Mods");
         let config_dir = root.path().join("config");
         fs::create_dir_all(&mods_dir).unwrap();
-        Self { _root: root, mods_dir, config_dir }
+        Self {
+            _root: root,
+            mods_dir,
+            config_dir,
+        }
     }
 
     fn manager(&self) -> DisabledManager {
@@ -46,16 +50,28 @@ fn desativar_e_reativar_devolve_o_mod_ao_lugar_de_origem() {
 
     let mgr = fx.manager();
     let disabled = mgr
-        .disable_mod(&original, &fx.mods_dir, "manual", "teste", &[fx.mods_dir.clone()])
+        .disable_mod(
+            &original,
+            &fx.mods_dir,
+            "manual",
+            "teste",
+            &[fx.mods_dir.clone()],
+        )
         .unwrap();
 
-    assert!(!original.exists(), "o arquivo original deveria ter sido renomeado");
+    assert!(
+        !original.exists(),
+        "o arquivo original deveria ter sido renomeado"
+    );
     assert!(disabled.to_string_lossy().ends_with(".disabled"));
 
     let restored = mgr.enable_mod(&disabled, &fx.mods_dir).unwrap();
 
     assert!(!disabled.exists());
-    assert_eq!(restored, original, "o mod deveria voltar ao caminho exato de origem");
+    assert_eq!(
+        restored, original,
+        "o mod deveria voltar ao caminho exato de origem"
+    );
     assert_eq!(fs::read(&restored).unwrap(), b"conteudo do mod");
 }
 
@@ -65,11 +81,14 @@ fn desativar_recusa_arquivo_fora_da_pasta_mods() {
     let fora = fx._root.path().join("Downloads/intruso.package");
     write_file(&fora, b"fora do escopo");
 
-    let resultado = fx
-        .manager()
-        .disable_mod(&fora, &fx.mods_dir, "manual", "", &[fx.mods_dir.clone()]);
+    let resultado =
+        fx.manager()
+            .disable_mod(&fora, &fx.mods_dir, "manual", "", &[fx.mods_dir.clone()]);
 
-    assert!(resultado.is_err(), "mods fora de Mods não podem ser desativados");
+    assert!(
+        resultado.is_err(),
+        "mods fora de Mods não podem ser desativados"
+    );
     assert!(fora.exists(), "o arquivo recusado não pode ser movido");
 }
 
@@ -82,12 +101,21 @@ fn backups_internos_nao_viram_duplicatas() {
     let conteudo = b"exatamente o mesmo conteudo";
 
     write_file(&fx.mods_dir.join("meu_mod.package"), conteudo);
-    write_file(&fx.mods_dir.join(BACKUP_DIR_NAME).join("meu_mod.package"), conteudo);
-    write_file(&fx.mods_dir.join(STAGING_DIR_NAME).join("x/meu_mod.package"), conteudo);
+    write_file(
+        &fx.mods_dir.join(BACKUP_DIR_NAME).join("meu_mod.package"),
+        conteudo,
+    );
+    write_file(
+        &fx.mods_dir.join(STAGING_DIR_NAME).join("x/meu_mod.package"),
+        conteudo,
+    );
 
     let grupos = detect_duplicates(&fx.mods_dir);
 
-    assert!(grupos.is_empty(), "staging e backups não são conteúdo do usuário");
+    assert!(
+        grupos.is_empty(),
+        "staging e backups não são conteúdo do usuário"
+    );
 }
 
 #[test]
@@ -118,12 +146,17 @@ fn varredura_de_lixo_ignora_pastas_internas() {
     write_file(&fx.mods_dir.join("leiame.txt"), b"instrucoes");
     write_file(&fx.mods_dir.join("preview.png"), b"imagem");
     write_file(&fx.mods_dir.join("mod.package"), b"mod de verdade");
-    write_file(&fx.mods_dir.join(BACKUP_DIR_NAME).join("nota.txt"), b"interno");
+    write_file(
+        &fx.mods_dir.join(BACKUP_DIR_NAME).join("nota.txt"),
+        b"interno",
+    );
 
     let lixo = find_junk_files(&fx.mods_dir);
 
     assert_eq!(lixo.len(), 2);
-    assert!(lixo.iter().all(|p| !p.to_string_lossy().contains(BACKUP_DIR_NAME)));
+    assert!(lixo
+        .iter()
+        .all(|p| !p.to_string_lossy().contains(BACKUP_DIR_NAME)));
     assert!(lixo.iter().all(|p| p.extension().unwrap() != "package"));
 }
 
@@ -162,17 +195,26 @@ fn arvore_de_mods_nao_expoe_pastas_internas_e_marca_desativados() {
     let fx = Fixture::new();
     write_file(&fx.mods_dir.join("ativo.package"), b"a");
     write_file(&fx.mods_dir.join("inativo.package.disabled"), b"b");
-    write_file(&fx.mods_dir.join(STAGING_DIR_NAME).join("temp.package"), b"c");
+    write_file(
+        &fx.mods_dir.join(STAGING_DIR_NAME).join("temp.package"),
+        b"c",
+    );
 
     let nodes = scan_mods_tree(&fx.mods_dir);
     let nomes: Vec<&str> = nodes.iter().map(|n| n.name.as_str()).collect();
 
     assert!(nomes.contains(&"ativo.package"));
     assert!(nomes.contains(&"inativo.package.disabled"));
-    assert!(!nomes.contains(&STAGING_DIR_NAME), "pasta interna vazou para a árvore");
+    assert!(
+        !nomes.contains(&STAGING_DIR_NAME),
+        "pasta interna vazou para a árvore"
+    );
     assert!(!nomes.contains(&"temp.package"));
 
-    let inativo = nodes.iter().find(|n| n.name.ends_with(".disabled")).unwrap();
+    let inativo = nodes
+        .iter()
+        .find(|n| n.name.ends_with(".disabled"))
+        .unwrap();
     assert!(inativo.disabled);
 }
 
@@ -182,7 +224,10 @@ fn arvore_de_mods_nao_expoe_pastas_internas_e_marca_desativados() {
 fn nome_de_pasta_perde_os_caracteres_proibidos() {
     assert_eq!(sanitize_entry_name("  Meus Mods  ").unwrap(), "Meus Mods");
     assert_eq!(sanitize_entry_name("CC/Cabelos").unwrap(), "CCCabelos");
-    assert_eq!(sanitize_entry_name(r#"a:b*c?d"e<f>g|h"#).unwrap(), "abcdefgh");
+    assert_eq!(
+        sanitize_entry_name(r#"a:b*c?d"e<f>g|h"#).unwrap(),
+        "abcdefgh"
+    );
     // Só separador e ponto não formam um nome: melhor recusar do que criar uma
     // pasta invisível ou escapar do diretório.
     assert!(sanitize_entry_name("///").is_none());
@@ -199,7 +244,10 @@ fn nova_pasta_e_criada_dentro_de_mods() {
     assert_eq!(criada, fx.mods_dir.join("Cabelos"));
 
     let repetida = create_folder(&fx.mods_dir, "Cabelos", &fx.mods_dir);
-    assert!(repetida.is_err(), "não deveria sobrescrever pasta existente");
+    assert!(
+        repetida.is_err(),
+        "não deveria sobrescrever pasta existente"
+    );
 }
 
 #[test]
@@ -249,8 +297,13 @@ fn mover_leva_o_arquivo_para_a_pasta_escolhida() {
     let destino = fx.mods_dir.join("Cabelos");
     fs::create_dir_all(&destino).unwrap();
 
-    let outcome =
-        transfer_items(&[origem.clone()], &destino, TransferMode::Move, &fx.mods_dir).unwrap();
+    let outcome = transfer_items(
+        &[origem.clone()],
+        &destino,
+        TransferMode::Move,
+        &fx.mods_dir,
+    )
+    .unwrap();
 
     assert_eq!(outcome.done, 1);
     assert!(outcome.failures.is_empty());
@@ -271,9 +324,18 @@ fn copiar_preserva_a_origem_e_copia_pasta_inteira() {
         transfer_items(&[pasta.clone()], &destino, TransferMode::Copy, &fx.mods_dir).unwrap();
 
     assert_eq!(outcome.done, 1);
-    assert!(pasta.join("a.package").exists(), "a origem não deveria sumir numa cópia");
-    assert_eq!(fs::read(destino.join("PackCompleto/a.package")).unwrap(), b"a");
-    assert_eq!(fs::read(destino.join("PackCompleto/sub/b.package")).unwrap(), b"b");
+    assert!(
+        pasta.join("a.package").exists(),
+        "a origem não deveria sumir numa cópia"
+    );
+    assert_eq!(
+        fs::read(destino.join("PackCompleto/a.package")).unwrap(),
+        b"a"
+    );
+    assert_eq!(
+        fs::read(destino.join("PackCompleto/sub/b.package")).unwrap(),
+        b"b"
+    );
 }
 
 #[test]
@@ -286,8 +348,14 @@ fn transferencia_nao_sobrescreve_arquivo_de_mesmo_nome_no_destino() {
 
     transfer_items(&[origem], &destino, TransferMode::Move, &fx.mods_dir).unwrap();
 
-    assert_eq!(fs::read(destino.join("mod.package")).unwrap(), b"versao existente");
-    assert_eq!(fs::read(destino.join("mod_1.package")).unwrap(), b"nova versao");
+    assert_eq!(
+        fs::read(destino.join("mod.package")).unwrap(),
+        b"versao existente"
+    );
+    assert_eq!(
+        fs::read(destino.join("mod_1.package")).unwrap(),
+        b"nova versao"
+    );
 }
 
 /// Mover uma pasta para dentro dela mesma entraria em laço criando cópias
@@ -334,8 +402,7 @@ fn mover_script_fundo_demais_gera_aviso_sem_falhar() {
     let destino = fx.mods_dir.join("Categoria/Autor");
     fs::create_dir_all(&destino).unwrap();
 
-    let outcome =
-        transfer_items(&[script], &destino, TransferMode::Move, &fx.mods_dir).unwrap();
+    let outcome = transfer_items(&[script], &destino, TransferMode::Move, &fx.mods_dir).unwrap();
 
     assert_eq!(outcome.done, 1, "o arquivo é movido mesmo assim");
     assert_eq!(outcome.script_warnings.len(), 1);
@@ -351,13 +418,13 @@ fn exclusao_em_lote_apaga_arquivos_e_pastas() {
     write_file(&pasta.join("a.package"), &vec![0u8; 300]);
     write_file(&pasta.join("b.package"), &vec![0u8; 200]);
 
-    let outcome = remove_entries(
-        &[arquivo.clone(), pasta.clone()],
-        &[fx.mods_dir.clone()],
-    );
+    let outcome = remove_entries(&[arquivo.clone(), pasta.clone()], &[fx.mods_dir.clone()]);
 
     assert_eq!(outcome.removed, 2);
-    assert_eq!(outcome.freed_bytes, 1000, "o tamanho da pasta é a soma do conteúdo");
+    assert_eq!(
+        outcome.freed_bytes, 1000,
+        "o tamanho da pasta é a soma do conteúdo"
+    );
     assert!(!arquivo.exists() && !pasta.exists());
 }
 
@@ -379,7 +446,10 @@ fn exclusao_em_lote_recusa_pasta_fora_de_mods() {
 #[test]
 fn busca_traz_o_acerto_com_as_pastas_que_levam_ate_ele() {
     let fx = Fixture::new();
-    write_file(&fx.mods_dir.join("Cabelos/Autor/cabelo_longo.package"), b"x");
+    write_file(
+        &fx.mods_dir.join("Cabelos/Autor/cabelo_longo.package"),
+        b"x",
+    );
     write_file(&fx.mods_dir.join("Roupas/vestido.package"), b"y");
 
     let nodes = scan_mods_tree(&fx.mods_dir);
@@ -422,8 +492,14 @@ fn painel_lista_desativados_com_motivo_e_observacao() {
     write_file(&mod_a, b"a");
 
     let mgr = fx.manager();
-    mgr.disable_mod(&mod_a, &fx.mods_dir, "suspected_bug", "trava no CAS", &[fx.mods_dir.clone()])
-        .unwrap();
+    mgr.disable_mod(
+        &mod_a,
+        &fx.mods_dir,
+        "suspected_bug",
+        "trava no CAS",
+        &[fx.mods_dir.clone()],
+    )
+    .unwrap();
 
     let lista = mgr.list_disabled(&fx.mods_dir);
     assert_eq!(lista.len(), 1);
@@ -461,7 +537,10 @@ fn entrada_orfa_do_manifesto_e_marcada_e_pode_ser_limpa() {
 
     let lista = mgr.list_disabled(&fx.mods_dir);
     assert_eq!(lista.len(), 1);
-    assert!(lista[0].missing, "arquivo sumiu do disco, deveria vir marcado");
+    assert!(
+        lista[0].missing,
+        "arquivo sumiu do disco, deveria vir marcado"
+    );
 
     assert_eq!(mgr.prune_missing().unwrap(), 1);
     assert!(mgr.list_disabled(&fx.mods_dir).is_empty());
@@ -470,11 +549,268 @@ fn entrada_orfa_do_manifesto_e_marcada_e_pode_ser_limpa() {
 #[test]
 fn painel_de_desativados_ignora_as_pastas_internas() {
     let fx = Fixture::new();
-    write_file(&fx.mods_dir.join(BACKUP_DIR_NAME).join("antigo.package.disabled"), b"x");
+    write_file(
+        &fx.mods_dir
+            .join(BACKUP_DIR_NAME)
+            .join("antigo.package.disabled"),
+        b"x",
+    );
     write_file(&fx.mods_dir.join("real.package.disabled"), b"y");
 
     let lista = fx.manager().list_disabled(&fx.mods_dir);
 
     assert_eq!(lista.len(), 1);
     assert_eq!(lista[0].name, "real.package");
+}
+
+#[cfg(unix)]
+#[test]
+fn p0_copia_de_pasta_incompleta_nao_publica_destino() {
+    let fx = Fixture::new();
+    let source = fx.mods_dir.join("Origem");
+    let destination = fx.mods_dir.join("Destino");
+    let original = source.join("original.package");
+    write_file(&original, b"ORIGINAL_PRESERVADO_EM_FALHA_RECURSIVA");
+    fs::create_dir(&destination).unwrap();
+    let before_hash = s4suite::engine::tray::full_sha256(&original).unwrap();
+    let _socket = std::os::unix::net::UnixListener::bind(source.join("nao_copiavel.sock")).unwrap();
+
+    let outcome =
+        transfer_items(&[source], &destination, TransferMode::Copy, &fx.mods_dir).unwrap();
+
+    assert_eq!(outcome.done, 0, "{outcome:?}");
+    assert_eq!(outcome.failures.len(), 1, "{outcome:?}");
+    assert_eq!(
+        s4suite::engine::tray::full_sha256(&original).unwrap(),
+        before_hash
+    );
+    assert_eq!(
+        fs::read(&original).unwrap(),
+        b"ORIGINAL_PRESERVADO_EM_FALHA_RECURSIVA"
+    );
+    assert_eq!(
+        fs::read_dir(&destination).unwrap().count(),
+        0,
+        "cópia incompleta foi publicada"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn p0_rename_nao_substitui_symlink_quebrado_preexistente() {
+    let fx = Fixture::new();
+    let original = fx.mods_dir.join("original.package");
+    write_file(&original, b"ORIGINAL_SEM_SOBRESCRITA");
+    let before_hash = s4suite::engine::tray::full_sha256(&original).unwrap();
+    let occupied = fx.mods_dir.join("ocupado.package");
+    let link_target = fx._root.path().join("alvo_ainda_ausente");
+    std::os::unix::fs::symlink(&link_target, &occupied).unwrap();
+
+    let result = rename_item(&original, "ocupado.package", &fx.mods_dir);
+
+    assert!(
+        result.is_err(),
+        "rename substituiu entrada existente: {result:?}"
+    );
+    assert_eq!(fs::read_link(&occupied).unwrap(), link_target);
+    assert_eq!(
+        s4suite::engine::tray::full_sha256(&original).unwrap(),
+        before_hash
+    );
+    assert_eq!(fs::read(&original).unwrap(), b"ORIGINAL_SEM_SOBRESCRITA");
+}
+
+#[cfg(unix)]
+#[test]
+fn p0_correcao_de_scripts_recusa_destino_symlink_externo() {
+    let fx = Fixture::new();
+    let original = fx.mods_dir.join("Categoria/Sub/original.ts4script");
+    write_file(&original, b"SCRIPT_ORIGINAL_NAO_PODE_SAIR_DE_MODS");
+    let before_hash = s4suite::engine::tray::full_sha256(&original).unwrap();
+    let outside = fx._root.path().join("fora");
+    fs::create_dir(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, fx.mods_dir.join("00_Scripts_Corrigidos")).unwrap();
+    let issues = s4suite::engine::organizer::check_script_depth(&fx.mods_dir);
+
+    let result = s4suite::engine::organizer::auto_fix_script_depth(&issues, &fx.mods_dir);
+
+    assert!(
+        result.is_err(),
+        "script foi movido através de symlink: {result:?}"
+    );
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+    assert_eq!(
+        s4suite::engine::tray::full_sha256(&original).unwrap(),
+        before_hash
+    );
+    assert_eq!(
+        fs::read(&original).unwrap(),
+        b"SCRIPT_ORIGINAL_NAO_PODE_SAIR_DE_MODS"
+    );
+}
+
+#[test]
+fn p0_duplicatas_revalidadas_removem_apenas_os_bytes_redundantes() {
+    let fx = Fixture::new();
+    let keeper = fx.mods_dir.join("original.package");
+    let redundant = fx.mods_dir.join("sub/copia.package");
+    write_file(&keeper, b"DUPLICADO_ESTAVEL");
+    write_file(&redundant, b"DUPLICADO_ESTAVEL");
+    let before_hash = s4suite::engine::tray::full_sha256(&keeper).unwrap();
+    let groups = detect_duplicates(&fx.mods_dir);
+    assert_eq!(groups.len(), 1);
+
+    let outcome = s4suite::engine::organizer::remove_duplicates(&groups, &fx.mods_dir);
+
+    assert_eq!(outcome.removed, 1, "{outcome:?}");
+    assert!(outcome.failures.is_empty(), "{outcome:?}");
+    assert!(!redundant.exists());
+    assert_eq!(fs::read(&keeper).unwrap(), b"DUPLICADO_ESTAVEL");
+    assert_eq!(
+        s4suite::engine::tray::full_sha256(&keeper).unwrap(),
+        before_hash
+    );
+}
+
+#[test]
+fn p0_restaurar_disabled_recusa_destino_externo_do_manifesto() {
+    let fx = Fixture::new();
+    let disabled = fx.mods_dir.join("original.package.disabled");
+    write_file(&disabled, b"DISABLED_ORIGINAL_PRESERVADO");
+    let disabled_hash = s4suite::engine::tray::full_sha256(&disabled).unwrap();
+    let outside = fx._root.path().join("fora/original.package");
+    write_file(&outside, b"ARQUIVO_EXTERNO_INTOCAVEL");
+    let outside_hash = s4suite::engine::tray::full_sha256(&outside).unwrap();
+    let manager = fx.manager();
+    let entry = s4suite::engine::disabled::DisabledModEntry {
+        disabled_path: disabled.display().to_string(),
+        original_path: outside.display().to_string(),
+        disabled_at: "0".into(),
+        reason: "manual".into(),
+        note: "manifesto redirecionado".into(),
+    };
+    manager
+        .save_manifest(&std::collections::HashMap::from([(
+            disabled.display().to_string(),
+            entry,
+        )]))
+        .unwrap();
+
+    let result = manager.enable_mod(&disabled, &fx.mods_dir);
+
+    assert!(
+        result.is_err(),
+        "restauração escreveu fora de Mods: {result:?}"
+    );
+    assert_eq!(
+        fs::read(&disabled).unwrap(),
+        b"DISABLED_ORIGINAL_PRESERVADO"
+    );
+    assert_eq!(
+        s4suite::engine::tray::full_sha256(&disabled).unwrap(),
+        disabled_hash
+    );
+    assert_eq!(fs::read(&outside).unwrap(), b"ARQUIVO_EXTERNO_INTOCAVEL");
+    assert_eq!(
+        s4suite::engine::tray::full_sha256(&outside).unwrap(),
+        outside_hash
+    );
+    assert_eq!(fs::read_dir(outside.parent().unwrap()).unwrap().count(), 1);
+    assert!(manager
+        .load_manifest()
+        .contains_key(&disabled.display().to_string()));
+}
+
+#[test]
+fn p0_restaurar_disabled_recusa_origem_fora_de_mods() {
+    let fx = Fixture::new();
+    let outside = fx._root.path().join("fora/original.package.disabled");
+    write_file(&outside, b"DISABLED_EXTERNO_NAO_PODE_SER_MOVIDO");
+    let before_hash = s4suite::engine::tray::full_sha256(&outside).unwrap();
+
+    let result = fx.manager().enable_mod(&outside, &fx.mods_dir);
+
+    assert!(
+        result.is_err(),
+        "restauração moveu origem fora de Mods: {result:?}"
+    );
+    assert_eq!(
+        fs::read(&outside).unwrap(),
+        b"DISABLED_EXTERNO_NAO_PODE_SER_MOVIDO"
+    );
+    assert_eq!(
+        s4suite::engine::tray::full_sha256(&outside).unwrap(),
+        before_hash
+    );
+    assert_eq!(fs::read_dir(outside.parent().unwrap()).unwrap().count(), 1);
+    assert_eq!(fs::read_dir(&fx.mods_dir).unwrap().count(), 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn p0_disabled_preserva_colisoes_com_symlinks_quebrados() {
+    let fx = Fixture::new();
+    let original = fx.mods_dir.join("original.package");
+    write_file(&original, b"MOD_COM_COLISOES_PRESERVADO");
+    let before_hash = s4suite::engine::tray::full_sha256(&original).unwrap();
+    let disabled_collision = fx.mods_dir.join("original.package.disabled");
+    let absent = fx._root.path().join("alvo_externo_ausente");
+    std::os::unix::fs::symlink(&absent, &disabled_collision).unwrap();
+    let manager = fx.manager();
+
+    let disabled = manager
+        .disable_mod(
+            &original,
+            &fx.mods_dir,
+            "manual",
+            "teste",
+            &[fx.mods_dir.clone()],
+        )
+        .unwrap();
+    assert_ne!(disabled, disabled_collision);
+    assert_eq!(fs::read_link(&disabled_collision).unwrap(), absent);
+    std::os::unix::fs::symlink(&absent, &original).unwrap();
+    let restored = manager.enable_mod(&disabled, &fx.mods_dir).unwrap();
+
+    assert_ne!(restored, original);
+    assert_eq!(fs::read_link(&original).unwrap(), absent);
+    assert_eq!(fs::read_link(&disabled_collision).unwrap(), absent);
+    assert_eq!(fs::read(&restored).unwrap(), b"MOD_COM_COLISOES_PRESERVADO");
+    assert_eq!(
+        s4suite::engine::tray::full_sha256(&restored).unwrap(),
+        before_hash
+    );
+    assert!(!absent.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn p0_manifesto_nao_sobrescreve_alvo_de_temporario_symlink() {
+    let fx = Fixture::new();
+    let outside = fx._root.path().join("fora/dados.package");
+    write_file(&outside, b"CONTEUDO_EXTERNO_AO_MANIFESTO");
+    let outside_hash = s4suite::engine::tray::full_sha256(&outside).unwrap();
+    fs::create_dir_all(&fx.config_dir).unwrap();
+    let occupied_temporary = fx.config_dir.join("disabled_mods.json.tmp");
+    std::os::unix::fs::symlink(&outside, &occupied_temporary).unwrap();
+
+    fx.manager()
+        .save_manifest(&std::collections::HashMap::new())
+        .unwrap();
+
+    assert_eq!(
+        fs::read(&outside).unwrap(),
+        b"CONTEUDO_EXTERNO_AO_MANIFESTO"
+    );
+    assert_eq!(
+        s4suite::engine::tray::full_sha256(&outside).unwrap(),
+        outside_hash
+    );
+    assert_eq!(fs::read_link(&occupied_temporary).unwrap(), outside);
+    assert!(
+        !fs::symlink_metadata(fx.config_dir.join("disabled_mods.json"))
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
 }

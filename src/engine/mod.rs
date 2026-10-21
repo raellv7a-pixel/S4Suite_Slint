@@ -1,4 +1,5 @@
 pub mod dbpf;
+pub mod manifest;
 pub mod disabled;
 pub mod installer;
 pub mod merger;
@@ -24,8 +25,20 @@ pub const INTERNAL_WORK_DIRS: [&str; 3] = [
 ];
 
 fn is_internal_work_dir(entry: &DirEntry) -> bool {
+    let name = entry.file_name().to_string_lossy();
     entry.file_type().is_dir()
-        && INTERNAL_WORK_DIRS.contains(&entry.file_name().to_string_lossy().as_ref())
+        && (INTERNAL_WORK_DIRS.contains(&name.as_ref())
+            || [
+                ".s4suite-copy-",
+                ".s4suite-move-",
+                ".s4suite-duplicate-",
+                ".s4suite-rollback-",
+                ".s4suite-tray-",
+                ".s4merge-",
+                ".s4-post-merge-",
+            ]
+            .iter()
+            .any(|prefix| name.starts_with(prefix)))
 }
 
 /// Percorre apenas o conteúdo real de mods, pulando as pastas internas.

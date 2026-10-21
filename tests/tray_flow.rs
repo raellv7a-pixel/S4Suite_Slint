@@ -55,7 +55,13 @@ impl Fixture {
         fs::create_dir_all(&downloads).unwrap();
         fs::create_dir_all(&tray_dir).unwrap();
         fs::create_dir_all(&mods_dir).unwrap();
-        Self { _root: root, downloads, work_dir, tray_dir, mods_dir }
+        Self {
+            _root: root,
+            downloads,
+            work_dir,
+            tray_dir,
+            mods_dir,
+        }
     }
 
     fn roots(&self) -> Vec<PathBuf> {
@@ -68,7 +74,10 @@ fn nome_de_importacao_e_sanitizado() {
     // Caractere proibido é removido, e o espaço duplo que a remoção deixa
     // para trás é colapsado — nada de pasta chamada "Maria  Silva".
     assert_eq!(sanitize_import_name(Some("Maria / Silva")), "Maria Silva");
-    assert_eq!(sanitize_import_name(Some("  Mod_v2-final!  ")), "Mod_v2-final");
+    assert_eq!(
+        sanitize_import_name(Some("  Mod_v2-final!  ")),
+        "Mod_v2-final"
+    );
     // Sem nada aproveitável, cai no rótulo padrão em vez de virar pasta vazia.
     assert_eq!(sanitize_import_name(Some("///")), "Imported_Item");
     assert!(!sanitize_import_name(None).is_empty());
@@ -105,7 +114,13 @@ fn zip_com_sim_e_cc_e_classificado_corretamente() {
 fn zip_apenas_com_cc_e_rotulado_como_tal() {
     let fx = Fixture::new();
     let archive = fx.downloads.join("PackCC.zip");
-    make_zip(&archive, &[("a.package", package_bytes("a")), ("b.package", package_bytes("b"))]);
+    make_zip(
+        &archive,
+        &[
+            ("a.package", package_bytes("a")),
+            ("b.package", package_bytes("b")),
+        ],
+    );
 
     let (candidatos, _) = prepare_tray_candidates(&[archive], &fx.work_dir, None).unwrap();
 
@@ -201,8 +216,13 @@ fn importacao_separa_tray_do_cc_nas_pastas_certas() {
     let (candidatos, _) = prepare_tray_candidates(&[archive], &fx.work_dir, None).unwrap();
     let c = &candidatos[0];
 
-    let (tray_n, cc_n, pulados) =
-        import_tray_item(&c.analysis, &fx.tray_dir, &c.cc_dir(&fx.mods_dir), &fx.roots()).unwrap();
+    let (tray_n, cc_n, pulados) = import_tray_item(
+        &c.analysis,
+        &fx.tray_dir,
+        &c.cc_dir(&fx.mods_dir),
+        &fx.roots(),
+    )
+    .unwrap();
 
     assert_eq!(tray_n, 1);
     assert_eq!(cc_n, 1);
@@ -212,7 +232,10 @@ fn importacao_separa_tray_do_cc_nas_pastas_certas() {
     assert!(fx.tray_dir.join("Maria.trayitem").exists());
 
     // O CC vai para uma subpasta identificada em Mods, não solto na raiz.
-    let destino_cc = fx.mods_dir.join("Imported_Sims").join(&c.analysis.detected_name);
+    let destino_cc = fx
+        .mods_dir
+        .join("Imported_Sims")
+        .join(&c.analysis.detected_name);
     assert!(destino_cc.join("cabelo.package").exists());
     assert!(!fx.mods_dir.join("cabelo.package").exists());
 }
@@ -248,7 +271,13 @@ fn destino_do_cc_pode_ser_trocado_por_item() {
     candidatos[0].cc_target = Some(escolhida.clone());
 
     let c = &candidatos[0];
-    import_tray_item(&c.analysis, &fx.tray_dir, &c.cc_dir(&fx.mods_dir), &fx.roots()).unwrap();
+    import_tray_item(
+        &c.analysis,
+        &fx.tray_dir,
+        &c.cc_dir(&fx.mods_dir),
+        &fx.roots(),
+    )
+    .unwrap();
 
     assert!(escolhida.join("cabelo.package").exists());
     assert!(
@@ -270,7 +299,82 @@ fn destino_padrao_e_uma_subpasta_com_o_nome_do_item() {
 
     assert_eq!(
         c.cc_dir(&fx.mods_dir),
-        fx.mods_dir.join("Imported_Sims").join(&c.analysis.detected_name)
+        fx.mods_dir
+            .join("Imported_Sims")
+            .join(&c.analysis.detected_name)
     );
-    assert!(!c.skipped, "um item recém-analisado entra na fila para importar");
+    assert!(
+        !c.skipped,
+        "um item recém-analisado entra na fila para importar"
+    );
+}
+
+#[test]
+fn p0_tray_recusa_destino_fora_das_raizes_antes_de_criar_pastas() {
+    let fx = Fixture::new();
+    let source = fx.downloads.join("original.package");
+    write_file(&source, b"CC_ORIGINAL_RESTRITO_A_MODS");
+    let before_hash = s4suite::engine::tray::full_sha256(&source).unwrap();
+    let analysis = s4suite::engine::tray::analyze_tray_source(&fx.downloads, None).unwrap();
+    let outside = fx._root.path().join("fora/nao_criar");
+
+    let result = import_tray_item(&analysis, &fx.tray_dir, &outside, &fx.roots());
+
+    assert!(
+        result.is_err(),
+        "importação aceitou pasta fora do escopo: {result:?}"
+    );
+    assert!(!outside.exists(), "importação criou pasta fora do escopo");
+    assert_eq!(fs::read_dir(&fx.tray_dir).unwrap().count(), 0);
+    assert_eq!(
+        s4suite::engine::tray::full_sha256(&source).unwrap(),
+        before_hash
+    );
+    assert_eq!(fs::read(&source).unwrap(), b"CC_ORIGINAL_RESTRITO_A_MODS");
+}
+
+#[test]
+fn p0_tray_falha_depois_da_primeira_publicacao_preserva_fontes_e_preexistentes() {
+    let fx = Fixture::new();
+    let tray_source = fx.downloads.join("original.trayitem");
+    let cc_source = fx.downloads.join("original.package");
+    write_file(&tray_source, b"TRAY_ORIGINAL_PRESERVADO");
+    write_file(&cc_source, b"CC_ORIGINAL_PRESERVADO");
+    let tray_hash = s4suite::engine::tray::full_sha256(&tray_source).unwrap();
+    let cc_hash = s4suite::engine::tray::full_sha256(&cc_source).unwrap();
+    let mut analysis = s4suite::engine::tray::analyze_tray_source(&fx.downloads, None).unwrap();
+    analysis.package_files[0].src_path = fx.downloads.join("fonte_ausente.package");
+    let sentinel = fx.tray_dir.join("preexistente.trayitem");
+    write_file(&sentinel, b"TRAY_PREEXISTENTE_INTOCAVEL");
+    let sentinel_hash = s4suite::engine::tray::full_sha256(&sentinel).unwrap();
+
+    let result = import_tray_item(
+        &analysis,
+        &fx.tray_dir,
+        &fx.mods_dir.join("CC"),
+        &fx.roots(),
+    );
+
+    assert!(
+        result.is_err(),
+        "a segunda cópia deveria falhar: {result:?}"
+    );
+    assert_eq!(fs::read_dir(&fx.tray_dir).unwrap().count(), 1);
+    for (path, hash, bytes) in [
+        (
+            &tray_source,
+            tray_hash,
+            b"TRAY_ORIGINAL_PRESERVADO".as_slice(),
+        ),
+        (&cc_source, cc_hash, b"CC_ORIGINAL_PRESERVADO".as_slice()),
+        (
+            &sentinel,
+            sentinel_hash,
+            b"TRAY_PREEXISTENTE_INTOCAVEL".as_slice(),
+        ),
+    ] {
+        assert_eq!(s4suite::engine::tray::full_sha256(path).unwrap(), hash);
+        assert_eq!(fs::read(path).unwrap(), bytes);
+    }
+    assert_eq!(fs::read_dir(fx.mods_dir.join("CC")).unwrap().count(), 0);
 }

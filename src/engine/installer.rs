@@ -1,9 +1,11 @@
-use crate::core::safety::{safe_remove_file, unique_dest_path};
+use crate::core::safety::{
+    is_safe_to_delete, path_exists_or_symlink, same_file_identity, unique_dest_path, AnchoredDir,
+};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
-use std::io::{self, Read};
+use std::io::{self, Read, Seek};
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use walkdir::WalkDir;
 
 /// Pasta de trabalho onde os arquivos são extraídos antes de irem para Mods.
@@ -17,7 +19,9 @@ pub const MANAGED_BASE_DIR: &str = "00_Triagem_Novos";
 pub enum InstallerError {
     #[error("Arquivo suspeito ou executável bloqueado por segurança: '{0}'")]
     SecurityBlocked(String),
-    #[error("Nenhum arquivo de mod útil (.package ou .ts4script) encontrado no arquivo compactado")]
+    #[error(
+        "Nenhum arquivo de mod útil (.package ou .ts4script) encontrado no arquivo compactado"
+    )]
     NoUsefulFiles,
     #[error("Erro ao descompactar: {0}")]
     ExtractionFailed(String),
@@ -48,7 +52,12 @@ pub fn install_identity_name(path: &Path) -> String {
             }
         })
         .collect();
-    let trimmed = sanitized.trim().trim_matches('_').trim().trim_matches('.').trim();
+    let trimmed = sanitized
+        .trim()
+        .trim_matches('_')
+        .trim()
+        .trim_matches('.')
+        .trim();
     if trimmed.is_empty() {
         "mod".to_string()
     } else {
@@ -72,7 +81,11 @@ pub fn is_valid_mod_file(filename: &str) -> bool {
 
 fn is_archive(path: &Path) -> bool {
     matches!(
-        path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase().as_str(),
+        path.extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase()
+            .as_str(),
         "zip" | "7z" | "rar"
     )
 }
@@ -102,7 +115,10 @@ pub fn scan_archive_security(archive_path: &Path) -> Result<(), InstallerError> 
             let listing = String::from_utf8_lossy(&output.stdout).to_lowercase();
             for ext in &blocked_exts {
                 if listing.contains(&format!(".{}", ext)) {
-                    return Err(InstallerError::SecurityBlocked(format!("Extensão .{} encontrada", ext)));
+                    return Err(InstallerError::SecurityBlocked(format!(
+                        "Extensão .{} encontrada",
+                        ext
+                    )));
                 }
             }
         }
@@ -116,7 +132,10 @@ pub fn detect_dependencies(package_bytes: &[u8]) -> Vec<String> {
     if package_bytes.windows(5).any(|w| w == b"Lot51") {
         deps.push("Lot51 Core Library".to_string());
     }
-    if package_bytes.windows(12).any(|w| w == b"XML Injector" || w == b"XmlInjector") {
+    if package_bytes
+        .windows(12)
+        .any(|w| w == b"XML Injector" || w == b"XmlInjector")
+    {
         deps.push("XML Injector".to_string());
     }
     if package_bytes.windows(9).any(|w| w == b"Frankosas") {
@@ -140,42 +159,364 @@ pub fn extract_archive_to_staging(
 
 /// Extração crua, sem o filtro de executáveis.
 pub fn extract_archive(archive_path: &Path, staging_dir: &Path) -> Result<PathBuf, InstallerError> {
-    fs::create_dir_all(staging_dir)?;
-
-    let ext = archive_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    let destination = AnchoredDir::create(staging_dir)?;
+    let ext = archive_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
     if ext == "zip" {
-        if let Ok(file) = File::open(archive_path) {
-            if let Ok(mut archive) = zip::ZipArchive::new(file) {
-                archive.extract(staging_dir).map_err(|e| InstallerError::ExtractionFailed(e.to_string()))?;
-                return Ok(staging_dir.to_path_buf());
+        let mut archive = zip::ZipArchive::new(open_regular_path(archive_path)?)
+            .map_err(|e| InstallerError::ExtractionFailed(e.to_string()))?;
+        for index in 0..archive.len() {
+            let mut entry = archive
+                .by_index(index)
+                .map_err(|e| InstallerError::ExtractionFailed(e.to_string()))?;
+            if entry.is_symlink() {
+                return Err(InstallerError::SecurityBlocked(format!(
+                    "Link no arquivo compactado: {}",
+                    entry.name()
+                )));
+            }
+            let name = PathBuf::from(entry.name());
+            let is_directory = entry.is_dir();
+            let size = entry.size();
+            extract_entry_at(&destination, &name, is_directory, size, &mut entry, || {
+                Ok(())
+            })?;
+        }
+        return Ok(staging_dir.to_path_buf());
+    }
+    if ext == "7z" {
+        let mut callback_started = false;
+        let result = sevenz_rust::decompress_with_extract_fn(
+            open_regular_path(archive_path)?,
+            destination.path(),
+            |entry, reader, _| {
+                callback_started = true;
+                if entry.is_anti_item() {
+                    return Err(sevenz_rust::Error::io(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "Entrada de exclusão 7z bloqueada",
+                    )));
+                }
+                extract_entry_at(
+                    &destination,
+                    Path::new(entry.name()),
+                    entry.is_directory(),
+                    entry.size(),
+                    reader,
+                    || Ok(()),
+                )
+                .map_err(sevenz_rust::Error::io)?;
+                Ok(true)
+            },
+        );
+        match result {
+            Ok(()) => return Ok(staging_dir.to_path_buf()),
+            Err(error) if callback_started => {
+                return Err(InstallerError::ExtractionFailed(error.to_string()))
+            }
+            Err(_) => {} // Codec não suportado antes de qualquer entrada: streaming CLI seguro.
+        }
+    }
+    extract_with_7z_stdout(archive_path, &destination)?;
+    Ok(staging_dir.to_path_buf())
+}
+
+fn extract_entry_at(
+    root: &AnchoredDir,
+    relative: &Path,
+    is_directory: bool,
+    expected_size: u64,
+    reader: &mut (impl Read + ?Sized),
+    finish: impl FnOnce() -> io::Result<()>,
+) -> io::Result<()> {
+    if relative.as_os_str().is_empty()
+        || relative
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_)))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("Caminho de extração bloqueado: {}", relative.display()),
+        ));
+    }
+    let mut parent = root.try_clone()?;
+    if let Some(path) = relative.parent() {
+        for component in path.components() {
+            if let Component::Normal(name) = component {
+                parent = parent.create_child(name)?;
             }
         }
     }
+    let name = relative
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Entrada sem nome"))?;
+    if is_directory {
+        parent.create_child(name)?;
+        return Ok(());
+    }
+    let workspace = tempfile::Builder::new()
+        .prefix(".s4suite-extract-")
+        .tempdir_in(parent.path())?;
+    let private = parent.child(workspace.path().file_name().unwrap())?;
+    let mut output = private.create_new("payload")?;
+    let result = (|| {
+        let count = io::copy(reader, &mut output)?;
+        output.sync_all()?;
+        if count != expected_size {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Entrada extraída incompleta",
+            ));
+        }
+        finish()?;
+        private.publish_noreplace("payload", &parent, name)
+    })();
+    if let Err(error) = result {
+        return match workspace.close() {
+            Ok(()) => Err(error),
+            Err(cleanup) => Err(io::Error::new(
+                error.kind(),
+                format!("{error}; limpeza de extração: {cleanup}"),
+            )),
+        };
+    }
+    if let Err(cleanup) = workspace.close() {
+        let rollback = remove_owned_file(&parent, name, &output);
+        return Err(io::Error::other(format!(
+            "Limpeza de extração: {cleanup}; rollback: {rollback:?}"
+        )));
+    }
+    Ok(())
+}
 
-    // Try 7z CLI or sevenz-rust
-    if ext == "7z" {
-        if sevenz_rust::decompress_file(archive_path, staging_dir).is_ok() {
-            return Ok(staging_dir.to_path_buf());
+struct ExternalArchiveEntry {
+    path: PathBuf,
+    size: u64,
+    directory: bool,
+}
+
+fn parse_7z_listing(listing: &str) -> io::Result<Vec<ExternalArchiveEntry>> {
+    let invalid = || {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Listagem 7z ambígua ou insegura",
+        )
+    };
+    let mut records = Vec::new();
+    let mut fields: HashMap<&str, &str> = HashMap::new();
+    for line in listing.lines().chain(std::iter::once("")) {
+        if line.is_empty() {
+            if fields.is_empty() {
+                continue;
+            }
+            let path: &str = fields.get("Path").copied().ok_or_else(invalid)?;
+            let path = PathBuf::from(path);
+            if path.as_os_str().is_empty()
+                || path
+                    .components()
+                    .any(|c| !matches!(c, Component::Normal(_)))
+            {
+                return Err(invalid());
+            }
+            let attributes = fields.get("Attributes").copied().unwrap_or("");
+            let mode = fields.get("Mode").copied().unwrap_or("");
+            let directory = fields.get("Folder").copied() == Some("+")
+                || attributes.starts_with('D')
+                || mode.starts_with('d');
+            // Links, reparse points, streams e entradas de exclusão não são
+            // materializados; atributos de Unix começam com l para symlinks.
+            if fields.iter().any(|(key, value)| {
+                !value.is_empty()
+                    && *value != "-"
+                    && matches!(
+                        *key,
+                        "Symbolic Link"
+                            | "Hard Link"
+                            | "Links"
+                            | "Reparse"
+                            | "NTFS AltStream"
+                            | "Alternate Stream"
+                            | "Anti"
+                            | "Deleted"
+                            | "Comment"
+                    )
+            }) || attributes
+                .split_whitespace()
+                .any(|part| part.starts_with('l'))
+                || mode.starts_with('l')
+                || fields.get("Encrypted").copied() == Some("+")
+            {
+                return Err(invalid());
+            }
+            if !fields.contains_key("Attributes")
+                && !fields.contains_key("Folder")
+                && mode.is_empty()
+            {
+                return Err(invalid());
+            }
+            let size = fields.get("Size").copied().ok_or_else(invalid)?;
+            let size = if size.is_empty() && directory {
+                0
+            } else {
+                if size.is_empty() || !size.bytes().all(|byte| byte.is_ascii_digit()) {
+                    return Err(invalid());
+                }
+                size.parse::<u64>().map_err(|_| invalid())?
+            };
+            records.push(ExternalArchiveEntry {
+                path,
+                size,
+                directory,
+            });
+            fields.clear();
+            continue;
+        }
+        let (key, value) = line.split_once(" = ").ok_or_else(invalid)?;
+        if !matches!(
+            key,
+            "Path"
+                | "Folder"
+                | "Size"
+                | "Packed Size"
+                | "Modified"
+                | "Created"
+                | "Accessed"
+                | "Attributes"
+                | "CRC"
+                | "Encrypted"
+                | "Method"
+                | "Block"
+                | "Host OS"
+                | "Version"
+                | "Volume Index"
+                | "Offset"
+                | "Solid"
+                | "Comment"
+                | "Characteristics"
+                | "NTFS AltStream"
+                | "Alternate Stream"
+                | "Symbolic Link"
+                | "Hard Link"
+                | "Anti"
+                | "Deleted"
+                | "Mode"
+                | "User"
+                | "Group"
+                | "User ID"
+                | "Group ID"
+                | "Links"
+                | "Short Name"
+                | "Reparse"
+        ) || (fields.is_empty() && key != "Path")
+            || fields.insert(key, value).is_some()
+        {
+            return Err(invalid());
         }
     }
+    let mut paths = HashSet::new();
+    if records.is_empty() || records.iter().any(|entry| !paths.insert(&entry.path)) {
+        return Err(invalid());
+    }
+    Ok(records)
+}
 
-    // Fallback 7z process. Usamos `output()` para capturar stdout/stderr — com
-    // `status()` o 7z escreve direto no terminal que lançou a aplicação.
-    let output = Command::new("7z")
-        .arg("x")
-        .arg(archive_path)
-        .arg(format!("-o{}", staging_dir.display()))
-        .arg("-y")
-        .output();
-
-    match output {
-        Ok(o) if o.status.success() => Ok(staging_dir.to_path_buf()),
-        Ok(_) => Err(InstallerError::ExtractionFailed(
-            "formato não reconhecido ou arquivo corrompido".to_string(),
-        )),
-        Err(_) => Err(InstallerError::ExtractionFailed(
-            "não foi possível extrair (instale o 7z para suportar .rar e .7z)".to_string(),
-        )),
+fn extract_with_7z_stdout(
+    archive_path: &Path,
+    destination: &AnchoredDir,
+) -> Result<(), InstallerError> {
+    // A listagem e todas as extrações leem o mesmo snapshot privado. Nenhum
+    // argumento -o é passado: o extrator externo só entrega bytes por stdout.
+    let workspace = tempfile::Builder::new()
+        .prefix(".s4suite-archive-")
+        .tempdir_in(destination.path())?;
+    let private = destination.child(workspace.path().file_name().unwrap())?;
+    let mut source = open_regular_path(archive_path)?;
+    drop(copy_open_file(
+        &mut source,
+        &private,
+        std::ffi::OsStr::new("archive"),
+    )?);
+    let snapshot = private.child_process_path().join("archive");
+    let result = (|| -> io::Result<()> {
+        let listing = Command::new("7z")
+            .args(["l", "-slt", "-ba", "-sccUTF-8", "--"])
+            .arg(&snapshot)
+            .current_dir(private.child_process_path())
+            .stdin(Stdio::null())
+            .output()?;
+        if !listing.status.success() {
+            return Err(io::Error::other(format!(
+                "7z não conseguiu listar arquivo: {}",
+                listing.status
+            )));
+        }
+        let listing = String::from_utf8(listing.stdout)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Listagem 7z não é UTF-8"))?;
+        for entry in parse_7z_listing(&listing)? {
+            if entry.directory {
+                extract_entry_at(destination, &entry.path, true, 0, &mut io::empty(), || {
+                    Ok(())
+                })?;
+                continue;
+            }
+            let mut child = Command::new("7z")
+                .args([
+                    "x",
+                    "-so",
+                    "-spd",
+                    "-ssc",
+                    "-sccUTF-8",
+                    "-bd",
+                    "-bb0",
+                    "-y",
+                    "--",
+                ])
+                .arg(&snapshot)
+                .arg(&entry.path)
+                .current_dir(private.child_process_path())
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()?;
+            let mut stdout = child
+                .stdout
+                .take()
+                .ok_or_else(|| io::Error::other("7z sem stdout"))?;
+            let extracted = extract_entry_at(
+                destination,
+                &entry.path,
+                false,
+                entry.size,
+                &mut stdout,
+                || {
+                    let status = child.wait()?;
+                    if !status.success() {
+                        return Err(io::Error::other(format!(
+                            "7z falhou ao extrair entrada: {status}"
+                        )));
+                    }
+                    Ok(())
+                },
+            );
+            drop(stdout);
+            if let Err(error) = extracted {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        }
+        Ok(())
+    })();
+    let cleanup = workspace.close();
+    match (result, cleanup) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) => Err(InstallerError::Io(error)),
+        (result, Err(cleanup)) => Err(InstallerError::RollbackFailed(format!(
+            "Extração externa: {result:?}; limpeza do snapshot: {cleanup}"
+        ))),
     }
 }
 
@@ -196,21 +537,26 @@ pub fn prepare_staging(
     sources: &[PathBuf],
     staging_dir: &Path,
 ) -> Result<StagingReport, InstallerError> {
-    if staging_dir.exists() {
-        fs::remove_dir_all(staging_dir)?;
-    }
-    fs::create_dir_all(staging_dir)?;
+    let parent_path = staging_dir
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Staging sem pai"))?;
+    let name = staging_dir
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Staging sem nome"))?;
+    let parent = AnchoredDir::create(parent_path)?;
+    let _operation = parent.lock_exclusive()?;
+    clear_staging_at(&parent, name)?;
+    let staging = parent.create_child(name)?;
 
     let mut report = StagingReport::default();
 
     for source in sources {
-        let identity = install_identity_name(source);
-        let dest = staging_dir.join(&identity);
+        let base_identity = install_identity_name(source);
+        let dest = crate::core::safety::unique_dest_path(staging_dir, &base_identity);
         let label = source
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| source.display().to_string());
-
         let outcome = if is_archive(source) {
             extract_archive_to_staging(source, &dest).map(|_| ())
         } else {
@@ -222,7 +568,15 @@ pub fn prepare_staging(
             Err(e) => {
                 // Uma fonte ruim não pode abortar o lote inteiro: descartamos
                 // o que ela deixou pela metade e seguimos com as demais.
-                let _ = fs::remove_dir_all(&dest);
+                let cleanup = staging.remove_tree(dest.file_name().unwrap());
+                if let Err(cleanup) = cleanup {
+                    if cleanup.kind() != io::ErrorKind::NotFound {
+                        return Err(InstallerError::RollbackFailed(format!(
+                            "{label}: {e}; limpeza parcial {}: {cleanup}",
+                            dest.display()
+                        )));
+                    }
+                }
                 report.failures.push((label, e.to_string()));
             }
         }
@@ -255,17 +609,32 @@ fn copy_loose_mod_to_staging(source: &Path, dest_dir: &Path) -> Result<(), Insta
         return Err(InstallerError::NoUsefulFiles);
     }
 
-    fs::create_dir_all(dest_dir)?;
-    fs::copy(source, dest_dir.join(&filename))?;
+    atomic_copy(source, &dest_dir.join(&filename))?;
     Ok(())
 }
 
 /// Remove o staging. Seguro de chamar quando ele não existe.
 pub fn clear_staging(staging_dir: &Path) -> io::Result<()> {
-    if staging_dir.exists() {
-        fs::remove_dir_all(staging_dir)?;
+    let parent_path = staging_dir
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Staging sem pai"))?;
+    let name = staging_dir
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Staging sem nome"))?;
+    let parent = match AnchoredDir::open(parent_path) {
+        Ok(parent) => parent,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    let _operation = parent.lock_exclusive()?;
+    clear_staging_at(&parent, name)
+}
+
+fn clear_staging_at(parent: &AnchoredDir, name: &std::ffi::OsStr) -> io::Result<()> {
+    match parent.remove_tree(name) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        result => result,
     }
-    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -285,6 +654,8 @@ pub struct StagedFile {
     pub size: u64,
     pub conflict: ConflictType,
     pub existing_dest: Option<PathBuf>,
+    /// Nome alternativo atribuído quando há colisão de destino na mesma fila (ex: .ts4script de autores diferentes)
+    pub target_filename: Option<String>,
 }
 
 impl StagedFile {
@@ -305,10 +676,13 @@ impl StagedFile {
             return existing.clone();
         }
         let managed = mods_dir.join(managed_base);
+        let effective_name = self.target_filename.as_deref().unwrap_or(&self.filename);
         if self.is_script() {
-            managed.join(&self.filename)
+            managed.join(effective_name)
+        } else if let Some(parent) = self.rel_path.parent() {
+            managed.join(parent).join(effective_name)
         } else {
-            managed.join(&self.rel_path)
+            managed.join(effective_name)
         }
     }
 }
@@ -331,9 +705,9 @@ pub fn calculate_conflicts(
     mods_dir: &Path,
 ) -> Result<ConflictReport, InstallerError> {
     let mut staged_files = Vec::new();
-    let mut exact_matches = 0;
-    let mut updates = 0;
-    let mut new_files = 0;
+    let mut exact_matches: usize = 0;
+    let mut updates: usize = 0;
+    let mut new_files: usize = 0;
 
     // O staging e os backups moram dentro de Mods. Sem excluí-los aqui, os
     // arquivos recém-extraídos apareceriam como "já instalados" e toda a fila
@@ -344,10 +718,13 @@ pub fn calculate_conflicts(
         if entry.path().is_file() {
             let fname = entry.file_name().to_string_lossy().to_string();
             let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-            existing_map.entry(fname).or_default().push(ExistingCandidate {
-                path: entry.path().to_path_buf(),
-                size,
-            });
+            existing_map
+                .entry(fname)
+                .or_default()
+                .push(ExistingCandidate {
+                    path: entry.path().to_path_buf(),
+                    size,
+                });
         }
     }
 
@@ -372,7 +749,10 @@ pub fn calculate_conflicts(
             })
             .unwrap_or_else(|| "mod".to_string());
 
-        let candidates = existing_map.get(&filename).map(|v| v.as_slice()).unwrap_or(&[]);
+        let candidates = existing_map
+            .get(&filename)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
 
         // Localiza candidato legítimo para atualização evitando substituir mods não relacionados
         let matched_dest = find_matching_existing_file(
@@ -413,11 +793,96 @@ pub fn calculate_conflicts(
             size,
             conflict,
             existing_dest,
+            target_filename: None,
         });
     }
 
     if staged_files.is_empty() {
         return Err(InstallerError::NoUsefulFiles);
+    }
+
+    // Detecta e resolve antecipadamente colisões de destino na mesma fila
+    // Especialmente .ts4script de autores diferentes ou arquivos com mesmo caminho relativo
+    let mut script_counts: HashMap<String, usize> = HashMap::new();
+    for f in &staged_files {
+        if f.is_script() && f.existing_dest.is_none() {
+            *script_counts.entry(f.filename.to_lowercase()).or_default() += 1;
+        }
+    }
+
+    let mut assigned_destinations: HashSet<PathBuf> = HashSet::new();
+    for f in &mut staged_files {
+        if f.is_script() && f.existing_dest.is_none() {
+            if let Some(&count) = script_counts.get(&f.filename.to_lowercase()) {
+                if count > 1 {
+                    // Há múltiplos scripts com o mesmo nome na fila: prefixa a identidade do mod para desambiguar
+                    let namespaced = format!("{}_{}", f.mod_root, f.filename);
+                    f.target_filename = Some(namespaced);
+                }
+            }
+        }
+
+        // Se o arquivo é uma atualização aprovada com existing_dest:
+        if let Some(existing) = &f.existing_dest {
+            if assigned_destinations.insert(existing.clone()) {
+                continue;
+            }
+            // Outro arquivo na fila JÁ reivindicou este destino existente:
+            // Desvincula para não substituir silenciosamente o primeiro arquivo
+            f.existing_dest = None;
+            match f.conflict {
+                ConflictType::ExactMatch => exact_matches = exact_matches.saturating_sub(1),
+                ConflictType::SizeDiff => updates = updates.saturating_sub(1),
+                ConflictType::NewFile => {}
+            }
+            f.conflict = ConflictType::NewFile;
+            new_files += 1;
+        }
+
+        // Para arquivos novos (ou atualizações colidentes desvinculadas):
+        // Garante que o destino seja estritamente único na fila E no disco
+        let mut dest = f.destination(mods_dir, MANAGED_BASE_DIR);
+        let mut counter = 1;
+        while assigned_destinations.contains(&dest)
+            || (path_exists_or_symlink(&dest) && f.existing_dest.is_none())
+        {
+            counter += 1;
+            let base_stem = if let Some(custom) = &f.target_filename {
+                Path::new(custom)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("mod")
+                    .to_string()
+            } else if f.is_script() {
+                format!(
+                    "{}_{}",
+                    f.mod_root,
+                    Path::new(&f.filename)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("script")
+                )
+            } else {
+                Path::new(&f.filename)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("mod")
+                    .to_string()
+            };
+            let ext = Path::new(&f.filename)
+                .extension()
+                .and_then(|s| s.to_str())
+                .unwrap_or("");
+            let dot_ext = if ext.is_empty() {
+                String::new()
+            } else {
+                format!(".{}", ext)
+            };
+            let unique_name = format!("{}_{}{}", base_stem, counter, dot_ext);
+            f.target_filename = Some(unique_name);
+            dest = f.destination(mods_dir, MANAGED_BASE_DIR);
+        }
+        assigned_destinations.insert(dest);
     }
 
     Ok(ConflictReport {
@@ -449,7 +914,11 @@ pub fn detect_mutually_exclusive(staged: &[StagedFile]) -> Vec<StagedFile> {
     let opcoes: Vec<StagedFile> = staged
         .iter()
         .filter(|file| {
-            let rel = file.rel_path.to_string_lossy().replace('\\', "/").to_lowercase();
+            let rel = file
+                .rel_path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .to_lowercase();
             // A marca tem que estar num componente do caminho, não no arquivo
             // inteiro: "description.package" contém "script", mas não é opção.
             rel.split('/')
@@ -496,7 +965,11 @@ pub fn detect_dependencies_in_package(path: &Path) -> Vec<String> {
         if let Ok(handle) = File::open(path) {
             use std::io::Read as _;
             let mut buffer = Vec::with_capacity(LIMITE_LEITURA);
-            if handle.take(LIMITE_LEITURA as u64).read_to_end(&mut buffer).is_ok() {
+            if handle
+                .take(LIMITE_LEITURA as u64)
+                .read_to_end(&mut buffer)
+                .is_ok()
+            {
                 for dep in detect_dependencies(&buffer) {
                     if !encontradas.contains(&dep) {
                         encontradas.push(dep);
@@ -526,27 +999,137 @@ pub fn collect_dependencies(staged: &[StagedFile]) -> Vec<String> {
     encontradas
 }
 
-/// Copia de forma atômica usando um arquivo temporário no mesmo diretório de destino.
-/// Garante que interrupções ou erros não deixem arquivos parciais corrompidos no destino.
+/// Copia um arquivo regular completo e publica sem substituir qualquer entrada.
+/// No Linux os diretórios ficam ancorados por descritor durante toda a cópia;
+/// plataformas sem essa garantia falham fechadas.
 pub fn atomic_copy(src: &Path, dest: &Path) -> io::Result<()> {
-    let parent = dest.parent().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "Destino sem pasta pai")
-    })?;
-    fs::create_dir_all(parent)?;
-    let filename = dest.file_name().unwrap_or_default().to_string_lossy();
-    let tmp_dest = unique_dest_path(parent, &format!(".{}.s4tmp", filename));
+    let mut source = open_regular_path(src)?;
+    let parent = dest
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Destino sem pasta pai"))?;
+    let name = dest
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Destino sem nome"))?;
+    copy_open_file(&mut source, &AnchoredDir::create(parent)?, name).map(|_| ())
+}
 
-    if let Err(e) = fs::copy(src, &tmp_dest) {
-        let _ = fs::remove_file(&tmp_dest);
-        return Err(e);
+pub(crate) fn atomic_copy_at(
+    src_parent: &AnchoredDir,
+    src_name: impl AsRef<std::ffi::OsStr>,
+    dest_parent: &AnchoredDir,
+    dest_name: impl AsRef<std::ffi::OsStr>,
+) -> io::Result<()> {
+    let mut source = src_parent.open_regular(src_name)?;
+    copy_open_file(&mut source, dest_parent, dest_name.as_ref()).map(|_| ())
+}
+
+fn open_regular_path(path: &Path) -> io::Result<File> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Fonte sem pasta pai"))?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Fonte sem nome"))?;
+    AnchoredDir::open(parent)?.open_regular(name)
+}
+
+fn unchanged_metadata(a: &fs::Metadata, b: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        same_file_identity(a, b)
+            && a.len() == b.len()
+            && a.mtime() == b.mtime()
+            && a.mtime_nsec() == b.mtime_nsec()
+            && a.ctime() == b.ctime()
+            && a.ctime_nsec() == b.ctime_nsec()
     }
-
-    if let Err(e) = fs::rename(&tmp_dest, dest) {
-        let _ = fs::remove_file(&tmp_dest);
-        return Err(e);
+    #[cfg(not(unix))]
+    {
+        let _ = (a, b);
+        false
     }
+}
 
-    Ok(())
+fn copy_open_file(
+    source: &mut File,
+    parent: &AnchoredDir,
+    name: &std::ffi::OsStr,
+) -> io::Result<File> {
+    let before = source.metadata()?;
+    if !before.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Fonte não é arquivo regular",
+        ));
+    }
+    source.rewind()?;
+    let workspace = tempfile::Builder::new()
+        .prefix(".s4suite-copy-")
+        .tempdir_in(parent.path())?;
+    let private = parent.child(workspace.path().file_name().unwrap())?;
+    let mut output = private.create_new("payload")?;
+    let result = (|| {
+        let count = io::copy(source, &mut output)?;
+        output.sync_all()?;
+        if count != before.len() || !unchanged_metadata(&before, &source.metadata()?) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Fonte mudou ou cópia ficou incompleta",
+            ));
+        }
+        private.publish_noreplace("payload", parent, name)
+    })();
+    if let Err(error) = result {
+        return match workspace.close() {
+            Ok(()) => Err(error),
+            Err(cleanup) => Err(io::Error::new(
+                error.kind(),
+                format!("{error}; falha ao limpar cópia privada: {cleanup}"),
+            )),
+        };
+    }
+    if let Err(cleanup) = workspace.close() {
+        let rollback = remove_owned_file(parent, name, &output);
+        return Err(io::Error::other(format!(
+            "Falha ao limpar cópia privada: {cleanup}; rollback: {rollback:?}"
+        )));
+    }
+    Ok(output)
+}
+
+/// Captura a entrada em quarentena antes de conferir identidade. Nunca exclui
+/// um substituto concorrente: restaura sem sobrescrever ou preserva quarentena.
+fn remove_owned_file(parent: &AnchoredDir, name: &std::ffi::OsStr, owned: &File) -> io::Result<()> {
+    let workspace = tempfile::Builder::new()
+        .prefix(".s4suite-rollback-")
+        .tempdir_in(parent.path())?;
+    let quarantine = parent.child(workspace.path().file_name().unwrap())?;
+    parent.publish_noreplace(name, &quarantine, "captured")?;
+    let captured = quarantine.open_regular("captured");
+    let matches = captured
+        .as_ref()
+        .ok()
+        .and_then(|file| file.metadata().ok())
+        .zip(owned.metadata().ok())
+        .map(|(a, b)| same_file_identity(&a, &b))
+        .unwrap_or(false);
+    if !matches {
+        let restore = quarantine.publish_noreplace("captured", parent, name);
+        if let Err(error) = restore {
+            let preserved = workspace.keep();
+            return Err(io::Error::other(format!(
+                "Entrada concorrente preservada em {}: {error}",
+                preserved.display()
+            )));
+        }
+        workspace.close()?;
+        return Err(io::Error::other(
+            "Rollback bloqueado: entrada substituída por outro processo",
+        ));
+    }
+    quarantine.remove_file("captured")?;
+    workspace.close()
 }
 
 /// Compara byte a byte o conteúdo de dois arquivos.
@@ -639,92 +1222,221 @@ pub fn execute_installation(
     managed_base: &str,
     allowed_roots: &[PathBuf],
 ) -> Result<(usize, usize), InstallerError> {
-    let backup_dir = mods_dir.join(BACKUP_DIR_NAME);
-    fs::create_dir_all(&backup_dir)?;
-
+    let mods = AnchoredDir::open(mods_dir)?;
+    let _operation = mods.lock_exclusive()?;
+    let absolute_mods = if mods_dir.is_absolute() {
+        mods_dir.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(mods_dir)
+    };
+    let mut destinations = HashSet::new();
+    let mut prepared = Vec::new();
+    // Valida o lote inteiro antes de criar backups ou publicar qualquer arquivo.
+    for file in &report.staged_files {
+        let target = file.destination(&absolute_mods, managed_base);
+        is_safe_to_delete(&target, allowed_roots)
+            .map_err(|e| InstallerError::SecurityBlocked(e.to_string()))?;
+        let relative = target
+            .strip_prefix(&absolute_mods)
+            .map_err(|_| InstallerError::SecurityBlocked(target.display().to_string()))?;
+        if relative
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_)))
+            || !destinations.insert(relative.to_path_buf())
+        {
+            return Err(InstallerError::SecurityBlocked(format!(
+                "Destino inválido ou duplicado: {}",
+                target.display()
+            )));
+        }
+        let source = open_regular_path(&file.src_path)?;
+        if source.metadata()?.len() != file.size {
+            return Err(InstallerError::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Tamanho da fonte mudou: {}", file.src_path.display()),
+            )));
+        }
+        prepared.push((file, source, relative.to_path_buf()));
+    }
+    let backup_dir = mods.create_child(BACKUP_DIR_NAME)?;
+    struct TransactionEntry {
+        parent: AnchoredDir,
+        name: std::ffi::OsString,
+        backup: Option<std::ffi::OsString>,
+        published: Option<File>,
+    }
+    let mut journal: Vec<TransactionEntry> = Vec::new();
     let mut installed_count = 0;
     let mut skipped_count = 0;
-    let mut backup_copies: Vec<(PathBuf, PathBuf)> = Vec::new();
-    let mut backed_up_targets: HashSet<PathBuf> = HashSet::new();
-    let mut newly_created_files: Vec<PathBuf> = Vec::new();
-    let mut updated_files: Vec<PathBuf> = Vec::new();
-
-    let mut execute = || -> Result<(), io::Error> {
-        for file in &report.staged_files {
-            // Byte-por-byte idêntico já presente: copiar de novo só gasta I/O.
+    let result = (|| -> io::Result<()> {
+        for (file, mut source, relative) in prepared {
+            let mut parent = mods.try_clone()?;
+            // Caminha a partir da raiz já aberta, não por um path re-resolvido.
+            if let Some(relative_parent) = relative.parent() {
+                for component in relative_parent.components() {
+                    if let Component::Normal(name) = component {
+                        parent = parent.create_child(name)?;
+                    }
+                }
+            }
+            let name = relative.file_name().unwrap().to_os_string();
             if file.conflict == ConflictType::ExactMatch {
+                let mut existing = parent.open_regular(&name)?;
+                if !open_files_are_identical(&mut source, &mut existing)? {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Correspondência exata mudou após o relatório",
+                    ));
+                }
                 skipped_count += 1;
                 continue;
             }
-
-            let target_dest = file.destination(mods_dir, managed_base);
-
-            // Se o arquivo já existe no destino, faça backup atômico antes de sobrescrever
-            if target_dest.exists() {
-                if backed_up_targets.insert(target_dest.clone()) {
-                    let backup_file = unique_dest_path(&backup_dir, &file.filename);
-                    atomic_copy(&target_dest, &backup_file)?;
-                    backup_copies.push((target_dest.clone(), backup_file));
+            let backup = if file.existing_dest.is_some() && file.conflict == ConflictType::SizeDiff
+            {
+                let original = parent.open_regular(&name)?;
+                let before = original.metadata()?;
+                let backup_name = loop {
+                    let candidate = unique_dest_path(&backup_dir.path(), &file.filename);
+                    let candidate = candidate.file_name().unwrap().to_os_string();
+                    match parent.publish_noreplace(&name, &backup_dir, &candidate) {
+                        Ok(()) => break candidate,
+                        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                        Err(e) => return Err(e),
+                    }
+                };
+                let captured = backup_dir
+                    .open_regular(&backup_name)
+                    .and_then(|file| file.metadata());
+                if !captured
+                    .as_ref()
+                    .map(|meta| same_file_identity(&before, meta))
+                    .unwrap_or(false)
+                {
+                    let restored = backup_dir.publish_noreplace(&backup_name, &parent, &name);
+                    return Err(io::Error::other(format!(
+                        "Entrada mudou durante captura de backup {}; restauração: {restored:?}",
+                        backup_dir.path().join(&backup_name).display()
+                    )));
                 }
-                updated_files.push(target_dest.clone());
+                Some(backup_name)
             } else {
-                newly_created_files.push(target_dest.clone());
-            }
-
-            // Instalação atômica via arquivo temporário para evitar arquivos parciais
-            atomic_copy(&file.src_path, &target_dest)?;
+                None
+            };
+            journal.push(TransactionEntry {
+                parent,
+                name,
+                backup,
+                published: None,
+            });
+            let entry = journal.last_mut().unwrap();
+            entry.published = Some(copy_open_file(&mut source, &entry.parent, &entry.name)?);
             installed_count += 1;
         }
         Ok(())
-    };
-
-    if let Err(e) = execute() {
-        // Rollback robusto: não engole erros silenciosamente e restaura arquivos de forma atômica
+    })();
+    if let Err(error) = result {
         let mut rollback_errors = Vec::new();
-
-        // 1. Remove apenas os arquivos verdadeiramente novos criados nesta instalação
-        for dest in newly_created_files {
-            if dest.exists() {
-                if let Err(err) = safe_remove_file(&dest, allowed_roots) {
+        for entry in journal.into_iter().rev() {
+            if let Some(published) = entry.published {
+                if let Err(e) = remove_owned_file(&entry.parent, &entry.name, &published) {
+                    rollback_errors.push(format!("remoção {}: {e}", entry.name.to_string_lossy()));
+                    continue;
+                }
+            }
+            if let Some(backup) = entry.backup {
+                let restored = backup_dir
+                    .open_regular(&backup)
+                    .and_then(|mut source| copy_open_file(&mut source, &entry.parent, &entry.name));
+                if let Err(e) = restored {
                     rollback_errors.push(format!(
-                        "falha ao remover arquivo novo {}: {}",
-                        dest.display(),
-                        err
+                        "restauração {} (backup {}): {e}",
+                        entry.name.to_string_lossy(),
+                        backup.to_string_lossy()
                     ));
                 }
             }
         }
-
-        // 2. Restaura os arquivos anteriores a partir do backup
-        for (target_dest, backup_file) in backup_copies {
-            if backup_file.exists() {
-                if let Err(err) = atomic_copy(&backup_file, &target_dest) {
-                    rollback_errors.push(format!(
-                        "falha ao restaurar {} de {}: {}",
-                        target_dest.display(),
-                        backup_file.display(),
-                        err
-                    ));
-                }
-            } else {
-                rollback_errors.push(format!(
-                    "backup ausente para restauração de {}",
-                    target_dest.display()
-                ));
-            }
-        }
-
         if !rollback_errors.is_empty() {
             return Err(InstallerError::RollbackFailed(format!(
-                "Erro na instalação: {}. Erros adicionais no rollback: {}",
-                e,
+                "{error}; {}",
                 rollback_errors.join("; ")
             )));
         }
-
-        return Err(InstallerError::Io(e));
+        return Err(InstallerError::Io(error));
     }
-
     Ok((installed_count, skipped_count))
 }
 
+fn open_files_are_identical(a: &mut File, b: &mut File) -> io::Result<bool> {
+    a.rewind()?;
+    b.rewind()?;
+    let before_a = a.metadata()?;
+    let before_b = b.metadata()?;
+    if before_a.len() != before_b.len() {
+        return Ok(false);
+    }
+    let mut buf_a = [0u8; 64 * 1024];
+    let mut buf_b = [0u8; 64 * 1024];
+    loop {
+        let count_a = a.read(&mut buf_a)?;
+        let count_b = b.read(&mut buf_b)?;
+        if count_a != count_b || buf_a[..count_a] != buf_b[..count_b] {
+            return Ok(false);
+        }
+        if count_a == 0 {
+            return Ok(unchanged_metadata(&before_a, &a.metadata()?)
+                && unchanged_metadata(&before_b, &b.metadata()?));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn p0_listagem_7z_recusa_ambiguidade_links_e_traversal() {
+        let valid = "Path = mod.package\nSize = 4\nFolder = -\nAttributes = A_ -rw-r--r--\n";
+        assert_eq!(parse_7z_listing(valid).unwrap().len(), 1);
+        for listing in [
+            "Path = ../outside\nSize = 4\nFolder = -\n",
+            "Path = /outside\nSize = 4\nFolder = -\n",
+            "Path = mod.package\nSize = 4\nSize = 8\nFolder = -\n",
+            "Path = link\nSize = 4\nFolder = -\nSymbolic Link = outside\n",
+            "Path = link\nSize = 4\nFolder = -\nHard Link = outside\n",
+            "Path = mod.package\nnewline-in-name\nSize = 4\nFolder = -\n",
+        ] {
+            assert!(
+                parse_7z_listing(listing).is_err(),
+                "listagem insegura aceita: {listing:?}"
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn p0_entrada_extraida_incompleta_ou_processo_falho_nao_e_publicada() {
+        let root = tempfile::tempdir().unwrap();
+        let destination = AnchoredDir::open(root.path()).unwrap();
+        let incomplete = extract_entry_at(
+            &destination,
+            Path::new("incomplete.package"),
+            false,
+            20,
+            &mut io::Cursor::new(b"short"),
+            || Ok(()),
+        );
+        assert!(incomplete.is_err());
+        assert!(!root.path().join("incomplete.package").exists());
+        let failed = extract_entry_at(
+            &destination,
+            Path::new("failed.package"),
+            false,
+            5,
+            &mut io::Cursor::new(b"whole"),
+            || Err(io::Error::other("extrator terminou com falha")),
+        );
+        assert!(failed.is_err());
+        assert!(!root.path().join("failed.package").exists());
+    }
+}
