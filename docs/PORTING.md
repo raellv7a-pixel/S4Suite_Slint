@@ -136,7 +136,12 @@ depende do `DisabledManager`, então inverter a ordem evitaria um TODO.
 - [x] Autorização pós-merge estrita com correspondência bijetiva exata e verificação SHA-256 de originais.
 - [x] Publicação atômica no-replace de partes e backup com rollback determinístico em caso de colisão ou falha de relatório.
 - [x] Verificação estrita de dentry em outputs publicados e contenção contra falhas parciais em quarentena.
-- [x] 33 testes em `tests/merger_flow.rs` e 12 testes unitários em `src/engine/merger.rs`.
+- [x] Manifesto S4S v1 embutido, leitura/escrita DBPF 2.1 e unmerge nativo Linux.
+- [x] Tamanho total limitado (incluindo índice/manifesto), recursos copiados em streaming.
+- [x] Unmerge reúne todas as partes, preserva associações de recursos compartilhados
+      e publica um lote novo sem substituir dados existentes.
+- [x] Regressões de merge/unmerge em `tests/merger_flow.rs`, além de testes de
+      formato DBPF e parser de manifesto. Investigação e limites em [S4S_MERGE_UNMERGE.md](S4S_MERGE_UNMERGE.md).
 A lógica pós-merge vive no `engine/`, não no `bridge/`: é regra de negócio e
 precisa ser testável sem event loop (a regra de ouro no topo deste documento).
 

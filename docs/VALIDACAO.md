@@ -17,9 +17,13 @@ verdade, com centenas de mods e nomes acentuados.
 
 ## Estado automatizado
 
-`cargo test` — **138 testes, todos verdes.**
-`simulacao_usuario` contra 287 packages e 95 scripts reais — **90 verificações,
-todas verdes.**
+Última verificação de merge/unmerge: `cargo test` — **264 testes aprovados**.
+Smoke com um merged real do Sims 4 Studio: 6 packages extraídos, 338 associações
+de recursos conferidas; novo merge em 2 partes e unmerge com dados preservados.
+Detalhes, evidências estáticas e limites: [S4S_MERGE_UNMERGE.md](S4S_MERGE_UNMERGE.md).
+
+Os números na tabela e na sessão de 90 verificações abaixo são históricos;
+não representam uma nova execução de todos os fluxos contra Mods reais.
 
 | Motor | Arquivo | Testes | Camada 1 | Camada 2 |
 |---|---|---:|:---:|:---:|
@@ -108,6 +112,9 @@ propósito.
 - [ ] Pós-ação "manter" não toca nos originais.
 - [ ] Pós-ação "desativar" renomeia os originais para `.disabled`.
 - [ ] Pós-ação "backup" gera o zip **antes** de remover os originais.
+- [ ] Packages com marcadores de merge ficam bloqueados; suspeitas `MegaPack` aparecem excluídas por padrão, e arquivos comuns podem ser excluídos manualmente pela lista.
+- [ ] TGI conflitante interrompe o merge; duplicatas idênticas são registradas no relatório.
+- [ ] Resultado parcial não oferece pós-ação sobre os originais.
 - [ ] Uma tarefa que falha não interrompe as seguintes.
 - [ ] O limite de tamanho por parte é respeitado.
 
@@ -156,6 +163,8 @@ propósito.
 - [x] **Merger: integridade temporal, dentry e SHA-256** — leitura operada sobre snapshot privado imutável; captura de SHA-256 e metadata inode/mtime/len; bloqueio destrutivo se houver alteração de conteúdo, concorrência com escritores externos (`ReadLease`) ou desvinculação/substituição de packages publicados no diretório de saída (`verify_published_outputs`).
 - [x] **Merger: publicação no-replace e rollback com contenção** — publicação de partes DBPF e backup ZIP via `publish_noreplace` sem sobrescrita; rollback de publicação restaura estado anterior sem tocar em colisões alheias e preserva workspace de recuperação se houver erro no próprio rollback; falha na escrita ou publicação do relatório JSON desfaz automaticamente as partes DBPF via `rollback_published_parts` (re-verificando inode e SHA-256 antes de descartar, sem destruir arquivos ou diretórios de terceiros) e retém o workspace de recuperação em caso de falha.
 - [x] **Merger: falhas parciais em exclusões sequenciais** — se uma falha ocorrer durante o processamento de múltiplos originais em quarentena, o sistema restaura os arquivos restantes e reporta falha parcial com contagem exata dos arquivos irreversivelmente afetados, nunca declarando rollback integral indevidamente.
+- [x] **Merger: colisões e integridade DBPF** — colisões TGI com metadados ou payload divergentes abortam; duplicatas exatas são registradas; a validação de saída compara TGIs, tamanhos, metadados de compressão e payloads armazenados.
+- [x] **Merger: guarda de merge preexistente** — marcadores exatos no nome bloqueiam a seleção; `MegaPack` é suspeito por padrão, com exclusão manual disponível. Manifestos internos de merges antigos não são reconhecidos pelo engine.
 - [x] **Safety e Installer: AnchoredDir e atomic_copy** — criação exclusiva com `tempfile_in`, pinagem de diretórios via file descriptor (`O_DIRECTORY | O_NOFOLLOW`), recusa de symlink ancestral e bloqueio de substituição de arquivos regulares ou links existentes.
 - [x] **Disabled e Organizer: contenção de manifesto e restauração** — `enable_mod` valida que tanto o mod desativado quanto o destino original permaneçam estritamente dentro de `Mods`; `save_manifest` usa arquivo temporário anônimo exclusivo para neutralizar redirecionamento por symlinks no config.
 ## Pendências conhecidas

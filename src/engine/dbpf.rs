@@ -1,6 +1,10 @@
+use serde::{Deserialize, Serialize};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::fmt;
 use std::io::{self, Read, Seek, SeekFrom, Write};
+
+// Policy cap: even a two-million-entry index already needs tens of MiB of RAM.
+pub const MAX_DBPF_INDEX_ENTRIES: u32 = 2_000_000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DBPFError {
@@ -12,15 +16,19 @@ pub enum DBPFError {
     HeaderTruncated,
     #[error("Índice DBPF fora dos limites do arquivo (offset: {0})")]
     IndexOutOfBounds(u64),
+    #[error("Estrutura DBPF inválida: {0}")]
+    InvalidStructure(&'static str),
     #[error("Erro de I/O ao ler/escrever DBPF: {0}")]
     Io(#[from] io::Error),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ResourceKey {
     pub type_id: u32,
     pub group_id: u32,
+    /// Historical name: this is the low 32-bit word of the instance.
     pub instance_ex: u32,
+    /// Historical name: this is the high 32-bit word of the instance.
     pub instance_low: u32,
 }
 
@@ -29,7 +37,7 @@ impl fmt::Display for ResourceKey {
         write!(
             f,
             "{:08X}:{:08X}:{:08X}{:08X}",
-            self.type_id, self.group_id, self.instance_ex, self.instance_low
+            self.type_id, self.group_id, self.instance_low, self.instance_ex
         )
     }
 }
@@ -72,16 +80,18 @@ impl DBPFReader {
             return Err(DBPFError::InvalidMagic);
         }
 
-        let mut cursor = io::Cursor::new(&buf[4..]);
-        let major = cursor.read_u32::<LittleEndian>()?;
-        let minor = cursor.read_u32::<LittleEndian>()?;
-
-        reader.seek(SeekFrom::Start(36))?;
-        let index_count = reader.read_u32::<LittleEndian>()?;
-
-        reader.seek(SeekFrom::Start(64))?;
-        let index_offset = reader.read_u32::<LittleEndian>()?;
-        let index_size = reader.read_u32::<LittleEndian>()?;
+        let word = |offset: usize| {
+            u32::from_le_bytes(buf[offset..offset + 4].try_into().unwrap())
+        };
+        let major = word(4);
+        let minor = word(8);
+        // Accept DBPF 2.0 as well as the 2.1 layout used by Sims 4 Studio.
+        if major != 2 || minor > 1 || word(60) != 3 {
+            return Err(DBPFError::UnsupportedVersion);
+        }
+        let index_count = word(36);
+        let index_offset = if word(64) != 0 { word(64) } else { word(40) };
+        let index_size = word(44);
 
         Ok(DBPFHeader {
             major,
@@ -94,20 +104,32 @@ impl DBPFReader {
 
     pub fn read_index<R: Read + Seek>(reader: &mut R) -> Result<(DBPFHeader, Vec<IndexEntry>), DBPFError> {
         let header = Self::read_header(reader)?;
-        if header.index_count == 0 {
+        if header.index_count > MAX_DBPF_INDEX_ENTRIES {
+            return Err(DBPFError::InvalidStructure("index exceeds safety entry limit"));
+        }
+        let file_len = reader.seek(SeekFrom::End(0))?;
+        let index_start = header.index_offset as u64;
+        let index_end = index_start + header.index_size as u64;
+        if header.index_count == 0 && header.index_size == 0 {
             return Ok((header, Vec::new()));
         }
-
-        // Um package truncado ou corrompido aponta o índice para fora do
-        // arquivo. Sem esta checagem o erro sai como "falha de I/O", que não
-        // diz nada a quem está tentando entender por que o mod não carrega.
-        let file_len = reader.seek(SeekFrom::End(0))?;
-        if header.index_offset as u64 >= file_len {
-            return Err(DBPFError::IndexOutOfBounds(header.index_offset as u64));
+        if index_start < 96 || index_end > file_len || header.index_size < 4 {
+            return Err(DBPFError::IndexOutOfBounds(index_start));
         }
-
-        reader.seek(SeekFrom::Start(header.index_offset as u64))?;
+        reader.seek(SeekFrom::Start(index_start))?;
         let idx_flags = reader.read_u32::<LittleEndian>()?;
+        if idx_flags & !7 != 0 {
+            return Err(DBPFError::InvalidStructure("unsupported index flags"));
+        }
+        let constants = idx_flags.count_ones() as u64;
+        let entry_size = 28 - constants * 4;
+        let minimum_size = 4 + constants * 4 + header.index_count as u64 * entry_size;
+        let maximum_size = minimum_size + header.index_count as u64 * 4;
+        if (header.index_size as u64) < minimum_size
+            || header.index_size as u64 > maximum_size
+        {
+            return Err(DBPFError::InvalidStructure("index count/size mismatch"));
+        }
 
         let const_type = if (idx_flags & 1) != 0 {
             Some(reader.read_u32::<LittleEndian>()?)
@@ -121,7 +143,7 @@ impl DBPFReader {
             None
         };
 
-        let const_instance_ex = if (idx_flags & 4) != 0 {
+        let const_instance_high = if (idx_flags & 4) != 0 {
             Some(reader.read_u32::<LittleEndian>()?)
         } else {
             None
@@ -130,6 +152,9 @@ impl DBPFReader {
         let mut entries = Vec::with_capacity(header.index_count as usize);
 
         for _ in 0..header.index_count {
+            if reader.stream_position()? + entry_size > index_end {
+                return Err(DBPFError::InvalidStructure("truncated index entry"));
+            }
             let type_id = match const_type {
                 Some(val) => val,
                 None => reader.read_u32::<LittleEndian>()?,
@@ -139,8 +164,8 @@ impl DBPFReader {
                 None => reader.read_u32::<LittleEndian>()?,
             };
 
-            let (instance_low, instance_ex) = if let Some(ex) = const_instance_ex {
-                (reader.read_u32::<LittleEndian>()?, ex)
+            let (instance_low, instance_ex) = if let Some(high) = const_instance_high {
+                (high, reader.read_u32::<LittleEndian>()?)
             } else {
                 (
                     reader.read_u32::<LittleEndian>()?,
@@ -152,8 +177,24 @@ impl DBPFReader {
             let file_size_raw = reader.read_u32::<LittleEndian>()?;
             let file_size = file_size_raw & 0x7FFFFFFF;
             let mem_size = reader.read_u32::<LittleEndian>()?;
-            let compressed = reader.read_u16::<LittleEndian>()?;
-            let _reserved = reader.read_u16::<LittleEndian>()?;
+            // S4S ReadIndexTable (0x06008599) gates this extension on bit 31.
+            let compressed = if file_size_raw & 0x8000_0000 != 0 {
+                if reader.stream_position()? + 4 > index_end {
+                    return Err(DBPFError::InvalidStructure("truncated compression extension"));
+                }
+                let compression = reader.read_u16::<LittleEndian>()?;
+                let _committed = reader.read_u16::<LittleEndian>()?;
+                compression
+            } else {
+                0
+            };
+            let resource_start = location_offset as u64;
+            let resource_end = resource_start + file_size as u64;
+            if resource_start < 96 || resource_end > file_len
+                || (resource_start < index_end && resource_end > index_start)
+            {
+                return Err(DBPFError::InvalidStructure("resource range outside payload area"));
+            }
 
             entries.push(IndexEntry {
                 key: ResourceKey {
@@ -167,6 +208,9 @@ impl DBPFReader {
                 mem_size,
                 compressed,
             });
+        }
+        if reader.stream_position()? != index_end {
+            return Err(DBPFError::InvalidStructure("trailing bytes in index"));
         }
 
         Ok((header, entries))
@@ -213,10 +257,14 @@ where
             continue;
         }
 
-        let mut inflado = Vec::with_capacity(entry.mem_size as usize);
+        if entry.compressed != 0x5A42 || entry.mem_size > limite_bytes {
+            continue;
+        }
+        let mut inflado = Vec::new();
         if flate2::read::ZlibDecoder::new(&bruto[..])
+            .take(entry.mem_size as u64 + 1)
             .read_to_end(&mut inflado)
-            .is_ok()
+            .is_ok() && inflado.len() == entry.mem_size as usize
         {
             visitar(&inflado);
         }
@@ -229,64 +277,91 @@ pub struct DBPFWriter;
 
 impl DBPFWriter {
     pub fn write_package<W: Write + Seek>(writer: &mut W, resources: &[PackageResource]) -> Result<(), DBPFError> {
-        // Write 96-byte header placeholder
-        writer.seek(SeekFrom::Start(0))?;
-        let header_buf = [0u8; 96];
-        writer.write_all(&header_buf)?;
+        let entries: Vec<_> = resources.iter().map(|resource| {
+            let file_size = u32::try_from(resource.data.len())
+                .map_err(|_| DBPFError::InvalidStructure("resource exceeds DBPF size field"))?;
+            Ok(IndexEntry {
+                key: resource.key,
+                location_offset: 0,
+                file_size,
+                mem_size: resource.mem_size,
+                compressed: resource.compressed,
+            })
+        }).collect::<Result<_, DBPFError>>()?;
+        Self::write_package_stream(writer, &entries, |index, writer| {
+            writer.write_all(&resources[index].data)
+        })
+    }
 
-        let mut entries = Vec::with_capacity(resources.len());
-
-        for res in resources {
-            let offset = writer.stream_position()? as u32;
-            writer.write_all(&res.data)?;
-
-            entries.push(IndexEntry {
-                key: res.key,
-                location_offset: offset,
-                file_size: res.data.len() as u32,
-                mem_size: if res.mem_size > 0 { res.mem_size } else { res.data.len() as u32 },
-                compressed: res.compressed,
-            });
+    /// Streams payloads unchanged; callback indices refer to the input entries.
+    /// Offsets are recomputed, while file size, memory size and compression are preserved.
+    pub fn write_package_stream<W: Write + Seek, F>(
+        writer: &mut W,
+        entries: &[IndexEntry],
+        mut copy_payload: F,
+    ) -> Result<(), DBPFError>
+    where
+        F: FnMut(usize, &mut W) -> io::Result<()>,
+    {
+        let count = u32::try_from(entries.len())
+            .map_err(|_| DBPFError::InvalidStructure("too many resources"))?;
+        if count > MAX_DBPF_INDEX_ENTRIES {
+            return Err(DBPFError::InvalidStructure("index exceeds safety entry limit"));
         }
-
-        // TGI Sort the index
-        entries.sort_by(|a, b| a.key.cmp(&b.key));
-
+        let index_size = 4u64 + entries.len() as u64 * 32;
+        let mut payload_end = 96u64;
+        for entry in entries {
+            if entry.file_size > 0x7FFF_FFFF {
+                return Err(DBPFError::InvalidStructure("resource exceeds 31-bit stored size"));
+            }
+            payload_end = payload_end.checked_add(entry.file_size as u64)
+                .ok_or(DBPFError::InvalidStructure("package size overflow"))?;
+        }
+        if payload_end + index_size > u32::MAX as u64 {
+            return Err(DBPFError::InvalidStructure("package exceeds 32-bit file offsets"));
+        }
+        writer.seek(SeekFrom::Start(0))?;
+        writer.write_all(&[0u8; 96])?;
+        let mut output_entries = Vec::with_capacity(entries.len());
+        for (index, entry) in entries.iter().enumerate() {
+            let start = writer.stream_position()?;
+            copy_payload(index, writer)?;
+            if writer.stream_position()? != start + entry.file_size as u64 {
+                return Err(DBPFError::InvalidStructure("streamed payload size mismatch"));
+            }
+            let mut output_entry = entry.clone();
+            output_entry.location_offset = start as u32;
+            output_entries.push(output_entry);
+        }
+        // Actual TGI order, accounting for the historical reversed word names.
+        output_entries.sort_by_key(|entry| (
+            entry.key.type_id, entry.key.group_id,
+            entry.key.instance_low, entry.key.instance_ex,
+        ));
         let index_offset = writer.stream_position()? as u32;
-
-        // Write index flags (no constants = 0)
         writer.write_u32::<LittleEndian>(0)?;
-
-        for entry in &entries {
+        for entry in &output_entries {
             writer.write_u32::<LittleEndian>(entry.key.type_id)?;
             writer.write_u32::<LittleEndian>(entry.key.group_id)?;
             writer.write_u32::<LittleEndian>(entry.key.instance_low)?;
             writer.write_u32::<LittleEndian>(entry.key.instance_ex)?;
             writer.write_u32::<LittleEndian>(entry.location_offset)?;
-            writer.write_u32::<LittleEndian>(entry.file_size)?;
+            writer.write_u32::<LittleEndian>(entry.file_size | 0x8000_0000)?;
             writer.write_u32::<LittleEndian>(entry.mem_size)?;
             writer.write_u16::<LittleEndian>(entry.compressed)?;
-            writer.write_u16::<LittleEndian>(0x4200)?; // DBPF reserved
+            writer.write_u16::<LittleEndian>(1)?; // committed resource
         }
-
-        let index_end = writer.stream_position()? as u32;
-        let index_size = index_end - index_offset;
-
-        // Rewind and write real DBPF header
         writer.seek(SeekFrom::Start(0))?;
         writer.write_all(b"DBPF")?;
-        writer.write_u32::<LittleEndian>(2)?; // Major = 2
-        writer.write_u32::<LittleEndian>(0)?; // Minor = 0
-
-        // Index Count at offset 36
+        writer.write_u32::<LittleEndian>(2)?;
+        writer.write_u32::<LittleEndian>(1)?;
         writer.seek(SeekFrom::Start(36))?;
-        writer.write_u32::<LittleEndian>(entries.len() as u32)?;
-
-        // Index Offset and Index Size at offset 64
-        writer.seek(SeekFrom::Start(64))?;
+        writer.write_u32::<LittleEndian>(count)?;
+        writer.seek(SeekFrom::Start(44))?;
+        writer.write_u32::<LittleEndian>(index_size as u32)?;
+        writer.seek(SeekFrom::Start(60))?;
+        writer.write_u32::<LittleEndian>(3)?;
         writer.write_u32::<LittleEndian>(index_offset)?;
-        writer.write_u32::<LittleEndian>(index_size)?;
-
         writer.flush()?;
         Ok(())
     }
@@ -333,6 +408,6 @@ mod tests {
         assert_eq!(header.index_count, 2);
         assert_eq!(index.len(), 2);
         // TGI sorted order
-        assert!(index[0].key <= index[1].key);
+        assert!(index[0].key.type_id <= index[1].key.type_id);
     }
 }

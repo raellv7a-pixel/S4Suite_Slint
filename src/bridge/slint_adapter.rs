@@ -10,7 +10,7 @@ use crate::engine::installer::{
 };
 use crate::engine::merger::{
     apply_post_merge_action_validated, common_ancestor, merge_sims4_packages, run_merge_queue,
-    JobStatus, MergeJob, MergeTask, PostMergeAction,
+    unmerge_sims4_packages, JobStatus, MergeJob, MergeTask, PostMergeAction, UnmergeTask,
 };
 use crate::engine::organizer::{
     auto_fix_script_depth, check_script_depth, create_folder, detect_duplicates, filter_tree,
@@ -1266,6 +1266,7 @@ pub fn setup_app_adapter(
     window.on_select_merger_input(move || {
         if let Some(dir) = rfd::FileDialog::new().pick_folder() {
             let mut inputs: Vec<PathBuf> = Vec::new();
+            let mut excluded = Vec::new();
             let model = Rc::new(VecModel::default());
 
             for entry in crate::engine::walk_user_mods(&dir, usize::MAX) {
@@ -1279,36 +1280,121 @@ pub fn setup_app_adapter(
                 if !is_package {
                     continue;
                 }
+                let index = inputs.len();
+                let locked = crate::engine::merger::premerged_marker(path).is_some();
+                let suspect = path
+                    .file_stem()
+                    .is_some_and(|stem| stem.to_string_lossy().eq_ignore_ascii_case("megapack"))
+                    || path.components().any(|component| {
+                        component
+                            .as_os_str()
+                            .to_string_lossy()
+                            .eq_ignore_ascii_case("megapack")
+                    });
+                if locked || suspect {
+                    excluded.push(index);
+                }
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
                 model.push(crate::MergeQueueItem {
                     name: SharedString::from(entry.file_name().to_string_lossy().to_string()),
-                    size_str: SharedString::from(crate::bridge::slint_models::format_size_bytes(
-                        size,
-                    )),
+                    size_str: SharedString::from(if locked {
+                        "Bloqueado: marcador de merge preexistente".to_string()
+                    } else if suspect {
+                        "Suspeito: MegaPack; confirme antes de incluir".to_string()
+                    } else {
+                        crate::bridge::slint_models::format_size_bytes(size)
+                    }),
+                    index: index as i32,
+                    included: !locked && !suspect,
+                    locked,
                 });
                 inputs.push(path.to_path_buf());
             }
 
             let total: u64 = inputs
                 .iter()
-                .map(|p| fs::metadata(p).map(|m| m.len()).unwrap_or(0))
+                .enumerate()
+                .filter(|(index, _)| !excluded.contains(index))
+                .map(|(_, path)| fs::metadata(path).map(|m| m.len()).unwrap_or(0))
                 .sum();
-            let count = inputs.len();
-            state_clone.set_merger_inputs(inputs);
+            let count = inputs.len().saturating_sub(excluded.len());
+            let excluded_count = excluded.len();
+            state_clone.set_merger_inputs_with_exclusions(inputs, excluded);
 
             if let Some(w) = weak_clone.upgrade() {
                 w.set_merge_items(ModelRc::from(model));
                 w.set_merge_input_dir(SharedString::from(dir.display().to_string()));
                 w.set_merge_status(SharedString::from(if count == 0 {
-                    "⚠️ Nenhum .package encontrado nessa pasta.".to_string()
+                    format!(
+                        "Nenhum package elegível; {} package(s) bloqueados ou sinalizados como suspeitos.",
+                        excluded_count
+                    )
                 } else {
                     format!(
-                        "{} package(s) prontos para unificar ({}).",
+                        "{} package(s) elegíveis ({}); {} bloqueado(s) ou suspeito(s).",
                         count,
-                        crate::bridge::slint_models::format_size_bytes(total)
+                        crate::bridge::slint_models::format_size_bytes(total),
+                        excluded_count
                     )
                 }));
             }
+        }
+    });
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_merger_input_clicked(move |index| {
+        let index = index as usize;
+        let Some((path, _)) = state_clone.merger_input_entries().get(index).cloned() else {
+            return;
+        };
+        if crate::engine::merger::premerged_marker(&path).is_some() {
+            return;
+        }
+        if state_clone.toggle_merger_input(index).is_none() {
+            return;
+        }
+        if let Some(window) = weak_clone.upgrade() {
+            let model = Rc::new(VecModel::default());
+            for (index, (path, included)) in
+                state_clone.merger_input_entries().into_iter().enumerate()
+            {
+                let locked = crate::engine::merger::premerged_marker(&path).is_some();
+                let suspect = path
+                    .file_stem()
+                    .is_some_and(|stem| stem.to_string_lossy().eq_ignore_ascii_case("megapack"))
+                    || path.components().any(|component| {
+                        component
+                            .as_os_str()
+                            .to_string_lossy()
+                            .eq_ignore_ascii_case("megapack")
+                    });
+                let size = fs::metadata(&path)
+                    .map(|metadata| metadata.len())
+                    .unwrap_or(0);
+                model.push(crate::MergeQueueItem {
+                    name: SharedString::from(
+                        path.file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string(),
+                    ),
+                    size_str: SharedString::from(if locked {
+                        "Bloqueado: marcador de merge preexistente".to_string()
+                    } else if suspect && included {
+                        "MegaPack incluído manualmente".to_string()
+                    } else if suspect {
+                        "Suspeito: MegaPack; confirme antes de incluir".to_string()
+                    } else if included {
+                        crate::bridge::slint_models::format_size_bytes(size)
+                    } else {
+                        "Excluído manualmente".to_string()
+                    }),
+                    index: index as i32,
+                    included,
+                    locked,
+                });
+            }
+            window.set_merge_items(ModelRc::from(model));
         }
     });
 
@@ -1566,6 +1652,112 @@ pub fn setup_app_adapter(
                     w.set_is_merging(false);
                     w.set_merge_progress(1.0);
                     w.set_merge_status(SharedString::from(msg));
+                }
+            });
+        });
+    });
+
+    // Unmerge shares the file-operation guard and busy indicator with the merge queue.
+    let cfg_clone = Arc::clone(&config_mgr);
+    let state_clone = Arc::clone(&state);
+    let weak_clone = weak_win.clone();
+    window.on_start_unmerge(move || {
+        let Some(operation) = state_clone.try_begin_file_operation() else {
+            return;
+        };
+        let config = cfg_clone.load();
+        let lang = config.language.clone();
+        let Some(input_packages) = rfd::FileDialog::new()
+            .set_title(t("Selecione TODOS os arquivos/partes do merge", &lang))
+            .add_filter("Packages", &["package"])
+            .pick_files()
+        else {
+            return;
+        };
+        if input_packages.is_empty() {
+            return;
+        }
+        let Some(output_dir) = rfd::FileDialog::new()
+            .set_title(t("Destino da desunificação (fora de Mods)", &lang))
+            .pick_folder()
+        else {
+            return;
+        };
+        let destination = output_dir.canonicalize();
+        let safe_destination = destination.as_ref().is_ok_and(|destination| {
+            let named_mods = destination.ancestors().any(|path| {
+                path.file_name().is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("Mods"))
+            });
+            let configured_mods = config.sims4_path.as_ref().map(|path| get_mods_dir(path));
+            !named_mods && configured_mods.as_ref().is_none_or(|mods| {
+                mods.canonicalize().map_or(!mods.exists(), |mods| !destination.starts_with(mods))
+            })
+        });
+        if !safe_destination {
+            if let Some(w) = weak_clone.upgrade() {
+                w.set_merge_status(SharedString::from(t("Escolha uma pasta acessível fora de Mods para desunificar.", &lang)));
+            }
+            return;
+        }
+        let task = UnmergeTask { input_packages, output_dir };
+        if let Some(w) = weak_clone.upgrade() {
+            w.set_is_merging(true);
+            w.set_merge_progress(0.0);
+            w.set_merge_status(SharedString::from(t("Desunificando; os arquivos originais serão mantidos...", &lang)));
+        }
+        let weak_async = weak_clone.clone();
+        tokio::task::spawn_blocking(move || {
+            let weak_progress = weak_async.clone();
+            let progress_label = t("Desunificando", &lang);
+            let result = unmerge_sims4_packages(&task, move |current, total, _message| {
+                let weak_ui = weak_progress.clone();
+                let message = format!("{}: {}/{}", progress_label, current, total);
+                let progress = if total == 0 { 0.0 } else { current as f32 / total as f32 };
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak_ui.upgrade() {
+                        w.set_merge_progress(progress.clamp(0.0, 1.0));
+                        w.set_merge_status(SharedString::from(message));
+                    }
+                });
+            });
+            let (summary, details) = match result {
+                Ok(report) => {
+                    let label = if report.success {
+                        "Desunificação concluída"
+                    } else if report.partial {
+                        "Desunificação parcial"
+                    } else {
+                        "Falha na desunificação"
+                    };
+                    let summary = format!("{} — {}: {}; {}: {}; {}: {}.",
+                        t(label, &lang),
+                        t("Packages mesclados", &lang), report.total_merged_packages,
+                        t("Packages extraídos", &lang), report.total_extracted_packages,
+                        t("Falhas", &lang), report.failed_packages.len());
+                    let mut details = format!("{}\n\n{}\n{}",
+                        summary, t("Arquivos extraídos:", &lang), report.extracted_files.join("\n"));
+                    for (path, error) in report.failed_packages {
+                        details.push_str(&format!("\n{}: {}", path, error));
+                    }
+                    (summary, details)
+                }
+                Err(error) => {
+                    let message = format!("{}: {}", t("Falha na desunificação", &lang), error);
+                    (message.clone(), message)
+                }
+            };
+            let title = t("Desunificar packages...", &lang);
+            let _ = slint::invoke_from_event_loop(move || {
+                let _operation = operation;
+                if let Some(w) = weak_async.upgrade() {
+                    w.set_is_merging(false);
+                    w.set_merge_progress(1.0);
+                    w.set_merge_status(SharedString::from(summary));
+                    rfd::MessageDialog::new()
+                        .set_title(title)
+                        .set_description(details)
+                        .set_buttons(rfd::MessageButtons::Ok)
+                        .show();
                 }
             });
         });

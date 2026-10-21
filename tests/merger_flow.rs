@@ -105,11 +105,20 @@ fn merge_reune_recursos_de_varios_packages_em_um_so() {
 
     let mut merged = File::open(&report.output_packages[0]).unwrap();
     let (_h, index) = DBPFReader::read_index(&mut merged).unwrap();
+    let user_entries: Vec<_> = index
+        .into_iter()
+        .filter(|e| e.key.type_id != s4suite::engine::manifest::S4S_MANIFEST_TYPE)
+        .collect();
     assert_eq!(
-        index.len(),
+        user_entries.len(),
         4,
         "os 4 recursos deveriam estar na parte unificada"
     );
+    assert!(s4suite::engine::manifest::MergedPackageManifest::read_from_package_file(
+        &PathBuf::from(&report.output_packages[0])
+    )
+    .unwrap()
+    .is_some());
 }
 
 #[test]
@@ -581,7 +590,12 @@ fn duas_tarefas_no_mesmo_destino_nao_se_sobrescrevem() {
         .iter()
         .map(|p| {
             let mut f = File::open(p).unwrap();
-            DBPFReader::read_index(&mut f).unwrap().1.len()
+            DBPFReader::read_index(&mut f)
+                .unwrap()
+                .1
+                .into_iter()
+                .filter(|e| e.key.type_id != s4suite::engine::manifest::S4S_MANIFEST_TYPE)
+                .count()
         })
         .sum();
     assert_eq!(
@@ -731,8 +745,12 @@ fn falha_de_leitura_durante_extracao_de_recurso_rejeita_sucesso_total() {
         let mut f = File::open(part).unwrap();
         let (header, index) = DBPFReader::read_index(&mut f).unwrap();
         assert_eq!(header.major, 2);
+        let user_entries: Vec<_> = index
+            .into_iter()
+            .filter(|e| e.key.type_id != s4suite::engine::manifest::S4S_MANIFEST_TYPE)
+            .collect();
         assert_eq!(
-            index.len(),
+            user_entries.len(),
             1,
             "só o recurso do arquivo válido deve estar presente"
         );
@@ -766,7 +784,10 @@ fn multiplas_partes_com_validacao_atomica_e_sem_residuos_temporarios() {
         let mut f = File::open(&part_path).unwrap();
         let (header, index) = DBPFReader::read_index(&mut f).unwrap();
         assert_eq!(header.major, 2);
-        total_recursos += index.len();
+        total_recursos += index
+            .into_iter()
+            .filter(|e| e.key.type_id != s4suite::engine::manifest::S4S_MANIFEST_TYPE)
+            .count();
     }
     assert_eq!(
         total_recursos, 9,
@@ -821,6 +842,7 @@ fn pos_merge_recusado_se_relatorio_for_parcial_ou_com_falhas() {
     let f1 = fx.input_dir.join("a.package");
     write_package(&f1, &[1], 100);
     let originais = vec![f1.clone()];
+    let original_digest = digest(&f1);
 
     // Relatório simulando merge com falha parcial
     let report_parcial = MergeReport {
@@ -830,6 +852,7 @@ fn pos_merge_recusado_se_relatorio_for_parcial_ou_com_falhas() {
         success_count: 1,
         failed_files: vec![("b.package".to_string(), "erro I/O".to_string())],
         output_packages: vec!["Part001.package".to_string()],
+        identical_resources: Vec::new(),
         original_snapshots: Vec::new(),
     };
 
@@ -850,6 +873,7 @@ fn pos_merge_recusado_se_relatorio_for_parcial_ou_com_falhas() {
         f1.exists(),
         "original não pode ser apagado se relatório for parcial"
     );
+    assert_eq!(digest(&f1), original_digest);
 }
 
 #[test]
@@ -1190,7 +1214,12 @@ fn p0_concurrent_merges_with_same_stem_never_replace_published_parts() {
     let mut keys = Vec::new();
     for output in &report.output_packages {
         let (_, index) = DBPFReader::read_index(&mut File::open(output).unwrap()).unwrap();
-        keys.extend(index.into_iter().map(|e| e.key.instance_low));
+        keys.extend(
+            index
+                .into_iter()
+                .filter(|e| e.key.type_id != s4suite::engine::manifest::S4S_MANIFEST_TYPE)
+                .map(|e| e.key.instance_low),
+        );
     }
     assert_eq!(keys, if winner == 0 { vec![1, 2] } else { vec![3, 4] });
     assert_eq!([digest(&a), digest(&b)], expected);
@@ -1199,4 +1228,196 @@ fn p0_concurrent_merges_with_same_stem_never_replace_published_parts() {
         3,
         "duas partes vencedoras e seu relatório; nenhum workspace perdedor"
     );
+}
+
+#[test]
+fn unmerge_recupera_packages_originais_com_recursos_identicos() {
+    let fx = Fixture::new();
+    let pkg1 = fx.input_dir.join("Vestido_Verao.package");
+    let pkg2 = fx.input_dir.join("Sapato_Salto.package");
+
+    write_package(&pkg1, &[101, 102], 2048);
+    write_package(&pkg2, &[201, 202, 203], 4096);
+
+    let merge_task = MergeTask {
+        input_files: vec![pkg1.clone(), pkg2.clone()],
+        output_dir: fx.output_dir.clone(),
+        max_size_bytes: 1_000_000_000,
+        name: Some("Colecao_Verao".to_string()),
+    };
+
+    let merge_report = merge_sims4_packages(&merge_task, |_, _, _| {}).unwrap();
+    assert!(merge_report.success);
+    assert_eq!(merge_report.output_packages.len(), 1);
+
+    let merged_path = PathBuf::from(&merge_report.output_packages[0]);
+    assert!(s4suite::engine::manifest::MergedPackageManifest::is_s4s_merged_package(&merged_path));
+
+    // Inspeciona antes de desunificar
+    let inspected = s4suite::engine::merger::inspect_merged_package(&merged_path)
+        .unwrap()
+        .expect("deveria ler o manifesto");
+    assert_eq!(inspected.total_package_count(), 2);
+
+    let unmerge_out = fx._root.path().join("Desunificados");
+    fs::create_dir_all(&unmerge_out).unwrap();
+
+    let unmerge_task = s4suite::engine::merger::UnmergeTask {
+        input_packages: vec![merged_path],
+        output_dir: unmerge_out.clone(),
+    };
+
+    let unmerge_report =
+        s4suite::engine::merger::unmerge_sims4_packages(&unmerge_task, |_, _, _| {}).unwrap();
+    assert!(unmerge_report.success);
+    assert_eq!(unmerge_report.total_extracted_packages, 2);
+
+    let extracted1 = unmerge_report.extracted_files.iter().map(PathBuf::from)
+        .find(|p| p.file_name().unwrap() == "Vestido_Verao.package").unwrap();
+    let extracted2 = unmerge_report.extracted_files.iter().map(PathBuf::from)
+        .find(|p| p.file_name().unwrap() == "Sapato_Salto.package").unwrap();
+    assert!(extracted1.exists(), "Vestido_Verao deve ter sido extraído");
+    assert!(extracted2.exists(), "Sapato_Salto deve ter sido extraído");
+
+    // Verifica se os recursos foram recuperados corretamente
+    let (_, idx1) = DBPFReader::read_index(&mut File::open(&extracted1).unwrap()).unwrap();
+    let keys1: Vec<u32> = idx1.into_iter().map(|e| e.key.instance_low).collect();
+    assert_eq!(keys1, vec![101, 102]);
+
+    let (_, idx2) = DBPFReader::read_index(&mut File::open(&extracted2).unwrap()).unwrap();
+    let keys2: Vec<u32> = idx2.into_iter().map(|e| e.key.instance_low).collect();
+    assert_eq!(keys2, vec![201, 202, 203]);
+}
+
+
+#[test]
+fn merge_recusa_package_ja_mesclado_pelo_s4s() {
+    let fx = Fixture::new();
+    let pkg1 = fx.input_dir.join("Original.package");
+    write_package(&pkg1, &[1, 2], 1024);
+
+    let task = MergeTask {
+        input_files: vec![pkg1],
+        output_dir: fx.output_dir.clone(),
+        max_size_bytes: 1_000_000_000,
+        name: Some("Mesclado".to_string()),
+    };
+
+    let report = merge_sims4_packages(&task, |_, _, _| {}).unwrap();
+    let merged_file = fx._root.path().join("nome_sem_marcador.package");
+    fs::copy(&report.output_packages[0], &merged_file).unwrap();
+
+    // Tentativa de fazer merge de um arquivo que já foi mesclado deve ser rejeitada com erro claro
+    let second_task = MergeTask {
+        input_files: vec![merged_file],
+        output_dir: fx.output_dir.clone(),
+        max_size_bytes: 1_000_000_000,
+        name: Some("Novo_Merge".to_string()),
+    };
+
+    let result = merge_sims4_packages(&second_task, |_, _, _| {});
+    assert!(result.is_err(), "deve recusar mesclar arquivo já mesclado");
+}
+
+fn stored_payloads(path: &Path) -> Vec<(ResourceKey, u32, u16, Vec<u8>)> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = File::open(path).unwrap();
+    let (_, index) = DBPFReader::read_index(&mut file).unwrap();
+    let mut result: Vec<_> = index.into_iter().map(|entry| {
+        file.seek(SeekFrom::Start(entry.location_offset as u64)).unwrap();
+        let mut payload = vec![0; entry.file_size as usize];
+        file.read_exact(&mut payload).unwrap();
+        (entry.key, entry.mem_size, entry.compressed, payload)
+    }).collect();
+    result.sort_by_key(|entry| entry.0);
+    result
+}
+
+#[test]
+fn multipart_unmerge_restores_shared_compressed_resources_and_same_names_in_folders() {
+    use std::io::Write;
+    let fx = Fixture::new();
+    let a = fx.input_dir.join("Cabelos/Ágata.package");
+    let b = fx.input_dir.join("Roupas/Ágata.package");
+    fs::create_dir_all(a.parent().unwrap()).unwrap();
+    fs::create_dir_all(b.parent().unwrap()).unwrap();
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(b"recurso compartilhado com compressao preservada").unwrap();
+    let shared = PackageResource {
+        key: key(123), data: encoder.finish().unwrap(), mem_size: 49, compressed: 0x5A42,
+    };
+    let unique = |n| PackageResource { key: key(n), data: vec![n as u8; 4096], mem_size: 4096, compressed: 0 };
+    DBPFWriter::write_package(&mut File::create(&a).unwrap(), &[shared.clone(), unique(1), unique(2)]).unwrap();
+    DBPFWriter::write_package(&mut File::create(&b).unwrap(), &[shared, unique(3)]).unwrap();
+    let originals = [stored_payloads(&a), stored_payloads(&b)];
+    let report = merge_sims4_packages(&MergeTask {
+        input_files: vec![a.clone(), b.clone()], output_dir: fx.output_dir.clone(),
+        max_size_bytes: 6500, name: Some("Partes".into()),
+    }, |_,_,_| {}).unwrap();
+    assert!(report.output_packages.len() > 1);
+    for path in &report.output_packages { assert!(fs::metadata(path).unwrap().len() <= 6500); }
+    let output = fx._root.path().join("restored");
+    let inputs = report.output_packages.iter().map(PathBuf::from).collect::<Vec<_>>();
+    assert!(s4suite::engine::merger::unmerge_sims4_packages(&s4suite::engine::merger::UnmergeTask {
+        input_packages: vec![inputs[0].clone()], output_dir: output.clone(),
+    }, |_,_,_| {}).is_err());
+    assert!(!output.exists(), "partes ausentes não publicam nenhum resultado");
+    let unmerged = s4suite::engine::merger::unmerge_sims4_packages(&s4suite::engine::merger::UnmergeTask {
+        input_packages: inputs, output_dir: output.clone(),
+    }, |_,_,_| {}).unwrap();
+    assert_eq!(unmerged.total_extracted_packages, 2);
+    for (source, expected) in [(&a, &originals[0]), (&b, &originals[1])] {
+        let relative = source.strip_prefix(&fx.input_dir).unwrap();
+        let restored = unmerged.extracted_files.iter().map(PathBuf::from).find(|p| p.ends_with(relative)).unwrap();
+        assert_eq!(&stored_payloads(&restored), expected);
+    }
+    assert_eq!(stored_payloads(&a), originals[0]);
+    assert_eq!(stored_payloads(&b), originals[1]);
+}
+
+#[test]
+fn unsafe_or_missing_manifest_members_never_publish_partial_packages() {
+    use s4suite::engine::manifest::{MergedPackage, MergedPackageManifest};
+    let fx = Fixture::new();
+    for (i, name) in ["../escape", "/absolute", "C:\\evil", "valid"].iter().enumerate() {
+        let path = fx.input_dir.join(format!("hostile{i}.package"));
+        let manifest = MergedPackageManifest::with_packages(vec![
+            MergedPackage { name: name.to_string(), resources: vec![key(42)] },
+        ]);
+        // The "valid" case references missing data and must fail too.
+        DBPFWriter::write_package(&mut File::create(&path).unwrap(), &[manifest.to_compressed_resource().unwrap()]).unwrap();
+        let dest = fx._root.path().join(format!("out{i}"));
+        assert!(s4suite::engine::merger::unmerge_single_package(&path, &dest, |_,_,_| {}).is_err());
+        assert!(!dest.exists());
+    }
+}
+
+#[test]
+fn unmerge_publishes_new_batch_without_replacing_existing_outputs() {
+    let fx = Fixture::new();
+    let source = fx.input_dir.join("original.package");
+    write_package(&source, &[1], 100);
+    let report = fx.run_merge(&[source]);
+    let output = fx._root.path().join("restored");
+    fs::create_dir_all(&output).unwrap();
+    fs::write(output.join("original.package"), b"user existing data").unwrap();
+    let a = s4suite::engine::merger::unmerge_single_package(Path::new(&report.output_packages[0]), &output, |_,_,_| {}).unwrap();
+    let b = s4suite::engine::merger::unmerge_single_package(Path::new(&report.output_packages[0]), &output, |_,_,_| {}).unwrap();
+    assert_ne!(a.extracted_files, b.extracted_files);
+    assert_eq!(fs::read(output.join("original.package")).unwrap(), b"user existing data");
+    assert_eq!(stored_payloads(Path::new(&a.extracted_files[0])), stored_payloads(Path::new(&b.extracted_files[0])));
+}
+
+#[test]
+fn merge_rejects_indivisible_resource_above_configured_size() {
+    let fx = Fixture::new();
+    let source = fx.input_dir.join("large.package");
+    write_package(&source, &[1], 4096);
+    let before = digest(&source);
+    assert!(merge_sims4_packages(&MergeTask {
+        input_files: vec![source.clone()], output_dir: fx.output_dir.clone(),
+        max_size_bytes: 1024, name: None,
+    }, |_,_,_| {}).is_err());
+    assert_eq!(digest(&source), before);
+    assert_eq!(fs::read_dir(&fx.output_dir).unwrap().count(), 0);
 }

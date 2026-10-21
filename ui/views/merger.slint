@@ -14,6 +14,9 @@ import { ViewHeader } from "../components/view_header.slint";
 export struct MergeQueueItem {
     name: string,
     size_str: string,
+    index: int,
+    included: bool,
+    locked: bool,
 }
 
 /// Uma tarefa da fila: um grupo de packages com destino e pós-ação próprios.
@@ -49,8 +52,9 @@ export component MergerView inherits Rectangle {
 
     callback select_input_clicked();
     callback select_output_clicked();
+    callback input_item_clicked(int);
     callback start_merge_clicked();
-
+    callback start_unmerge_clicked();
     in property <bool> show_post_merge_dialog: false;
     in property <string> post_merge_message: "";
     callback post_merge_action(string); // "keep", "disable", "backup", "delete"
@@ -96,36 +100,21 @@ export component MergerView inherits Rectangle {
             }
         }
 
-        // Actions Bar
         HorizontalLayout {
             spacing: 12px;
             Button {
-                text: I18n.tr("Selecionar Pasta de Origem");
-                icon_str: Ic.folder;
+                text: I18n.tr("Desunificar packages...");
+                icon_str: Ic.folder_open;
                 enabled: !root.is_merging;
-                clicked => { root.select_input_clicked(); }
+                clicked => { root.start_unmerge_clicked(); }
             }
-            Button {
-                text: I18n.tr("Selecionar Pasta de Destino");
-                icon_str: Ic.folder;
-                enabled: !root.is_merging;
-                clicked => { root.select_output_clicked(); }
-            }
-            Rectangle { horizontal-stretch: 1; }
-            Button {
-                // Adicionar à fila em vez de unificar direto: o caso comum é ter
-                // vários grupos com destinos diferentes.
-                text: I18n.tr("Adicionar à Fila");
-                icon_str: Ic.plus;
-                enabled: !root.is_merging && root.items.length > 0 && root.output_dir != "";
-                clicked => { root.add_job_clicked(); }
-            }
-            Button {
-                kind: ButtonKind.filled;
-                text: root.is_merging ? I18n.tr("Unificando...") : I18n.tr("Executar Fila");
-                // Sem origem e destino definidos não há merge possível.
-                enabled: !root.is_merging && root.jobs.length > 0;
-                clicked => { root.start_queue_clicked(); }
+            Text {
+                text: I18n.tr("Selecione TODAS as partes. Requer manifesto S4S/S4Suite; packages antigos sem manifesto não podem ser recuperados. Originais mantidos; extração em nova pasta fora de Mods.");
+                font-size: 11px;
+                color: Theme.text_secondary;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
             }
         }
 
@@ -209,8 +198,18 @@ export component MergerView inherits Rectangle {
                             padding-left: 8px;
                             padding-right: 8px;
                             alignment: center;
+                            TouchArea {
+                                width: 28px;
+                                height: 28px;
+                                clicked => { if !item.locked { root.input_item_clicked(item.index); } }
+                                Icon {
+                                    glyph: item.included ? Ic.checkbox_on : Ic.checkbox_off;
+                                    font-size: 14px;
+                                    color: item.included ? Theme.accent_color : Theme.text_muted;
+                                }
+                            }
                             Icon { glyph: Ic.package; font-size: 14px; color: Theme.text_secondary; }
-                            Text { text: item.name; font-size: 12px; color: Theme.text_primary; horizontal-stretch: 1; vertical-alignment: center; overflow: elide; }
+                            Text { text: item.name; font-size: 12px; color: item.included ? Theme.text_primary : Theme.text_muted; horizontal-stretch: 1; vertical-alignment: center; overflow: elide; }
                             Text { text: item.size_str; font-size: 11px; color: Theme.text_secondary; width: 90px; vertical-alignment: center; }
                         }
                     }

@@ -193,11 +193,11 @@ fn auditoria_merger_multipartes_e_hashes_de_recursos() {
     make_real_dbpf_package(&p1, &[(1, r1), (2, r2)]);
     make_real_dbpf_package(&p2, &[(3, r3), (4, r4)]);
 
-    // Força divisão em múltiplas partes (limite de 100 bytes força particionamento)
+    // Includes header/index/manifest overhead while forcing one payload per part.
     let task = MergeTask {
         input_files: vec![p1, p2],
         output_dir: out_dir.clone(),
-        max_size_bytes: 100,
+        max_size_bytes: 300,
         name: Some("MultiHash".to_string()),
     };
 
@@ -211,15 +211,22 @@ fn auditoria_merger_multipartes_e_hashes_de_recursos() {
         .collect();
     assert!(residuais.is_empty(), "nenhum arquivo .s4tmp pode restar na publicação");
 
-    // Valida que cada parte é DBPF válido
-    let mut total_recursos = 0;
+    use std::io::{Seek, SeekFrom};
+    let expected: std::collections::BTreeMap<_, _> = [r1, r2, r3, r4]
+        .iter().enumerate().map(|(i, bytes)| (i as u32 + 1, sha256_digest(*bytes))).collect();
+    let mut recovered = std::collections::BTreeMap::new();
     for part in &report.output_packages {
+        assert!(fs::metadata(part).unwrap().len() <= task.max_size_bytes);
         let mut f = File::open(part).unwrap();
-        let (hdr, idx) = DBPFReader::read_index(&mut f).unwrap();
-        assert_eq!(hdr.major, 2);
-        total_recursos += idx.len();
+        let (_, idx) = DBPFReader::read_index(&mut f).unwrap();
+        for entry in idx.into_iter().filter(|e| e.key != s4suite::engine::manifest::S4S_MANIFEST_KEY) {
+            f.seek(SeekFrom::Start(entry.location_offset as u64)).unwrap();
+            let mut payload = vec![0; entry.file_size as usize];
+            f.read_exact(&mut payload).unwrap();
+            assert!(recovered.insert(entry.key.instance_low, sha256_digest(&payload)).is_none());
+        }
     }
-    assert_eq!(total_recursos, 4, "todos os 4 recursos devem ser preservados");
+    assert_eq!(recovered, expected);
 }
 
 #[test]

@@ -1,4 +1,18 @@
 {
+  "Desunificar packages...": "Desunificar packages...",
+  "Selecione TODAS as partes. Requer manifesto S4S/S4Suite; packages antigos sem manifesto não podem ser recuperados. Originais mantidos; extração em nova pasta fora de Mods.": "Selecione TODAS as partes. Requer manifesto S4S/S4Suite; packages antigos sem manifesto não podem ser recuperados. Originais mantidos; extração em nova pasta fora de Mods.",
+  "Selecione TODOS os arquivos/partes do merge": "Selecione TODOS os arquivos/partes do merge",
+  "Destino da desunificação (fora de Mods)": "Destino da desunificação (fora de Mods)",
+  "Escolha uma pasta acessível fora de Mods para desunificar.": "Escolha uma pasta acessível fora de Mods para desunificar.",
+  "Desunificando; os arquivos originais serão mantidos...": "Desunificando; os arquivos originais serão mantidos...",
+  "Desunificando": "Desunificando",
+  "Desunificação concluída": "Desunificação concluída",
+  "Desunificação parcial": "Desunificação parcial",
+  "Falha na desunificação": "Falha na desunificação",
+  "Packages mesclados": "Packages mesclados",
+  "Packages extraídos": "Packages extraídos",
+  "Falhas": "Falhas",
+  "Arquivos extraídos:": "Arquivos extraídos:",
   "Portuguese": "Português",
   "English": "English",
   "Spanish": "Español"

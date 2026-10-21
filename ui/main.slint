@@ -162,8 +162,10 @@ export component MainWindow inherits Window {
     callback clean_junk();
     callback toggle_disabled_mod(string);
     callback select_merger_input();
+    callback merger_input_clicked(int);
     callback select_merger_output();
     callback start_merge();
+    callback start_unmerge();
     callback select_tray_files();
     callback start_tray_import();
     callback select_translation_file();
@@ -310,8 +312,10 @@ export component MainWindow inherits Window {
                     post_merge_message: root.post_merge_message;
                     post_merge_action(action) => { root.post_merge_action(action); }
                     select_input_clicked => { root.select_merger_input(); }
+                    input_item_clicked(index) => { root.merger_input_clicked(index); }
                     select_output_clicked => { root.select_merger_output(); }
                     start_merge_clicked => { root.start_merge(); }
+                    start_unmerge_clicked => { root.start_unmerge(); }
 
                     jobs: root.merge_jobs;
                     jobs_selected_count: root.merge_jobs_selected_count;

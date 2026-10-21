@@ -4,6 +4,7 @@ use crate::engine::merger::{JobStatus, PostMergeAction};
 use crate::engine::organizer::{DuplicateGroup, ScriptDepthIssue, TransferMode};
 use crate::engine::tray::{TrayImportCandidate, TRAY_WORK_DIR};
 use parking_lot::Mutex;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -94,9 +95,9 @@ pub struct AppState {
     /// Desativados marcados no painel, para restaurar ou excluir em lote.
     selected_disabled: Mutex<Vec<PathBuf>>,
 
-    /// Packages encontrados na pasta de origem do merge.
+    /// Packages da origem e índices excluídos manualmente ou por marcador de merge.
     merger_inputs: Mutex<Vec<PathBuf>>,
-    /// Destino escolhido para as partes unificadas.
+    excluded_merger_inputs: Mutex<HashSet<usize>>,
     merger_output: Mutex<Option<PathBuf>>,
     /// Fila de tarefas montada pelo usuário.
     merge_jobs: Mutex<Vec<QueuedJob>>,
@@ -132,6 +133,7 @@ impl AppState {
             pending_transfer: Mutex::new(None),
             selected_disabled: Mutex::new(Vec::new()),
             merger_inputs: Mutex::new(Vec::new()),
+            excluded_merger_inputs: Mutex::new(HashSet::new()),
             merger_output: Mutex::new(None),
             merge_jobs: Mutex::new(Vec::new()),
             selected_jobs: Mutex::new(Vec::new()),
@@ -271,11 +273,48 @@ impl AppState {
     // --- Merger ---
 
     pub fn set_merger_inputs(&self, files: Vec<PathBuf>) {
+        self.set_merger_inputs_with_exclusions(files, Vec::new());
+    }
+
+    pub fn set_merger_inputs_with_exclusions(&self, files: Vec<PathBuf>, excluded: Vec<usize>) {
         *self.merger_inputs.lock() = files;
+        *self.excluded_merger_inputs.lock() = excluded.into_iter().collect();
     }
 
     pub fn merger_inputs(&self) -> Vec<PathBuf> {
-        self.merger_inputs.lock().clone()
+        let files = self.merger_inputs.lock();
+        let excluded = self.excluded_merger_inputs.lock();
+        files
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !excluded.contains(index))
+            .map(|(_, path)| path.clone())
+            .collect()
+    }
+
+    /// Toggle manual inclusion; returns the new included state.
+    pub fn toggle_merger_input(&self, index: usize) -> Option<bool> {
+        let files = self.merger_inputs.lock();
+        if index >= files.len() {
+            return None;
+        }
+        drop(files);
+        let mut excluded = self.excluded_merger_inputs.lock();
+        if excluded.remove(&index) {
+            Some(true)
+        } else {
+            excluded.insert(index);
+            Some(false)
+        }
+    }
+    pub fn merger_input_entries(&self) -> Vec<(PathBuf, bool)> {
+        let files = self.merger_inputs.lock();
+        let excluded = self.excluded_merger_inputs.lock();
+        files
+            .iter()
+            .enumerate()
+            .map(|(index, path)| (path.clone(), !excluded.contains(&index)))
+            .collect()
     }
 
     pub fn set_merger_output(&self, dir: Option<PathBuf>) {
@@ -288,6 +327,7 @@ impl AppState {
 
     pub fn clear_merger(&self) {
         self.merger_inputs.lock().clear();
+        self.excluded_merger_inputs.lock().clear();
         *self.merger_output.lock() = None;
         self.clear_pending_post_merge();
     }
@@ -434,5 +474,26 @@ impl AppState {
         self.tray_sources.lock().clear();
         self.tray_candidates.lock().clear();
         self.selected_tray.lock().clear();
+    }
+}
+
+#[cfg(test)]
+mod merger_input_tests {
+    use super::AppState;
+    use std::path::PathBuf;
+
+    #[test]
+    fn manually_excluded_packages_are_omitted_and_can_be_reincluded() {
+        let temp = tempfile::tempdir().unwrap();
+        let first = PathBuf::from("first.package");
+        let second = PathBuf::from("second.package");
+        let state = AppState::new(temp.path());
+        state.set_merger_inputs_with_exclusions(vec![first.clone(), second.clone()], vec![1]);
+
+        assert_eq!(state.merger_inputs(), vec![first.clone()]);
+        assert_eq!(state.toggle_merger_input(1), Some(true));
+        assert_eq!(state.merger_inputs(), vec![first.clone(), second.clone()]);
+        assert_eq!(state.toggle_merger_input(0), Some(false));
+        assert_eq!(state.merger_inputs(), vec![second]);
     }
 }

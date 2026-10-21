@@ -1,4 +1,5 @@
 pub mod dbpf;
+pub mod manifest;
 pub mod disabled;
 pub mod installer;
 pub mod merger;

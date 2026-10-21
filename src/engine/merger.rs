@@ -1,5 +1,6 @@
 use crate::core::safety::{same_file_identity, AnchoredDir, ReadLease};
-use crate::engine::dbpf::{DBPFReader, DBPFWriter, PackageResource, ResourceKey};
+use crate::engine::dbpf::{DBPFReader, DBPFWriter, IndexEntry, PackageResource, ResourceKey};
+use crate::engine::manifest::{MergedFolder, MergedPackage, MergedPackageManifest, S4S_MANIFEST_KEY};
 use crate::engine::disabled::DisabledManager;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
+/// Teto observado no PackageMergeUtility.Merge do Sims 4 Studio 3.2.6.5.
+/// Mantido como política de compatibilidade; não é prova do limite interno do jogo.
+pub const MAX_SAFE_PACKAGE_SIZE: u64 = 2_147_483_647;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergeReport {
     pub success: bool,
@@ -20,8 +25,27 @@ pub struct MergeReport {
     pub success_count: usize,
     pub failed_files: Vec<(String, String)>,
     pub output_packages: Vec<String>,
+    /// TGIs descartados como duplicatas somente após igualdade de payload e metadados.
+    #[serde(default)]
+    pub identical_resources: Vec<IdenticalResource>,
     #[serde(skip, default)]
     pub original_snapshots: Vec<OriginalSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdenticalResource {
+    pub key: String,
+    pub retained_from: String,
+    pub duplicate_from: String,
+}
+
+#[derive(Debug, Clone)]
+struct ResourceLocation {
+    path: PathBuf,
+    offset: u32,
+    file_size: u32,
+    mem_size: u32,
+    compressed: u16,
 }
 
 /// In-memory evidence only: deserializing a report never authorizes destruction.
@@ -39,6 +63,89 @@ pub struct MergeTask {
     /// Nome do grupo, como o usuário o vê na fila. Vira o prefixo dos arquivos
     /// gerados — `None` cai no nome genérico com timestamp.
     pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnmergeTask {
+    /// Arquivos .package mesclados que devem ser desunificados.
+    pub input_packages: Vec<PathBuf>,
+    /// Diretório onde os packages originais extraídos serão gravados.
+    pub output_dir: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnmergeReport {
+    pub success: bool,
+    pub partial: bool,
+    pub total_merged_packages: usize,
+    pub total_extracted_packages: usize,
+    pub extracted_files: Vec<String>,
+    pub failed_packages: Vec<(String, String)>,
+}
+/// Filename markers complement binary manifest detection. Exact tokens avoid
+/// matching unrelated words such as "emergency" or "merger".
+pub(crate) fn premerged_marker(path: &Path) -> Option<&'static str> {
+    fn classify(token: &str, all_in_one_state: &mut u8) -> Option<&'static str> {
+        if token.eq_ignore_ascii_case("MERGE") {
+            return Some("MERGE");
+        }
+        if token.eq_ignore_ascii_case("MERGED") {
+            return Some("MERGED");
+        }
+        if token.eq_ignore_ascii_case("COMBINED") {
+            return Some("COMBINED");
+        }
+        if token.eq_ignore_ascii_case("ALLINONE") {
+            return Some("ALL-IN-ONE");
+        }
+
+        *all_in_one_state = if token.eq_ignore_ascii_case("ALL") {
+            1
+        } else if token.eq_ignore_ascii_case("IN") && *all_in_one_state == 1 {
+            2
+        } else if token.eq_ignore_ascii_case("ONE") && *all_in_one_state == 2 {
+            return Some("ALL-IN-ONE");
+        } else {
+            0
+        };
+        None
+    }
+
+    let name = path.file_name()?.to_string_lossy();
+    let stem = Path::new(name.as_ref()).file_stem()?.to_string_lossy();
+    if stem.ends_with("MERGED") {
+        return Some("MERGED");
+    }
+
+    let mut token_start = None;
+    let mut previous = None;
+    let mut all_in_one_state = 0;
+    for (offset, current) in name.char_indices() {
+        let boundary = !current.is_ascii_alphanumeric()
+            || previous.is_some_and(|prior: char| {
+                (prior.is_ascii_lowercase() && current.is_ascii_uppercase())
+                    || (prior.is_ascii_alphabetic() != current.is_ascii_alphabetic())
+            });
+        if boundary {
+            if let Some(start) = token_start.take() {
+                if let Some(marker) = classify(&name[start..offset], &mut all_in_one_state) {
+                    return Some(marker);
+                }
+            }
+            if current.is_ascii_alphanumeric() {
+                token_start = Some(offset);
+            }
+        } else if token_start.is_none() {
+            token_start = Some(offset);
+        }
+        previous = current.is_ascii_alphanumeric().then_some(current);
+    }
+    if let Some(start) = token_start {
+        if let Some(marker) = classify(&name[start..], &mut all_in_one_state) {
+            return Some(marker);
+        }
+    }
+    None
 }
 
 pub fn merge_sims4_packages<F>(
@@ -60,6 +167,30 @@ where
     F: Fn(usize, usize, &str) + Send + Sync,
     H: FnOnce(&Path, &AnchoredDir) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
 {
+    if let Some(path) = task
+        .input_files
+        .iter()
+        .find(|path| MergedPackageManifest::is_s4s_merged_package(path))
+    {
+        return Err(format!(
+            "Entrada já contém manifesto de merge do Sims 4 Studio / S4Suite: {}. Desunifique o package antes de mesclar.",
+            path.display()
+        )
+        .into());
+    }
+
+    if let Some((path, marker)) = task
+        .input_files
+        .iter()
+        .find_map(|path| premerged_marker(path).map(|marker| (path, marker)))
+    {
+        return Err(format!(
+            "Entrada suspeita de merge preexistente ({marker}): {}",
+            path.display()
+        )
+        .into());
+    }
+
     let output_dir = AnchoredDir::create(&task.output_dir)?;
     let workspace = tempfile::Builder::new()
         .prefix(".s4merge-")
@@ -76,6 +207,7 @@ where
             success_count: 0,
             failed_files: Vec::new(),
             output_packages: Vec::new(),
+            identical_resources: Vec::new(),
             original_snapshots: Vec::new(),
         });
     }
@@ -83,15 +215,15 @@ where
     let mut original_snapshots = Vec::new();
     let mut file_cache: HashMap<PathBuf, BufReader<File>> = HashMap::new();
     let mut seen_inputs = HashSet::new();
-    // O prefixo é resolvido **antes** de escrever qualquer parte: duas tarefas
-    // da fila que terminam no mesmo segundo produziam o mesmo nome, e a segunda
-    // gravava por cima da primeira — com os originais já consumidos pela
-    // pós-ação, o conteúdo da primeira ia embora sem nenhum erro na tela.
+    // O prefixo é resolvido antes de escrever qualquer parte para evitar colisões
+    // entre tarefas iniciadas no mesmo segundo.
     let stem = unique_output_stem(&output_dir.path(), task.name.as_deref());
-    let mut global_resources: IndexMap<ResourceKey, (PathBuf, u32, u32, u32, u16)> =
-        IndexMap::new();
+    let mut global_resources: IndexMap<ResourceKey, ResourceLocation> = IndexMap::new();
+    let mut identical_resources = Vec::new();
     let mut failed_files = Vec::new();
     let mut success_count: usize = 0;
+    let input_root = common_ancestor(&task.input_files).unwrap_or_else(|| PathBuf::from("."));
+    let mut original_packages: Vec<(PathBuf, Vec<ResourceKey>)> = Vec::new();
 
     for (idx, fpath) in task.input_files.iter().enumerate() {
         let fname = fpath.file_name().unwrap_or_default().to_string_lossy();
@@ -110,22 +242,55 @@ where
                 let mut reader = BufReader::with_capacity(512 * 1024, file);
                 match DBPFReader::read_index(&mut reader) {
                     Ok((_header, index)) => {
+                        if index.iter().any(|entry| entry.key == S4S_MANIFEST_KEY) {
+                            return Err("Entrada snapshot já contém manifesto de merge".into());
+                        }
+                        let unique: HashSet<_> = index.iter().map(|entry| entry.key).collect();
+                        if unique.len() != index.len() {
+                            return Err(format!("TGI repetido dentro de {}", fpath.display()).into());
+                        }
+                        let relative = fpath.strip_prefix(&input_root).unwrap_or(fpath);
+                        validate_relative_package_path(relative)?;
+                        let keys = index.iter().map(|entry| entry.key).collect();
+                        original_packages.push((relative.to_path_buf(), keys));
+                        file_cache.insert(fpath.clone(), reader);
                         for entry in index {
-                            // Later files in task.input_files overwrite earlier ones
-                            global_resources.insert(
-                                entry.key,
-                                (
-                                    fpath.clone(),
-                                    entry.location_offset,
-                                    entry.file_size,
-                                    entry.mem_size,
-                                    entry.compressed,
-                                ),
-                            );
+                            let current = ResourceLocation {
+                                path: fpath.clone(),
+                                offset: entry.location_offset,
+                                file_size: entry.file_size,
+                                mem_size: entry.mem_size,
+                                compressed: entry.compressed,
+                            };
+                            if let Some(previous) = global_resources.get(&entry.key) {
+                                if previous.file_size != current.file_size
+                                    || previous.mem_size != current.mem_size
+                                    || previous.compressed != current.compressed
+                                    || !resource_payloads_equal(
+                                        &mut file_cache,
+                                        previous,
+                                        &current,
+                                    )?
+                                {
+                                    return Err(format!(
+                                        "Colisão de TGI com conteúdo ou metadados diferentes: {} em {} e {}",
+                                        entry.key,
+                                        previous.path.display(),
+                                        current.path.display()
+                                    )
+                                    .into());
+                                }
+                                identical_resources.push(IdenticalResource {
+                                    key: entry.key.to_string(),
+                                    retained_from: previous.path.display().to_string(),
+                                    duplicate_from: current.path.display().to_string(),
+                                });
+                            } else {
+                                global_resources.insert(entry.key, current);
+                            }
                         }
                         success_count += 1;
                         original_snapshots.push(snapshot);
-                        file_cache.insert(fpath.clone(), reader);
                     }
                     Err(e) => {
                         failed_files.push((fpath.display().to_string(), e.to_string()));
@@ -146,117 +311,55 @@ where
             success_count: 0,
             failed_files,
             output_packages: Vec::new(),
+            identical_resources,
             original_snapshots,
         });
     }
-    // Sort resources by TGI for engine load times
-    let mut sorted_keys: Vec<ResourceKey> = global_resources.keys().copied().collect();
-    sorted_keys.sort();
-
-    let mut chunk_index = 1;
-    let mut current_chunk_resources: Vec<PackageResource> = Vec::new();
-    let mut current_chunk_bytes = 0u64;
-    let mut output_packages = Vec::new();
-    let mut pending_chunks: Vec<(PathBuf, PathBuf)> = Vec::new();
-
-    let safe_limit = ((task.max_size_bytes as f64) * 0.90) as u64;
-
-    let write_result = (|| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        for (res_idx, key) in sorted_keys.iter().enumerate() {
-            if res_idx % 100 == 0 || res_idx == sorted_keys.len() - 1 {
-                progress_cb(
-                    res_idx + 1,
-                    sorted_keys.len(),
-                    &format!(
-                        "Processando Recursos: {}/{}",
-                        res_idx + 1,
-                        sorted_keys.len()
-                    ),
-                );
-            }
-
-            let (src_path, offset, size, mem_size, compressed) = &global_resources[key];
-
-            let mut data = vec![0u8; *size as usize];
-            let mut read_failed = false;
-            if let Some(reader) = file_cache.get_mut(src_path) {
-                if let Err(e) = reader.seek(SeekFrom::Start(*offset as u64)) {
-                    let err_msg = format!("falha no seek do recurso {}: {}", key, e);
-                    if !failed_files
-                        .iter()
-                        .any(|(p, _)| p == &src_path.display().to_string())
-                    {
-                        failed_files.push((src_path.display().to_string(), err_msg));
-                        success_count = success_count.saturating_sub(1);
-                    }
-                    read_failed = true;
-                } else if let Err(e) = reader.read_exact(&mut data) {
-                    let err_msg = format!(
-                        "falha na leitura do recurso {}: arquivo truncado ou erro de I/O ({})",
-                        key, e
-                    );
-                    if !failed_files
-                        .iter()
-                        .any(|(p, _)| p == &src_path.display().to_string())
-                    {
-                        failed_files.push((src_path.display().to_string(), err_msg));
-                        success_count = success_count.saturating_sub(1);
-                    }
-                    read_failed = true;
-                }
-            } else {
-                read_failed = true;
-            }
-
-            if read_failed {
-                continue;
-            }
-
-            let res_len = data.len() as u64;
-            if current_chunk_bytes + res_len > safe_limit && !current_chunk_resources.is_empty() {
-                let part_name = format!("{}_Part{:03}.package", stem, chunk_index);
-                let tmp_name = format!(".{}_Part{:03}.package.s4tmp", stem, chunk_index);
-                let part_path = output_dir.path().join(&part_name);
-                let tmp_path = workspace.path().join(&tmp_name);
-
-                write_package_chunk(&tmp_path, &current_chunk_resources)?;
-                validate_package_chunk(&tmp_path, current_chunk_resources.len())?;
-                pending_chunks.push((tmp_path, part_path));
-
-                chunk_index += 1;
-                current_chunk_resources.clear();
-                current_chunk_bytes = 0;
-            }
-
-            current_chunk_resources.push(PackageResource {
-                key: *key,
-                data,
-                mem_size: *mem_size,
-                compressed: *compressed,
-            });
-            current_chunk_bytes += res_len;
-        }
-
-        if !current_chunk_resources.is_empty() {
-            let part_name = format!("{}_Part{:03}.package", stem, chunk_index);
-            let tmp_name = format!(".{}_Part{:03}.package.s4tmp", stem, chunk_index);
-            let part_path = output_dir.path().join(&part_name);
-            let tmp_path = workspace.path().join(&tmp_name);
-
-            write_package_chunk(&tmp_path, &current_chunk_resources)?;
-            validate_package_chunk(&tmp_path, current_chunk_resources.len())?;
-            pending_chunks.push((tmp_path, part_path));
-        }
-
-        Ok(())
-    })();
-
-    if let Err(e) = write_result {
-        return match workspace.close() {
-            Ok(()) => Err(e),
-            Err(cleanup) => Err(format!("{e}; limpeza do workspace falhou: {cleanup}").into()),
-        };
+    // Every part carries the complete ownership manifest. Our unmerge resolves
+    // it against all selected parts, detecting an incomplete set rather than
+    // silently writing a partial original.
+    let manifest = manifest_for_originals(&original_packages)?;
+    let manifest_resource = manifest.to_compressed_resource()?;
+    let max_size = task.max_size_bytes.min(MAX_SAFE_PACKAGE_SIZE);
+    let overhead = 96 + 4 + 32 + manifest_resource.data.len() as u64;
+    if max_size <= overhead {
+        return Err(format!("Limite de tamanho insuficiente para cabeçalho e manifesto ({overhead} bytes)").into());
     }
+    let target_size = max_size - max_size / 10;
+    let mut keys: Vec<_> = global_resources.keys().copied().collect();
+    keys.sort();
+    let mut chunks: Vec<Vec<ResourceKey>> = Vec::new();
+    let mut chunk = Vec::new();
+    let mut size = overhead;
+    for key in keys {
+        let added = global_resources[&key].file_size as u64 + 32;
+        if overhead + added > max_size {
+            return Err(format!("Recurso {key} não cabe no limite configurado ({max_size} bytes), incluindo manifesto e índice").into());
+        }
+        if !chunk.is_empty() && size + added > target_size {
+            chunks.push(std::mem::take(&mut chunk));
+            size = overhead;
+        }
+        chunk.push(key);
+        size += added;
+    }
+    if !chunk.is_empty() {
+        chunks.push(chunk);
+    }
+    let mut output_packages = Vec::new();
+    let mut pending_chunks = Vec::new();
+    for (i, chunk) in chunks.iter().enumerate() {
+        progress_cb(i + 1, chunks.len(), &format!("Processando Recursos: parte {}/{}", i + 1, chunks.len()));
+        let part_name = format!("{stem}_Part{:03}.package", i + 1);
+        let temp_path = workspace.path().join(format!(".{part_name}.s4tmp"));
+        let sources: Vec<_> = chunk.iter().map(|key| (*key, global_resources[key].clone())).collect();
+        write_streamed_chunk(&temp_path, &sources, Some(&manifest_resource), &mut file_cache)?;
+        if fs::metadata(&temp_path)?.len() > max_size {
+            return Err("Parte gerada excede limite configurado".into());
+        }
+        pending_chunks.push((temp_path, output_dir.path().join(part_name)));
+    }
+
 
     let hashes = match publish_chunks(&pending_chunks, &workspace_dir, &output_dir, |_, _| Ok(())) {
         Ok(hashes) => hashes,
@@ -298,6 +401,7 @@ where
         success_count,
         failed_files,
         output_packages,
+        identical_resources,
         original_snapshots,
     };
     let report_step = (|| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -353,6 +457,288 @@ where
 
     workspace.close()?;
     Ok(report)
+}
+
+/// Inspeciona um package mesclado, retornando o manifesto do Sims 4 Studio / S4Suite se presente.
+pub fn inspect_merged_package(
+    path: &Path,
+) -> Result<Option<MergedPackageManifest>, Box<dyn std::error::Error + Send + Sync>> {
+    MergedPackageManifest::read_from_package_file(path)
+}
+
+/// Desunifica um único package mesclado para a pasta de destino.
+pub fn unmerge_single_package<F>(
+    merged_package_path: &Path,
+    output_dir: &Path,
+    progress_cb: F,
+) -> Result<UnmergeReport, Box<dyn std::error::Error + Send + Sync>>
+where
+    F: Fn(usize, usize, &str) + Send + Sync,
+{
+    unmerge_sims4_packages(
+        &UnmergeTask {
+            input_packages: vec![merged_package_path.to_path_buf()],
+            output_dir: output_dir.to_path_buf(),
+        },
+        progress_cb,
+    )
+}
+
+/// Reconstructs resource ownership from manifests, not original DBPF layout.
+/// A missing TGI aborts the batch: partial packages must never look successful.
+pub fn unmerge_sims4_packages<F>(
+    task: &UnmergeTask,
+    progress_cb: F,
+) -> Result<UnmergeReport, Box<dyn std::error::Error + Send + Sync>>
+where
+    F: Fn(usize, usize, &str) + Send + Sync,
+{
+    if task.input_packages.is_empty() {
+        return Err("Selecione os packages mesclados e todas as partes do lote".into());
+    }
+    let mut readers = HashMap::new();
+    let mut resources: IndexMap<ResourceKey, ResourceLocation> = IndexMap::new();
+    let mut packages: IndexMap<PathBuf, Vec<ResourceKey>> = IndexMap::new();
+    for (i, path) in task.input_packages.iter().enumerate() {
+        progress_cb(i + 1, task.input_packages.len(), "Lendo manifestos e índices");
+        // Immutable snapshots avoid reading a manifest from one version of the
+        // file and payloads from another version.
+        let (_, file) = snapshot_original(path)?;
+        let mut reader = BufReader::new(file);
+        let manifest = MergedPackageManifest::read_from_reader(&mut reader)?
+            .ok_or("Package sem manifesto S4S; não é possível recuperar seus originais")?;
+        let (_, index) = DBPFReader::read_index(&mut reader)?;
+        if readers.insert(path.clone(), reader).is_some() {
+            return Err("Package de entrada repetido".into());
+        }
+        for entry in index {
+            if entry.key == S4S_MANIFEST_KEY {
+                continue;
+            }
+            let current = ResourceLocation {
+                path: path.clone(), offset: entry.location_offset, file_size: entry.file_size,
+                mem_size: entry.mem_size, compressed: entry.compressed,
+            };
+            if let Some(previous) = resources.get(&entry.key) {
+                if previous.file_size != current.file_size
+                    || previous.mem_size != current.mem_size
+                    || previous.compressed != current.compressed
+                    || !resource_payloads_equal(&mut readers, previous, &current)?
+                {
+                    return Err(format!("Colisão de TGI divergente no unmerge: {}", entry.key).into());
+                }
+            } else {
+                resources.insert(entry.key, current);
+            }
+        }
+        let mut names = HashSet::new();
+        for (folder, package) in manifest.flatten_packages() {
+            validate_manifest_component(&package.name)?;
+            let relative = PathBuf::from(folder).join(format!("{}.package", package.name));
+            validate_relative_package_path(&relative)?;
+            if !names.insert(relative.clone()) {
+                return Err(format!("Nome duplicado no manifesto: {}", relative.display()).into());
+            }
+            if package.resources.iter().any(|key| *key == S4S_MANIFEST_KEY) {
+                return Err("Manifesto não pode pertencer ao conteúdo de um original".into());
+            }
+            if let Some(previous) = packages.get(&relative) {
+                // Repeated complete manifests are expected for a multipart
+                // merge; distinct package identities must not silently combine.
+                if previous != &package.resources {
+                    return Err(format!("Manifestos incompatíveis para {}", relative.display()).into());
+                }
+            } else {
+                packages.insert(relative, package.resources.clone());
+            }
+        }
+    }
+    if packages.is_empty() {
+        return Err("Manifesto não declara nenhum package".into());
+    }
+    for (path, keys) in &packages {
+        let mut seen = HashSet::new();
+        for key in keys {
+            if !seen.insert(key) {
+                return Err(format!("TGI repetido no manifesto: {key}").into());
+            }
+            if !resources.contains_key(key) {
+                return Err(format!("Recurso {key} ausente de {}; selecione todas as partes. Nenhum arquivo publicado.", path.display()).into());
+            }
+        }
+    }
+    let output = AnchoredDir::create(&task.output_dir)?;
+    let workspace = tempfile::Builder::new().prefix(".s4merge-unmerge-").tempdir_in(output.path())?;
+    let staging = output.child(workspace.path().file_name().ok_or("workspace sem nome")?)?;
+    let batch = staging.create_child("result")?;
+    for (i, (relative, keys)) in packages.iter().enumerate() {
+        progress_cb(i + 1, packages.len(), &format!("Extraindo {}", relative.display()));
+        let mut parents: Vec<AnchoredDir> = Vec::new();
+        // Each component has been validated; anchored creation refuses links.
+        if let Some(folder) = relative.parent() {
+            for component in folder.components() {
+                let parent = parents.last().unwrap_or(&batch);
+                let child = parent.create_child(component.as_os_str())?;
+                parents.push(child);
+            }
+        }
+        let parent = parents.last().unwrap_or(&batch);
+        let path = parent.path().join(relative.file_name().ok_or("package sem nome")?);
+        let mut sources: Vec<_> = keys.iter().map(|key| (*key, resources[key].clone())).collect();
+        sources.sort_by_key(|(key, _)| *key);
+        write_streamed_chunk(&path, &sources, None, &mut readers)?;
+        parent.sync_all()?;
+    }
+    batch.sync_all()?;
+    let base = format!("Unmerged_{}", chrono_like_timestamp());
+    let mut suffix = 0usize;
+    let published_name = loop {
+        let name = if suffix == 0 { base.clone() } else { format!("{base}_{suffix}") };
+        match staging.publish_noreplace("result", &output, &name) {
+            Ok(()) => break name,
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => suffix += 1,
+            Err(e) => return Err(e.into()),
+        }
+    };
+    output.sync_all()?;
+    workspace.close()?;
+    let extracted_files = packages.keys().map(|path| {
+        task.output_dir.join(&published_name).join(path).display().to_string()
+    }).collect::<Vec<_>>();
+    Ok(UnmergeReport {
+        success: true, partial: false, total_merged_packages: task.input_packages.len(),
+        total_extracted_packages: extracted_files.len(), extracted_files, failed_packages: Vec::new(),
+    })
+}
+
+fn validate_manifest_component(name: &str) -> io::Result<()> {
+    if name.is_empty() || name == "." || name == ".."
+        || name.chars().any(|c| c.is_control() || "/\\:".contains(c))
+    {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "Componente de caminho inseguro no manifesto"));
+    }
+    Ok(())
+}
+
+fn validate_relative_package_path(path: &Path) -> io::Result<()> {
+    if path.as_os_str().is_empty() {
+        return Err(io::Error::other("Caminho vazio no manifesto"));
+    }
+    let text = path.to_str().ok_or_else(|| io::Error::other("Nome de package não é UTF-8"))?;
+    // Check raw separators as well: Path::components normalizes away ".".
+    for name in text.split('/') {
+        validate_manifest_component(name)?;
+    }
+    if path.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+        return Err(io::Error::other("Caminho absoluto ou traversal no manifesto"));
+    }
+    Ok(())
+}
+
+fn manifest_for_originals(
+    originals: &[(PathBuf, Vec<ResourceKey>)],
+) -> io::Result<MergedPackageManifest> {
+    let mut manifest = MergedPackageManifest::new();
+    for (path, resources) in originals {
+        validate_relative_package_path(path)?;
+        let mut folder = &mut manifest.root;
+        if let Some(parent) = path.parent() {
+            for name in parent.components() {
+                let name = name.as_os_str().to_str().ok_or_else(|| io::Error::other("Nome não UTF-8"))?;
+                let index = match folder.folders.iter().position(|f| f.name == name) {
+                    Some(i) => i,
+                    None => {
+                        folder.folders.push(MergedFolder { name: name.into(), ..Default::default() });
+                        folder.folders.len() - 1
+                    }
+                };
+                folder = &mut folder.folders[index];
+            }
+        }
+        let name = path.file_stem().and_then(OsStr::to_str).ok_or_else(|| io::Error::other("Nome inválido"))?;
+        validate_manifest_component(name)?;
+        if folder.packages.iter().any(|p| p.name == name) {
+            return Err(io::Error::other("Packages com mesmo caminho relativo"));
+        }
+        folder.packages.push(MergedPackage { name: name.into(), resources: resources.clone() });
+    }
+    Ok(manifest)
+}
+
+fn write_streamed_chunk(
+    path: &Path,
+    sources: &[(ResourceKey, ResourceLocation)],
+    manifest: Option<&PackageResource>,
+    readers: &mut HashMap<PathBuf, BufReader<File>>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut entries = Vec::with_capacity(sources.len() + usize::from(manifest.is_some()));
+    for (key, source) in sources {
+        entries.push(IndexEntry {
+            key: *key, location_offset: 0, file_size: source.file_size,
+            mem_size: source.mem_size, compressed: source.compressed,
+        });
+    }
+    if let Some(manifest) = manifest {
+        entries.push(IndexEntry {
+            key: manifest.key, location_offset: 0, file_size: manifest.data.len() as u32,
+            mem_size: manifest.mem_size, compressed: manifest.compressed,
+        });
+    }
+    let size = 100 + entries.len() as u64 * 32
+        + entries.iter().map(|entry| entry.file_size as u64).sum::<u64>();
+    if size > MAX_SAFE_PACKAGE_SIZE {
+        return Err("Package reconstruído excede teto de compatibilidade de 2 GiB".into());
+    }
+    let mut writer = BufWriter::new(fs::OpenOptions::new().write(true).create_new(true).open(path)?);
+    DBPFWriter::write_package_stream(&mut writer, &entries, |i, writer| {
+        if i == sources.len() {
+            return writer.write_all(&manifest.ok_or_else(|| io::Error::other("Manifesto ausente"))?.data);
+        }
+        let source = &sources[i].1;
+        let reader = readers.get_mut(&source.path).ok_or_else(|| io::Error::other("Snapshot ausente"))?;
+        reader.seek(SeekFrom::Start(source.offset as u64))?;
+        let copied = io::copy(&mut reader.take(source.file_size as u64), writer)?;
+        if copied != source.file_size as u64 {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Snapshot truncado"));
+        }
+        Ok(())
+    })?;
+    writer.into_inner()?.sync_all()?;
+    let mut output = File::open(path)?;
+    let (_, actual) = DBPFReader::read_index(&mut output)?;
+    if actual.len() != entries.len() || output.metadata()?.len() > MAX_SAFE_PACKAGE_SIZE {
+        return Err("Parte inválida após escrita".into());
+    }
+    let expected: HashMap<_, _> = entries.iter().map(|entry| (entry.key, entry)).collect();
+    let original: HashMap<_, _> = sources.iter().map(|(key, source)| (*key, source)).collect();
+    let mut buffer = [0u8; 64 * 1024];
+    let mut source_buffer = [0u8; 64 * 1024];
+    for entry in actual {
+        let expected = expected.get(&entry.key).ok_or("TGI inesperado após escrita")?;
+        if entry.file_size != expected.file_size || entry.mem_size != expected.mem_size || entry.compressed != expected.compressed {
+            return Err("Metadados divergentes após escrita".into());
+        }
+        output.seek(SeekFrom::Start(entry.location_offset as u64))?;
+        if let Some(source) = original.get(&entry.key) {
+            let reader = readers.get_mut(&source.path).ok_or("Snapshot ausente")?;
+            reader.seek(SeekFrom::Start(source.offset as u64))?;
+            let mut remaining = source.file_size as usize;
+            while remaining > 0 {
+                let n = remaining.min(buffer.len());
+                output.read_exact(&mut buffer[..n])?;
+                reader.read_exact(&mut source_buffer[..n])?;
+                if buffer[..n] != source_buffer[..n] { return Err("Payload divergente após escrita".into()); }
+                remaining -= n;
+            }
+        } else {
+            let manifest = manifest.ok_or("Manifesto inesperado")?;
+            for bytes in manifest.data.chunks(buffer.len()) {
+                output.read_exact(&mut buffer[..bytes.len()])?;
+                if buffer[..bytes.len()] != *bytes { return Err("Manifesto divergente após escrita".into()); }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn hash_reader(reader: &mut impl Read) -> io::Result<[u8; 32]> {
@@ -1117,51 +1503,36 @@ fn create_zip_from_captured(
     }
 }
 
-fn validate_package_chunk(
-    part_path: &Path,
-    expected_count: usize,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut file = File::open(part_path)?;
-    let (header, index) = DBPFReader::read_index(&mut file)?;
 
-    if header.major != 2 {
-        return Err(format!("Cabeçalho DBPF inválido: versão major {}", header.major).into());
-    }
-    if index.len() != expected_count {
-        return Err(format!(
-            "Inconsistência de recursos na parte gerada: esperado {} recursos, encontrado {}",
-            expected_count,
-            index.len()
-        )
-        .into());
-    }
+fn resource_payloads_equal(
+    readers: &mut HashMap<PathBuf, BufReader<File>>,
+    left: &ResourceLocation,
+    right: &ResourceLocation,
+) -> io::Result<bool> {
+    let mut left_buffer = [0u8; 64 * 1024];
+    let mut right_buffer = [0u8; 64 * 1024];
+    let mut remaining = left.file_size as usize;
 
-    let file_len = file.seek(SeekFrom::End(0))?;
-    for entry in &index {
-        let end_offset = entry.location_offset as u64 + entry.file_size as u64;
-        if end_offset > file_len {
-            return Err(format!(
-                "Recurso {} corrompido: offset {} + tamanho {} excede tamanho do arquivo {}",
-                entry.key, entry.location_offset, entry.file_size, file_len
-            )
-            .into());
+    let mut offset = 0u64;
+    while remaining > 0 {
+        let count = remaining.min(left_buffer.len());
+        let reader = readers.get_mut(&left.path)
+            .ok_or_else(|| io::Error::other("reader de recurso ausente"))?;
+        reader.seek(SeekFrom::Start(left.offset as u64 + offset))?;
+        reader.read_exact(&mut left_buffer[..count])?;
+        let reader = readers.get_mut(&right.path)
+            .ok_or_else(|| io::Error::other("reader de recurso ausente"))?;
+        reader.seek(SeekFrom::Start(right.offset as u64 + offset))?;
+        reader.read_exact(&mut right_buffer[..count])?;
+        offset += count as u64;
+        if left_buffer[..count] != right_buffer[..count] {
+            return Ok(false);
         }
+        remaining -= count;
     }
-
-    Ok(())
+    Ok(true)
 }
 
-fn write_package_chunk(
-    part_path: &Path,
-    resources: &[PackageResource],
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let file = File::create(part_path)?;
-    let mut writer = BufWriter::with_capacity(4 * 1024 * 1024, file);
-    DBPFWriter::write_package(&mut writer, resources)?;
-    let inner = writer.into_inner()?;
-    inner.sync_all()?;
-    Ok(())
-}
 
 fn chrono_like_timestamp() -> String {
     let now = SystemTime::now()
@@ -1234,58 +1605,128 @@ mod tests {
     use crate::engine::dbpf::ResourceKey;
     use tempfile::tempdir;
 
-    #[test]
-    fn test_merger_tgi_overwrite() {
-        let dir = tempdir().unwrap();
-        let pkg1_path = dir.path().join("mod1.package");
-        let pkg2_path = dir.path().join("mod2.package");
-        let out_dir = dir.path().join("output");
-
-        let key_shared = ResourceKey {
+    fn shared_key() -> ResourceKey {
+        ResourceKey {
             type_id: 0x11111111,
-            group_id: 0x0,
-            instance_ex: 0x0,
-            instance_low: 0x1,
-        };
+            group_id: 0,
+            instance_ex: 0,
+            instance_low: 1,
+        }
+    }
 
-        let res1 = PackageResource {
-            key: key_shared,
-            data: b"Old Version Content from Mod1".to_vec(),
-            mem_size: 29,
-            compressed: 0,
-        };
+    fn write_one_resource(path: &Path, data: &[u8], mem_size: u32, compressed: u16) {
+        let mut file = File::create(path).unwrap();
+        DBPFWriter::write_package(
+            &mut file,
+            &[PackageResource {
+                key: shared_key(),
+                data: data.to_vec(),
+                mem_size,
+                compressed,
+            }],
+        )
+        .unwrap();
+    }
 
-        let res2 = PackageResource {
-            key: key_shared,
-            data: b"NEW UPDATED VERSION Content from Mod2".to_vec(),
-            mem_size: 37,
-            compressed: 0,
-        };
-
-        let mut f1 = File::create(&pkg1_path).unwrap();
-        DBPFWriter::write_package(&mut f1, &[res1]).unwrap();
-
-        let mut f2 = File::create(&pkg2_path).unwrap();
-        DBPFWriter::write_package(&mut f2, &[res2]).unwrap();
-
+    #[test]
+    fn tgi_collision_with_different_payload_is_rejected_without_output() {
+        let dir = tempdir().unwrap();
+        let first = dir.path().join("first.package");
+        let second = dir.path().join("second.package");
+        let output = dir.path().join("output");
+        write_one_resource(&first, b"payload A", 9, 0);
+        write_one_resource(&second, b"payload B", 9, 0);
         let task = MergeTask {
-            input_files: vec![pkg1_path, pkg2_path],
-            output_dir: out_dir.clone(),
-            max_size_bytes: 1_000_000_000,
+            input_files: vec![first, second],
+            output_dir: output.clone(),
+            max_size_bytes: 1_000_000,
+            name: Some("collision".into()),
+        };
+
+        let error = merge_sims4_packages(&task, |_, _, _| {}).unwrap_err();
+        assert!(error.to_string().contains("Colisão de TGI"));
+        assert!(fs::read_dir(output).unwrap().all(|entry| !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".package")));
+    }
+
+    #[test]
+    fn tgi_collision_with_different_metadata_is_rejected() {
+        let dir = tempdir().unwrap();
+        let first = dir.path().join("first.package");
+        let second = dir.path().join("second.package");
+        write_one_resource(&first, b"same", 4, 0);
+        write_one_resource(&second, b"same", 3, 0);
+        let task = MergeTask {
+            input_files: vec![first, second],
+            output_dir: dir.path().join("output"),
+            max_size_bytes: 1_000_000,
+            name: Some("metadata-collision".into()),
+        };
+
+        let error = merge_sims4_packages(&task, |_, _, _| {}).unwrap_err();
+        assert!(error.to_string().contains("Colisão de TGI"));
+    }
+
+    #[test]
+    fn merge_rejects_filename_marker_before_creating_output() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("existing_merged.package");
+        write_one_resource(&input, b"payload", 7, 0);
+        let output = dir.path().join("output");
+        let task = MergeTask {
+            input_files: vec![input],
+            output_dir: output.clone(),
+            max_size_bytes: 1_000_000,
             name: None,
+        };
+
+        assert!(merge_sims4_packages(&task, |_, _, _| {}).is_err());
+        assert!(!output.exists());
+    }
+
+    #[test]
+    fn identical_tgi_payload_and_metadata_are_deduplicated_and_reported() {
+        let dir = tempdir().unwrap();
+        let first = dir.path().join("first.package");
+        let second = dir.path().join("second.package");
+        write_one_resource(&first, b"same payload", 12, 0);
+        write_one_resource(&second, b"same payload", 12, 0);
+        let task = MergeTask {
+            input_files: vec![first, second],
+            output_dir: dir.path().join("output"),
+            max_size_bytes: 1_000_000,
+            name: Some("identical".into()),
         };
 
         let report = merge_sims4_packages(&task, |_, _, _| {}).unwrap();
         assert!(report.success);
-        assert_eq!(report.output_packages.len(), 1);
+        assert_eq!(report.identical_resources.len(), 1);
+        let output = File::open(&report.output_packages[0]).unwrap();
+        let (_header, index) = DBPFReader::read_index(&mut BufReader::new(output)).unwrap();
+        let content: Vec<_> = index.iter().filter(|e| e.key != S4S_MANIFEST_KEY).collect();
+        assert_eq!(content.len(), 1);
+        assert_eq!(content[0].key, shared_key());
+        assert_eq!(content[0].mem_size, 12);
+    }
 
-        let merged_file_path = PathBuf::from(&report.output_packages[0]);
-        let mut f_merged = File::open(&merged_file_path).unwrap();
-        let (_hdr, index) = DBPFReader::read_index(&mut f_merged).unwrap();
 
-        assert_eq!(index.len(), 1);
-        assert_eq!(index[0].key, key_shared);
-        assert_eq!(index[0].file_size, 37); // Length of NEW UPDATED VERSION from Mod2
+    #[test]
+    fn premerged_markers_match_tokens_and_explicit_merged_suffix_only() {
+        for name in [
+            "hair MERGED.package",
+            "HairMerge.package",
+            "set-ALL-IN-ONE.package",
+            "CollectionCombined.package",
+            "BodyPresetsMERGED.package",
+        ] {
+            assert!(premerged_marker(Path::new(name)).is_some(), "{name}");
+        }
+        for name in ["emergency.package", "merger.package", "mergeable.package"] {
+            assert!(premerged_marker(Path::new(name)).is_none(), "{name}");
+        }
     }
 
     fn hash_file(path: &Path) -> [u8; 32] {
