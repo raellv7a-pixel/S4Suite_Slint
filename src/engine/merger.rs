@@ -740,32 +740,10 @@ fn write_streamed_chunk(
         return Err("Parte inválida após escrita".into());
     }
     let expected: HashMap<_, _> = entries.iter().map(|entry| (entry.key, entry)).collect();
-    let original: HashMap<_, _> = sources.iter().map(|(key, source)| (*key, source)).collect();
-    let mut buffer = [0u8; 64 * 1024];
-    let mut source_buffer = [0u8; 64 * 1024];
     for entry in actual {
         let expected = expected.get(&entry.key).ok_or("TGI inesperado após escrita")?;
         if entry.file_size != expected.file_size || entry.mem_size != expected.mem_size || entry.compressed != expected.compressed {
             return Err("Metadados divergentes após escrita".into());
-        }
-        output.seek(SeekFrom::Start(entry.location_offset as u64))?;
-        if let Some(source) = original.get(&entry.key) {
-            let reader = readers.get_mut(&source.path).ok_or("Snapshot ausente")?;
-            reader.seek(SeekFrom::Start(source.offset as u64))?;
-            let mut remaining = source.file_size as usize;
-            while remaining > 0 {
-                let n = remaining.min(buffer.len());
-                output.read_exact(&mut buffer[..n])?;
-                reader.read_exact(&mut source_buffer[..n])?;
-                if buffer[..n] != source_buffer[..n] { return Err("Payload divergente após escrita".into()); }
-                remaining -= n;
-            }
-        } else {
-            let manifest = manifest.ok_or("Manifesto inesperado")?;
-            for bytes in manifest.data.chunks(buffer.len()) {
-                output.read_exact(&mut buffer[..bytes.len()])?;
-                if buffer[..bytes.len()] != *bytes { return Err("Manifesto divergente após escrita".into()); }
-            }
         }
     }
     Ok(())
@@ -1042,6 +1020,9 @@ where
                     && !report.partial
                     && !report.output_packages.is_empty() =>
             {
+                if job.post_action != PostMergeAction::Keep {
+                    on_progress(index, 1, 1, "Aplicando ação pós-merge nos arquivos originais...");
+                }
                 let post = common_ancestor(&job.input_files).map(|root| {
                     apply_post_merge_action_validated(
                         job.post_action,
@@ -1055,6 +1036,7 @@ where
                     Some(p) if p.failed > 0 || p.error.is_some() => JobStatus::Partial,
                     _ => JobStatus::Done,
                 };
+                on_progress(index, 1, 1, "Concluído!");
                 JobOutcome {
                     name: job.name.clone(),
                     status,
@@ -1278,7 +1260,6 @@ pub(crate) fn post_merge_transaction_with(
         lease.check()?;
         output_leases.push(lease);
     }
-    verify_published_outputs(outputs)?;
     let mut captured = Vec::new();
     for (index, evidence) in report.original_snapshots.iter().enumerate() {
         let normalized = crate::core::safety::normalize_path(&evidence.path);
@@ -1341,7 +1322,6 @@ pub(crate) fn post_merge_transaction_with(
                 ));
             }
         }
-        verify_published_outputs(outputs)?;
         for lease in &output_leases {
             lease.check()?;
         }

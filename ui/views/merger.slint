@@ -147,16 +147,20 @@ export component MergerView inherits Rectangle {
         HorizontalLayout {
             spacing: 16px;
             Text {
-                text: I18n.tr("Origem: ") + (root.input_dir == "" ? I18n.tr("não selecionada") : root.input_dir);
+                text: root.input_dir == ""
+                    ? I18n.tr("Origem: nenhuma pasta selecionada")
+                    : (I18n.tr("Origem: ") + root.input_dir);
                 font-size: 11px;
                 color: Theme.text_muted;
                 horizontal-stretch: 1;
                 overflow: elide;
             }
             Text {
-                text: I18n.tr("Destino: ") + (root.output_dir == "" ? I18n.tr("não selecionado") : root.output_dir);
+                text: root.output_dir == ""
+                    ? (root.input_dir != "" ? I18n.tr("⚠️ Selecione a pasta de destino") : I18n.tr("Destino: nenhuma pasta selecionada"))
+                    : (I18n.tr("Destino: ") + root.output_dir);
                 font-size: 11px;
-                color: root.output_dir == "" ? Theme.warning : Theme.text_muted;
+                color: (root.input_dir != "" && root.output_dir == "") ? Theme.warning : Theme.text_muted;
                 horizontal-stretch: 1;
                 overflow: elide;
             }

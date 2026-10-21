@@ -1,4 +1,7 @@
 {
+  "Origem: nenhuma pasta selecionada": "Origem: nenhuma pasta selecionada",
+  "Destino: nenhuma pasta selecionada": "Destino: nenhuma pasta selecionada",
+  "⚠️ Selecione a pasta de destino": "⚠️ Selecione a pasta de destino",
   "Desunificar packages...": "Desunificar packages...",
   "Selecione TODAS as partes. Requer manifesto S4S/S4Suite; packages antigos sem manifesto não podem ser recuperados. Originais mantidos; extração em nova pasta fora de Mods.": "Selecione TODAS as partes. Requer manifesto S4S/S4Suite; packages antigos sem manifesto não podem ser recuperados. Originais mantidos; extração em nova pasta fora de Mods.",
   "Selecione TODOS os arquivos/partes do merge": "Selecione TODOS os arquivos/partes do merge",
